@@ -6,6 +6,17 @@ const countryFilter = document.querySelector('#country-filter');
 const guideCount = document.querySelector('#guide-count');
 const navShop = document.querySelector('#nav-shop');
 
+function isStanLink(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' &&
+      (url.hostname === 'stan.store' || url.hostname.endsWith('.stan.store')) &&
+      !url.username && !url.password && !url.port && url.pathname !== '/';
+  } catch {
+    return false;
+  }
+}
+
 function renderGuides(guides) {
   list.replaceChildren();
   guideCount.textContent = `${guides.length} ${guides.length === 1 ? 'guide' : 'guides'} shown`;
@@ -38,7 +49,11 @@ function renderGuides(guides) {
     description.textContent = guide.description;
     const link = document.createElement('span');
     link.className = 'card-link';
-    link.textContent = 'View guide on Stan ↗';
+    link.textContent = 'View guide on Stan ';
+    const arrow = document.createElement('span');
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.textContent = '↗';
+    link.append(arrow);
     const newTabNotice = document.createElement('span');
     newTabNotice.className = 'sr-only';
     newTabNotice.textContent = ' (opens in a new tab)';
@@ -48,13 +63,13 @@ function renderGuides(guides) {
   }
 }
 
-fetch('guides.json')
+fetch('guides.json', { cache: 'no-cache' })
   .then((response) => {
     if (!response.ok) throw new Error('Could not load the guide catalog');
     return response.json();
   })
   .then((data) => {
-    if (/^https:\/\//.test(data.stanUrl || '')) {
+    if (isStanLink(data.stanUrl)) {
       navShop.href = data.stanUrl;
       navShop.target = '_blank';
       navShop.rel = 'noopener noreferrer';
@@ -67,9 +82,13 @@ fetch('guides.json')
       navShop.replaceChildren('Shop on Stan ', arrow, newTabNotice);
     }
     const guides = Array.isArray(data.guides)
-      ? data.guides.filter((guide) => guide.title && guide.description && guide.country && guide.state && /^https:\/\//.test(guide.stanUrl || ''))
+      ? data.guides.filter((guide, index) => {
+          const valid = guide && guide.title && guide.description && guide.country && guide.state && isStanLink(guide.stanUrl);
+          if (!valid) console.warn(`Skipping incomplete or insecure guide at index ${index}`);
+          return valid;
+        })
       : [];
-    const countries = [...new Set(guides.map((guide) => guide.country))].sort();
+    const countries = [...new Set(guides.map((guide) => guide.country))].sort((a, b) => a.localeCompare(b));
     for (const country of countries) {
       const option = document.createElement('option');
       option.value = country;

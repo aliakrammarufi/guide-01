@@ -9,8 +9,10 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 
@@ -18,6 +20,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 HANDOFF = PROJECT / ".ai-handoff"
 PLAN_SCHEMA = PROJECT / "automation" / "plan.schema.json"
 VERDICT_SCHEMA = PROJECT / "automation" / "verdict.schema.json"
+SITE_CHECK = PROJECT / "automation" / "check.py"
 
 
 def save_json(path: Path, value: dict) -> None:
@@ -34,20 +37,83 @@ def run_agent(label: str, command: list[str], output: Path, errors: Path) -> Non
     print(f"  {label} is working...", flush=True)
     child_env = os.environ.copy()
     child_env.pop("CLAUDECODE", None)
+    child_env.pop("CLAUDE_CODE_ENTRYPOINT", None)
     with output.open("w", encoding="utf-8") as stdout, errors.open(
         "w", encoding="utf-8"
     ) as stderr:
-        subprocess.run(
+        process = subprocess.Popen(
             command, cwd=PROJECT, stdin=subprocess.DEVNULL,
             stdout=stdout, stderr=stderr, env=child_env,
-            check=True, timeout=3600,
+            start_new_session=True,
         )
+        try:
+            code = process.wait(timeout=3600)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            stop_group(process)
+            raise
+        finally:
+            # Agents must not leave background shell tools editing the project.
+            stop_group(process)
+        if code:
+            raise subprocess.CalledProcessError(code, command)
+
+
+def stop_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.wait()
+
+
+def git(*args: str) -> str:
+    result = subprocess.run(
+        ["git", *args], cwd=PROJECT, stdin=subprocess.DEVNULL,
+        text=True, capture_output=True, check=True,
+    )
+    return result.stdout.strip()
+
+
+def require_clean_tree() -> None:
+    if git("rev-parse", "--show-toplevel") != str(PROJECT):
+        raise ValueError("The collaboration project must be its own Git repository")
+    if git("status", "--porcelain", "--untracked-files=all"):
+        raise ValueError("The project has uncommitted changes; review or commit them before starting a new run")
+
+
+def checkpoint(task_number: int, title: str) -> str:
+    git("diff", "--check")
+    if git("status", "--porcelain", "--untracked-files=all"):
+        git("add", "-A")
+        git("diff", "--cached", "--check")
+        safe_title = " ".join(title.split())[:72]
+        git("-c", "core.hooksPath=/dev/null", "commit", "-m", f"collab: task {task_number} - {safe_title}")
+    return git("rev-parse", "--verify", "HEAD")
 
 
 def codex_base(sandbox: str) -> list[str]:
-    command = ["codex", "exec", "--sandbox", sandbox]
-    if sandbox == "workspace-write":
-        command.append("--approve-for-me")
+    command = [
+        "codex", "exec", "--ignore-user-config", "--sandbox", sandbox,
+        "-c", "approval_policy=never",
+        "-c", "sandbox_workspace_write.network_access=false",
+        "-c", "web_search=disabled",
+        "-c", "mcp_servers={}",
+        "-c", 'plugins."browser@openai-bundled".enabled=false',
+        "-c", 'plugins."chrome@openai-bundled".enabled=false',
+        "-c", 'plugins."computer-use@openai-bundled".enabled=false',
+    ]
     if not (PROJECT / ".git").exists():
         command.append("--skip-git-repo-check")
     return command
@@ -134,8 +200,12 @@ def work_task(state: dict, run_dir: Path) -> None:
             "and remaining concerns for Codex."
         )
         command = [
-            "claude", "-p", "--permission-mode", "auto",
-            "--permission-prompts", "none", prompt,
+            "claude", "-p", "--restricted", "--no-chrome",
+            "--tools", "Read,Glob,Grep,Edit,Write",
+            "--strict-mcp-config", "--no-session-persistence",
+            "--max-budget-usd", "10",
+            "--permission-mode", "auto", "--permission-prompts", "none",
+            prompt,
         ]
         run_agent("Claude", command, task_dir / "claude.md", task_dir / "claude.err")
         state["phase"] = "verify"
@@ -158,8 +228,19 @@ def work_task(state: dict, run_dir: Path) -> None:
         verdict = load_json(task_dir / "verdict.json")
         if verdict.get("status") not in {"complete", "needs_user", "blocked"}:
             raise ValueError("Codex returned an invalid task status")
+        if verdict["status"] == "complete":
+            check = subprocess.run(
+                [sys.executable, str(SITE_CHECK)], cwd=PROJECT,
+                stdin=subprocess.DEVNULL, text=True, capture_output=True,
+            )
+            if check.returncode:
+                verdict["status"] = "blocked"
+                verdict["summary"] = "Independent site checks failed."
+                verdict["next_step"] = (check.stdout + check.stderr).strip()[:2000]
+                save_json(task_dir / "verdict.json", verdict)
         state["results"].append({"task_index": index - 1, "task": task["title"], **verdict})
         if verdict["status"] == "complete":
+            state["results"][-1]["commit"] = checkpoint(index, task["title"])
             state["task_index"] += 1
             state["attempt"] = 1
             state["resume_note"] = ""
@@ -213,6 +294,11 @@ def main() -> int:
                 state["resume_note"] = args.note
             save_json(run_dir / "state.json", state)
         else:
+            try:
+                require_clean_tree()
+            except (subprocess.CalledProcessError, ValueError) as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             run_dir = HANDOFF / f"run-{stamp}-{os.getpid()}"
             run_dir.mkdir()

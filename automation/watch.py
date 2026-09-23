@@ -7,6 +7,7 @@ import argparse
 import fcntl
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -62,8 +63,13 @@ def watch() -> None:
 
         STOP_REQUEST.unlink(missing_ok=True)
 
+        stale_found = False
         for stale in QUEUE.glob("*.running"):
             move_unique(stale, PAUSED, stale.stem + ".md")
+            stale_found = True
+        if stale_found:
+            print("Interrupted work was moved to paused/. Review it before restarting the watcher.", flush=True)
+            return
 
         print("Watching for queued tasks. Press Ctrl+C to stop.", flush=True)
         while True:
@@ -83,28 +89,49 @@ def watch() -> None:
             log = HANDOFF / f"queue-{task.stem}.log"
             print(f"Starting: {task.stem}", flush=True)
             with log.open("w", encoding="utf-8") as output:
-                result = subprocess.run(
+                process = subprocess.Popen(
                     [sys.executable, str(RUNNER), objective],
                     cwd=PROJECT, stdin=subprocess.DEVNULL,
                     stdout=output, stderr=subprocess.STDOUT,
-                    check=False,
+                    start_new_session=True,
                 )
-            if result.returncode != 0 and "Another collaboration run is already active" in log.read_text(encoding="utf-8"):
+                try:
+                    result_code = process.wait()
+                except KeyboardInterrupt:
+                    try:
+                        os.killpg(process.pid, signal.SIGINT)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        process.wait()
+                    move_unique(active, PAUSED, task.name)
+                    print(f"Interrupted: {task.stem}. Review paused/ before restarting.", flush=True)
+                    return
+            if result_code != 0 and "Another collaboration run is already active" in log.read_text(encoding="utf-8"):
                 os.replace(active, task)
                 time.sleep(10)
                 continue
-            destination = COMPLETED if result.returncode == 0 else PAUSED
+            destination = COMPLETED if result_code == 0 else PAUSED
             move_unique(active, destination, task.name)
             print(
-                f"{'Completed' if result.returncode == 0 else 'Paused'}: {task.stem}. "
+                f"{'Completed' if result_code == 0 else 'Paused'}: {task.stem}. "
                 f"See {log.relative_to(PROJECT)}",
                 flush=True,
             )
+            if result_code != 0:
+                print("Watcher paused to protect the remaining queue. Review the run before restarting.", flush=True)
+                return
 
 
 def status() -> None:
     prepare_dirs()
-    with WATCH_LOCK.open("w") as lock:
+    with WATCH_LOCK.open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
