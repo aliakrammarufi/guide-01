@@ -40,3 +40,19 @@ Use `./collab.sh --max-tasks 8 "..."` for a larger objective, or `./collab.sh --
 The runner launches new non-interactive Codex and Claude sessions. It does not type into the two interactive chats you already have open. Avoid editing the same project in those chats while the runner is active.
 
 The agents can edit this project, but the runner tells them not to push, deploy, purchase, or send external messages. Review the result before publishing. This automation uses your existing CLI sign-ins and their usage limits.
+
+### Keep a queue running while you are away
+
+Leave this command running in a normal Terminal tab on the Mac Mini:
+
+```bash
+./collab.sh --watch
+```
+
+Add a new project objective from another normal Terminal tab:
+
+```bash
+./collab.sh --queue "Add the real Stan guide listings and check the catalog"
+```
+
+The watcher picks up queued objectives in order. Each objective gets its own Codex plan and the same Codex → Claude → Codex phases. Finished tasks move to `automation/completed/`; tasks that need attention move to `automation/paused/`. Logs and detailed handoffs remain in `.ai-handoff/`. Press Ctrl+C in the watcher tab to stop it. The watcher does not invent new objectives after the queued work is finished; it waits for another task.

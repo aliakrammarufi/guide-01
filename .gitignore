@@ -1,2 +1,5 @@
 .ai-handoff/
 __pycache__/
+automation/queue/
+automation/completed/
+automation/paused/
