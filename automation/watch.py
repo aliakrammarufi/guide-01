@@ -21,6 +21,8 @@ COMPLETED = AUTOMATION / "completed"
 PAUSED = AUTOMATION / "paused"
 HANDOFF = PROJECT / ".ai-handoff"
 RUNNER = AUTOMATION / "runner.py"
+WATCH_LOCK = HANDOFF / "watch.lock"
+STOP_REQUEST = HANDOFF / "stop-watch"
 
 
 def prepare_dirs() -> None:
@@ -52,17 +54,23 @@ def move_unique(source: Path, directory: Path, name: str) -> None:
 
 def watch() -> None:
     prepare_dirs()
-    with (HANDOFF / "watch.lock").open("w") as lock:
+    with WATCH_LOCK.open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError("A queue watcher is already running") from None
+
+        STOP_REQUEST.unlink(missing_ok=True)
 
         for stale in QUEUE.glob("*.running"):
             move_unique(stale, PAUSED, stale.stem + ".md")
 
         print("Watching for queued tasks. Press Ctrl+C to stop.", flush=True)
         while True:
+            if STOP_REQUEST.exists():
+                STOP_REQUEST.unlink()
+                print("Watcher stopped by request.", flush=True)
+                return
             pending = sorted(QUEUE.glob("*.md"))
             if not pending:
                 time.sleep(10)
@@ -94,17 +102,36 @@ def watch() -> None:
             )
 
 
+def status() -> None:
+    prepare_dirs()
+    with WATCH_LOCK.open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("Watcher is running")
+            return
+        print("Watcher is stopped")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Queue or watch collaboration tasks")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--enqueue", metavar="TASK")
     mode.add_argument("--watch", action="store_true")
+    mode.add_argument("--stop", action="store_true")
+    mode.add_argument("--status", action="store_true")
     args = parser.parse_args()
     try:
         if args.enqueue is not None:
             enqueue(args.enqueue)
-        else:
+        elif args.watch:
             watch()
+        elif args.stop:
+            prepare_dirs()
+            STOP_REQUEST.touch()
+            print("Stop requested. The watcher will exit after its current task.")
+        else:
+            status()
     except (OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

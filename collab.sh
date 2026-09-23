@@ -17,6 +17,14 @@ if [[ "${1-}" == "--watch" ]]; then
   exec python3 automation/watch.py --watch "$@"
 fi
 
+if [[ "${1-}" == "--stop-watch" ]]; then
+  exec python3 automation/watch.py --stop
+fi
+
+if [[ "${1-}" == "--status" ]]; then
+  exec python3 automation/watch.py --status
+fi
+
 if command -v caffeinate >/dev/null 2>&1; then
   exec caffeinate -i python3 automation/runner.py "$@"
 fi
