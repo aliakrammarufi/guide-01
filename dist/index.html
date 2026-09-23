@@ -3,122 +3,360 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#102b32" />
-    <meta name="description" content="Discover digital field guides organized by country and state. Find your place with Marufi Digital." />
-    <title>Marufi Digital — A clearer way to explore</title>
+    <meta name="theme-color" content="#14201c" />
+    <meta name="description" content="Marufi Digital publishes premium digital guides and books organized by country and state. Browse the collection, add to your cart, and pay securely with Stripe." />
+    <title>Marufi Digital · Guides and books by place</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
     <script src="site.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
-    <div class="announcement">
-      <span class="announcement-mark" aria-hidden="true"></span>
-      <span>Independent digital field guides, organized by place</span>
-      <span class="announcement-end" aria-hidden="true">COUNTRY / STATE / EXPLORE</span>
+    <div class="topbar" id="topbar">
+      <span class="topbar-brand">Marufi Digital</span>
+      <span class="topbar-mid">Digital guides and books, organized by country and state</span>
+      <span class="topbar-end">Secure checkout with Stripe</span>
     </div>
-    <header class="site-header">
-      <a class="brand" href="#top" aria-label="Marufi Digital home">
-        <span class="brand-mark" aria-hidden="true">M<span class="brand-dot">.</span></span>
-        <span class="brand-name">MARUFI <span>DIGITAL</span></span>
-      </a>
-      <nav aria-label="Main navigation">
-        <a href="#guides">The guides</a>
-        <a href="#approach">Our approach</a>
-        <a class="nav-shop" href="#guides" id="nav-shop">Explore collection <span aria-hidden="true">↗</span></a>
-      </nav>
+
+    <header class="masthead" id="masthead">
+      <div class="masthead-row wrap">
+        <a class="wordmark" href="#top" aria-label="Marufi Digital home">Marufi <em>Digital</em><small aria-hidden="true">Guides by place</small></a>
+        <nav class="site-nav" id="site-nav" aria-label="Main navigation">
+          <a href="#guides">Collection</a>
+          <a href="#inside">Inside</a>
+          <a href="#approach">How it works</a>
+          <a href="#faq">Questions</a>
+          <a class="nav-shop" href="#guides">Shop the collection <span aria-hidden="true">↓</span></a>
+          <p class="nav-foot" aria-hidden="true">Secure checkout with Stripe · Instant download</p>
+        </nav>
+        <div class="masthead-tools">
+          <button class="cart-button" id="cart-open" type="button" aria-haspopup="dialog" aria-controls="cart" aria-expanded="false">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 8h12l1 13H5L6 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
+            <span class="cart-label">Cart</span>
+            <span class="cart-count" id="cart-count" hidden>0</span>
+          </button>
+          <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Open menu">
+            <span class="nav-toggle-bars" aria-hidden="true"><i></i><i></i></span>
+            <span class="nav-toggle-text" aria-hidden="true">Menu</span>
+          </button>
+        </div>
+      </div>
     </header>
 
     <main id="main" tabindex="-1">
       <section class="hero" id="top" aria-labelledby="hero-title">
-        <div class="hero-main">
-          <div class="hero-copy">
-            <div class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> THE WORLD, A LITTLE CLOSER</div>
-            <h1 id="hero-title">See a place <em>more clearly.</em></h1>
-            <p>Digital guides to the countries and states on your mind. Find the place, get the details, and explore with a little more confidence.</p>
+        <div class="hero-grid wrap">
+          <div class="hero-copy reveal">
+            <p class="eyebrow">Digital guides and books · by country and state</p>
+            <h1 id="hero-title">Know the place <em>before you arrive.</em></h1>
+            <p class="deck">Marufi Digital publishes digital guides and books organized by country and state. Choose the place, read what is inside, and pay securely with Stripe. Your download is ready the moment payment clears.</p>
             <div class="hero-actions">
-              <a class="primary-button" href="#guides">Explore the guides <span aria-hidden="true">↗</span></a>
-              <a class="hero-secondary" href="#approach">How it works <span aria-hidden="true">↓</span></a>
+              <a class="button button-lg" href="#guides">Browse the collection <span aria-hidden="true">↓</span></a>
+              <a class="text-link" href="#preview" data-sample-only>See a sample listing <span aria-hidden="true">→</span></a>
+            </div>
+            <ul class="hero-facts">
+              <li><strong>Filed by place</strong><span>Country, then state</span></li>
+              <li><strong>Instant download</strong><span>Delivered after payment</span></li>
+              <li><strong>Secure checkout</strong><span>Powered by Stripe</span></li>
+            </ul>
+          </div>
+          <figure class="plate reveal">
+            <div class="plate-img">
+              <span class="plate-tag" aria-hidden="true">Field notes</span>
+              <picture>
+                <source media="(max-width: 700px)" srcset="assets/travel-planning-800.webp" type="image/webp" />
+                <img src="assets/travel-planning.webp" alt="A map and notebook on a wooden table by a window overlooking mountains and water" width="1536" height="1024" fetchpriority="high" />
+              </picture>
+            </div>
+            <figcaption><span>Plate 01</span><span>Planning table, morning light</span></figcaption>
+          </figure>
+        </div>
+        <span class="hero-side" aria-hidden="true">Marufi Digital · Guides by place</span>
+      </section>
+
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee-track">
+          <span>Secure checkout with Stripe</span><span>Instant digital download</span><span>Guides and books by place</span><span>Written to be read in one sitting</span><span>Independent publisher</span>
+          <span>Secure checkout with Stripe</span><span>Instant digital download</span><span>Guides and books by place</span><span>Written to be read in one sitting</span><span>Independent publisher</span>
+        </div>
+      </div>
+
+      <nav class="contents" aria-label="On this page">
+        <ol class="wrap">
+          <li><a href="#guides">The collection<span class="arrow" aria-hidden="true">↓</span></a></li>
+          <li><a href="#inside">Inside every title<span class="arrow" aria-hidden="true">↓</span></a></li>
+          <li><a href="#approach">How it works<span class="arrow" aria-hidden="true">↓</span></a></li>
+          <li><a href="#faq">Questions<span class="arrow" aria-hidden="true">↓</span></a></li>
+        </ol>
+      </nav>
+
+      <section class="section collection-section" id="guides" aria-labelledby="collection-title">
+        <div class="wrap">
+          <div class="section-index"><span>The collection</span><span>Filed by place</span></div>
+          <div class="section-head reveal">
+            <h2 id="collection-title">Every title, <em>filed by place.</em></h2>
+            <p>Browse by country and state. Buy a title directly, or add a few to your cart and pay for everything at once. Checkout is handled by Stripe.</p>
+          </div>
+          <div class="catalog-controls" id="catalog-controls" hidden>
+            <label class="search-field">
+              <span class="sr-only">Search the collection</span>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
+              <input id="guide-search" type="search" placeholder="Search a country, state, or title" autocomplete="off" />
+            </label>
+            <label class="select-field">
+              <span class="sr-only">Filter by country</span>
+              <select id="country-filter"><option value="">All countries</option></select>
+            </label>
+            <div class="type-filter" id="type-filter" role="group" aria-label="Filter by format">
+              <button type="button" class="chip is-active" data-type="">All</button>
+              <button type="button" class="chip" data-type="Guide">Guides</button>
+              <button type="button" class="chip" data-type="Book">Books</button>
+            </div>
+            <p class="catalog-count" id="guide-count" aria-live="polite"></p>
+          </div>
+          <div id="featured" class="featured" hidden></div>
+          <div id="guide-list" class="guide-grid"></div>
+          <div id="catalog-message" class="catalog-message">
+            <div class="message-symbol" aria-hidden="true">Editor's<br />note</div>
+            <div class="message-copy">
+              <span class="message-overline">The collection / in progress</span>
+              <h3>The library is taking shape.</h3>
+              <p>Guides and books will appear here as they are added to the collection.</p>
             </div>
           </div>
-          <div class="hero-visual">
-            <picture>
-              <source media="(max-width: 700px)" srcset="assets/travel-planning-800.webp" type="image/webp" />
-              <img src="assets/travel-planning.webp" alt="A map and notebook by a window overlooking mountains and water" width="1536" height="1024" fetchpriority="high" />
-            </picture>
-            <div class="photo-index" aria-hidden="true"><span>FIELD NOTES</span><span>001 / 001</span></div>
-            <div class="photo-caption" aria-hidden="true"><span>LOOK CLOSER.</span><span>GO FURTHER.</span></div>
-          </div>
-        </div>
-        <div class="hero-rail" aria-hidden="true">
-          <span>AN ATLAS FOR THE CURIOUS</span>
-          <span class="rail-line"></span>
-          <span>COUNTRY BY COUNTRY &nbsp;·&nbsp; STATE BY STATE</span>
         </div>
       </section>
 
-      <section class="collection-section" id="guides" aria-labelledby="collection-title">
-        <div class="section-index"><span>01 / THE COLLECTION</span><span>FIND YOUR PLACE</span></div>
-        <div class="section-head">
-          <div>
-            <div class="eyebrow eyebrow-dark"><span class="eyebrow-line" aria-hidden="true"></span> A PLACE TO BEGIN</div>
-            <h2 id="collection-title">Choose the place. <em>Find your perspective.</em></h2>
+      <section class="section preview-section" id="preview" aria-labelledby="preview-title" data-sample-only>
+        <div class="wrap">
+          <div class="section-index"><span>Sample listing</span><span>Format preview</span></div>
+          <div class="section-head reveal">
+            <h2 id="preview-title">What a listing looks like, <em>before the first one is published.</em></h2>
+            <p>These three cards show the layout only. They are not products, carry no prices, and cannot be purchased. Published titles will appear in the collection above with their own cover, price, and Stripe checkout.</p>
           </div>
-          <p>Browse by country and state. When you choose a guide, checkout opens securely in the Marufi Digital Stan store.</p>
-        </div>
-        <div class="catalog-controls" id="catalog-controls" hidden>
-          <label class="search-field">
-            <span class="sr-only">Search guides</span>
-            <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
-            <input id="guide-search" type="search" placeholder="Search a country or state" autocomplete="off" />
-          </label>
-          <label class="select-field">
-            <span class="sr-only">Filter by country</span>
-            <select id="country-filter"><option value="">All countries</option></select>
-          </label>
-        </div>
-        <p id="guide-count" class="sr-only" aria-live="polite"></p>
-        <div id="guide-list" class="guide-grid"></div>
-        <div id="catalog-message" class="catalog-message">
-          <div class="message-symbol" aria-hidden="true">◆</div>
-          <div class="message-copy">
-            <span class="message-overline">THE COLLECTION / IN PROGRESS</span>
-            <h3>The library is taking shape.</h3>
-            <p>Guides will appear here as they are added to the collection.</p>
+          <div class="guide-grid sample-grid" role="list" aria-label="Sample listings, not for sale">
+            <article class="guide-card sample-card" role="listitem" aria-label="Sample listing 1 of 3, not for sale">
+              <div class="card-cover"><div class="cover-art" data-tone="clay"><span>Country</span><strong>State</strong></div><span class="card-badge sample-badge">Sample</span></div>
+              <div class="card-body">
+                <div class="card-meta"><span class="card-kicker">Guide · Country / State</span><span class="card-price">Price</span></div>
+                <h3>Where to begin</h3>
+                <p>A real listing names the country and state here and describes what the buyer receives in plain terms.</p>
+                <div class="card-actions"><span class="button button-sm is-disabled">Buy now</span><span class="button-ghost is-disabled">Add to cart</span></div>
+              </div>
+            </article>
+            <article class="guide-card sample-card" role="listitem" aria-label="Sample listing 2 of 3, not for sale">
+              <div class="card-cover"><div class="cover-art" data-tone="pine"><span>Country</span><strong>State</strong></div><span class="card-badge sample-badge">Sample</span></div>
+              <div class="card-body">
+                <div class="card-meta"><span class="card-kicker">Book · Country / State</span><span class="card-price">Price</span></div>
+                <h3>Getting around</h3>
+                <p>Titles stay short and specific. The description says what is inside, not how good it is.</p>
+                <div class="card-actions"><span class="button button-sm is-disabled">Buy now</span><span class="button-ghost is-disabled">Add to cart</span></div>
+              </div>
+            </article>
+            <article class="guide-card sample-card" role="listitem" aria-label="Sample listing 3 of 3, not for sale">
+              <div class="card-cover"><div class="cover-art" data-tone="ink"><span>Country</span><strong>State</strong></div><span class="card-badge sample-badge">Sample</span></div>
+              <div class="card-body">
+                <div class="card-meta"><span class="card-kicker">Guide · Country / State</span><span class="card-price">Price</span></div>
+                <h3>When to go</h3>
+                <p>Every published title has its own secure Stripe checkout. Sample cards link nowhere.</p>
+                <div class="card-actions"><span class="button button-sm is-disabled">Buy now</span><span class="button-ghost is-disabled">Add to cart</span></div>
+              </div>
+            </article>
           </div>
-          <span class="message-corner" aria-hidden="true">M/D</span>
+          <p class="sample-note">This section is a preview of the format. It is removed automatically once the first real title is published.</p>
         </div>
       </section>
 
-      <section class="approach-section" id="approach" aria-labelledby="approach-title">
-        <div class="section-index section-index-light"><span>02 / OUR APPROACH</span><span>MADE FOR THE CURIOUS</span></div>
-        <div class="approach-grid">
-          <div class="approach-intro">
-            <h2 id="approach-title">From somewhere in mind <em>to something in hand.</em></h2>
+      <section class="section inside-section" id="inside" aria-labelledby="inside-title">
+        <div class="wrap">
+          <div class="section-index"><span>Inside every title</span><span>The standard</span></div>
+          <div class="section-head reveal">
+            <h2 id="inside-title">Made to be read, <em>not scrolled past.</em></h2>
+            <p>Each guide and book is built the same way, so once you have read one you know exactly what the next one gives you.</p>
           </div>
-          <div class="approach-content">
-            <p>Finding the right information should feel simple. Our collection brings place guides together in one clear country and state directory, so you can get to the place that matters to you.</p>
-            <a href="#guides">See the guide library <span aria-hidden="true">↗</span></a>
+          <ul class="features reveal">
+            <li>
+              <svg aria-hidden="true" viewBox="0 0 32 32"><path d="M4 8l8-3 8 3 8-3v19l-8 3-8-3-8 3z"/><path d="M12 5v19M20 8v19"/></svg>
+              <strong>Filed by place</strong>
+              <p>One country, one state, one title. No sprawling regions and no padding.</p>
+            </li>
+            <li>
+              <svg aria-hidden="true" viewBox="0 0 32 32"><path d="M6 6h20v20H6z"/><path d="M10 12h12M10 17h12M10 22h7"/></svg>
+              <strong>Plain language</strong>
+              <p>The listing tells you what is inside before you decide, and the writing reads the same way.</p>
+            </li>
+            <li>
+              <svg aria-hidden="true" viewBox="0 0 32 32"><path d="M16 4v16"/><path d="m9 13 7 7 7-7"/><path d="M5 22v6h22v-6"/></svg>
+              <strong>Instant download</strong>
+              <p>Pay with Stripe and your download is ready straight away, with a receipt in your inbox.</p>
+            </li>
+            <li>
+              <svg aria-hidden="true" viewBox="0 0 32 32"><rect x="5" y="13" width="22" height="15"/><path d="M10 13V9a6 6 0 0 1 12 0v4"/></svg>
+              <strong>Secure by design</strong>
+              <p>Payments are handled by Stripe. Your card details never touch this site.</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section approach-section" id="approach" aria-labelledby="approach-title">
+        <div class="wrap">
+          <div class="section-index"><span>How it works</span><span>Three steps</span></div>
+          <div class="section-head reveal">
+            <h2 id="approach-title">Simple by design, <em>from search to checkout.</em></h2>
+            <p>The collection is one directory. Find the place, read what is inside, and pay once.</p>
+          </div>
+          <ol class="steps reveal">
+            <li><strong>Find the place</strong><p>Search by country, state, or title, or filter the collection to guides or books.</p></li>
+            <li><strong>Buy, or add to cart</strong><p>Buy a title straight away, or keep a few in your cart while you compare what each one covers.</p></li>
+            <li><strong>Pay once with Stripe</strong><p>Card, Apple Pay, or Google Pay in one secure Stripe checkout. Then download and start reading.</p></li>
+          </ol>
+          <div class="approach-foot">
+            <p>Marufi Digital is an independent publisher of digital guides and books. Payments are processed by Stripe.</p>
+            <a class="text-link" href="#guides">Back to the collection <span aria-hidden="true">↑</span></a>
           </div>
         </div>
-        <div class="approach-steps" aria-label="How the guide library works">
-          <div><span>01</span><strong>Find your place</strong><p>Search the country or state that interests you.</p></div>
-          <div><span>02</span><strong>Choose a guide</strong><p>See what each digital guide covers.</p></div>
-          <div><span>03</span><strong>Open on Stan</strong><p>Checkout securely in our Stan store.</p></div>
+      </section>
+
+      <section class="section faq-section" id="faq" aria-labelledby="faq-title">
+        <div class="wrap">
+          <div class="section-index"><span>Questions</span><span>Before you buy</span></div>
+          <div class="faq-grid">
+            <div class="section-head section-head-stack reveal">
+              <h2 id="faq-title">Good to know <em>before checkout.</em></h2>
+              <p>Short answers about how buying works. Anything else, ask by email from the footer.</p>
+            </div>
+            <div class="faq-list reveal">
+              <details open>
+                <summary>How do I receive my purchase?</summary>
+                <p>Pay through Stripe's secure checkout. As soon as payment clears you are brought to a confirmation page with your download, and Stripe emails your receipt.</p>
+              </details>
+              <details>
+                <summary>What does the cart do?</summary>
+                <p>The cart keeps the titles you choose on this device so you can compare them, then pays for all of them in one Stripe checkout.</p>
+              </details>
+              <details>
+                <summary>Which payment methods can I use?</summary>
+                <p>Major credit and debit cards, plus Apple Pay and Google Pay where your device supports them. Stripe handles the payment from start to finish.</p>
+              </details>
+              <details>
+                <summary>Do I need an account?</summary>
+                <p>No. Browse, search, and fill your cart freely. Stripe only asks for your email and payment details at checkout.</p>
+              </details>
+            </div>
+          </div>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="footer-top">
-        <div class="footer-brand">MARUFI <span>DIGITAL</span><span class="brand-dot">.</span></div>
-        <p>For wherever curiosity leads.</p>
+    <footer class="site-footer" id="footer">
+      <div class="footer-cta wrap">
+        <div class="footer-cta-copy reveal">
+          <p class="eyebrow eyebrow-light">Start with the place</p>
+          <h2>Somewhere in mind? <em>Find its guide.</em></h2>
+        </div>
+        <a class="button button-light button-lg" href="#guides">Browse the collection <span aria-hidden="true">↑</span></a>
       </div>
-      <div class="footer-bottom">
-        <span>INDEPENDENT DIGITAL FIELD GUIDES</span>
+      <div class="footer-grid wrap">
+        <div class="footer-brand">
+          <div class="footer-wordmark">Marufi <em>Digital</em></div>
+          <p>Digital guides and books organized by country and state, written to be read in one sitting. Payments are processed securely by Stripe.</p>
+          <div class="footer-trust"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span>Secure checkout with Stripe</span></div>
+        </div>
+        <nav class="footer-col" aria-labelledby="footer-explore">
+          <h3 id="footer-explore">Explore</h3>
+          <a href="#guides">The collection</a>
+          <a href="#inside">Inside every title</a>
+          <a href="#approach">How it works</a>
+          <a href="#faq">Questions</a>
+        </nav>
+        <nav class="footer-col" aria-labelledby="footer-support">
+          <h3 id="footer-support">Support</h3>
+          <a href="#faq">Ordering help</a>
+          <a id="footer-contact" href="#faq" hidden>Email us</a>
+          <button type="button" class="link-button" id="footer-cart">Open your cart</button>
+        </nav>
+        <nav class="footer-col" aria-labelledby="footer-follow" id="footer-follow-col" hidden>
+          <h3 id="footer-follow">Follow</h3>
+        </nav>
+      </div>
+      <div class="footer-payments wrap">
+        <div class="footer-payments-copy">
+          <span class="footer-payments-label">We accept</span>
+          <p>All major cards and wallets, processed securely by Stripe. Prices are charged in Canadian dollars.</p>
+        </div>
+        <ul class="payment-list" aria-label="Accepted payment methods">
+          <li><img src="assets/payments/visa.svg" alt="Visa" width="52" height="33" loading="lazy" /></li>
+          <li><img src="assets/payments/mastercard.svg" alt="Mastercard" width="52" height="33" loading="lazy" /></li>
+          <li><img src="assets/payments/amex.svg" alt="American Express" width="52" height="33" loading="lazy" /></li>
+          <li><img src="assets/payments/discover.svg" alt="Discover" width="52" height="33" loading="lazy" /></li>
+          <li><img src="assets/payments/jcb.svg" alt="JCB" width="52" height="33" loading="lazy" /></li>
+          <li><img src="assets/payments/unionpay.svg" alt="UnionPay" width="52" height="33" loading="lazy" /></li>
+          <li><img src="assets/payments/applepay.svg" alt="Apple Pay" width="52" height="33" loading="lazy" /></li>
+          <li><img src="assets/payments/googlepay.svg" alt="Google Pay" width="52" height="33" loading="lazy" /></li>
+        </ul>
+        <a class="powered-by" href="https://stripe.com" target="_blank" rel="noopener noreferrer"><span>Powered by</span><img src="assets/payments/stripe.svg" alt="" width="18" height="18" loading="lazy" /><strong>Stripe</strong><span class="sr-only">(opens in a new tab)</span></a>
+      </div>
+      <div class="footer-bottom wrap">
+        <span>© 2026 Marufi Digital · Independent publisher</span>
+        <span>Guides and books by place</span>
         <a href="#top">Back to top <span aria-hidden="true">↑</span></a>
       </div>
+      <div class="footer-mark" aria-hidden="true">Marufi</div>
     </footer>
+
+    <div class="cart-overlay" id="cart-overlay" hidden></div>
+    <aside class="cart" id="cart" role="dialog" aria-modal="true" aria-labelledby="cart-title" hidden>
+      <div class="cart-head">
+        <div>
+          <span class="message-overline">Your selection</span>
+          <h2 id="cart-title">Cart</h2>
+        </div>
+        <button class="cart-close" id="cart-close" type="button" aria-label="Close cart"><span aria-hidden="true">×</span></button>
+      </div>
+      <ul class="cart-items" id="cart-items"></ul>
+      <div class="cart-empty" id="cart-empty">
+        <div class="message-symbol" aria-hidden="true">Nothing<br />yet</div>
+        <p>Your cart is empty. Add a guide or book from the collection to keep it here while you decide.</p>
+        <a class="text-link" href="#guides" id="cart-browse">Browse the collection <span aria-hidden="true">↓</span></a>
+      </div>
+      <div class="cart-foot" id="cart-foot" hidden>
+        <div class="cart-summary"><span id="cart-summary-label">0 titles</span><strong id="cart-total"></strong></div>
+        <button type="button" class="button cart-checkout" id="cart-checkout">Checkout with Stripe <span aria-hidden="true">→</span></button>
+        <ul class="payment-list payment-list-mini" aria-label="Accepted payment methods">
+          <li><img src="assets/payments/visa.svg" alt="Visa" width="36" height="23" /></li>
+          <li><img src="assets/payments/mastercard.svg" alt="Mastercard" width="36" height="23" /></li>
+          <li><img src="assets/payments/amex.svg" alt="American Express" width="36" height="23" /></li>
+          <li><img src="assets/payments/applepay.svg" alt="Apple Pay" width="36" height="23" /></li>
+          <li><img src="assets/payments/googlepay.svg" alt="Google Pay" width="36" height="23" /></li>
+        </ul>
+        <p class="cart-note" id="cart-note">One secure Stripe payment for everything in your cart. Your cart is saved on this device only.</p>
+        <button type="button" class="button-ghost cart-clear" id="cart-clear">Clear cart</button>
+      </div>
+    </aside>
+
+    <div class="modal-overlay" id="quick-overlay" hidden></div>
+    <div class="quick" id="quick" role="dialog" aria-modal="true" aria-labelledby="quick-title" hidden>
+      <span class="sheet-handle" aria-hidden="true"></span>
+      <button class="cart-close quick-close" id="quick-close" type="button" aria-label="Close"><span aria-hidden="true">×</span></button>
+      <div class="quick-cover" id="quick-cover"></div>
+      <div class="quick-body">
+        <span class="card-kicker" id="quick-kicker"></span>
+        <h2 id="quick-title"></h2>
+        <p class="quick-desc" id="quick-desc"></p>
+        <ul class="quick-highlights" id="quick-highlights"></ul>
+        <div class="quick-meta"><span id="quick-format"></span><strong id="quick-price"></strong></div>
+        <div class="quick-actions">
+          <button type="button" class="button" id="quick-buy">Buy now <span aria-hidden="true">→</span></button>
+          <button type="button" class="button-ghost" id="quick-add">Add to cart</button>
+        </div>
+        <p class="quick-note">Secure checkout with Stripe. Instant download after payment.</p>
+      </div>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

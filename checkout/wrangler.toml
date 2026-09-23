@@ -1,0 +1,10 @@
+name = "marufi-checkout"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+SUCCESS_URL = "https://your-domain.com/thank-you.html"
+CANCEL_URL = "https://your-domain.com/#guides"
+ALLOWED_ORIGINS = "https://your-domain.com,https://www.your-domain.com"
+# ALLOWED_PRICES = "price_123,price_456"
+# Set the secret with: wrangler secret put STRIPE_SECRET_KEY

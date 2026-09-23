@@ -1,0 +1,2 @@
+Card brand icons (visa, mastercard, amex, discover, jcb, unionpay): svg-credit-card-payment-icons by Aaron Fagan, Apache License 2.0.
+Apple Pay, Google Pay, and Stripe glyphs: Simple Icons, CC0 1.0. Brand marks remain the property of their respective owners.

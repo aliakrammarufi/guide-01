@@ -1,5 +1,12 @@
 {
   "storeName": "Marufi Digital",
-  "stanUrl": "",
+  "currency": "CAD",
+  "checkoutEndpoint": "",
+  "contactEmail": "",
+  "social": {
+    "instagram": "",
+    "tiktok": "",
+    "youtube": ""
+  },
   "guides": []
 }
