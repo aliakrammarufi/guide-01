@@ -1,73 +1,70 @@
 # Marufi Digital guide site
 
-This project is a static storefront for Marufi Digital's digital guides and books, organized by country and state. Payments are taken with Stripe. The public site files are in `dist/`; the optional cart-checkout endpoint is in `checkout/`.
+A static storefront for Marufi Digital's digital guides and books, organized by country and state, for every country. Payments are taken with Stripe. The public site is in `dist/`; the optional backend (cart checkout, secure downloads, e-mail) is one Cloudflare Worker in `checkout/`.
 
-## How selling works
+## What the site does
 
-- **Buy now** on a card opens that title's Stripe checkout. The simplest setup is a Stripe **Payment Link** per title: no server is needed, and the visitor lands back on `thank-you.html` if you set the link's confirmation page to redirect there.
-- **Add to cart** keeps titles in the visitor's browser. **Checkout with Stripe** in the cart pays for everything in one Stripe Checkout session. That needs the small endpoint in `checkout/worker.js` deployed (see below) and a Stripe **Price ID** on each title. Without the endpoint, the cart still works and shows a Buy with Stripe button per title.
-- **Delivery** is up to your Stripe setup. Stripe emails the receipt; add your download link to the Payment Link's confirmation page or send it with a Stripe post-purchase email or webhook. The thank-you page tells buyers to check their inbox.
+- **Collection** with search, country filter, Guides / Books / Bundles / Saved chips, an Editor's pick spotlight, sale pricing with countdown, a quick-view dialog with editions (variants), sample pages, save-for-later hearts, and a compare tool (up to three titles side by side).
+- **Atlas**: a world map with a pin for every covered state, plus a country list. Pick a country to see its states with the titles under each; states without a title show "Coming soon" and a notify-me button.
+- **Zones**: a horizontal strip of the cities people are heading to, what makes each special, best time to go, and the guide that covers it.
+- **Reviews**, **About the author**, FAQ with an optional refund policy, and a footer with accepted payment marks and "Resend my download".
+- **Cart** with one-payment Stripe Checkout, gift orders, and a currency switcher for display prices.
+- **Thank-you page** that shows secure, time-limited download links when the Worker is deployed.
+- SEO: Product structured data is injected for every title; `robots.txt` and `sitemap.xml` are included (replace `YOUR-DOMAIN`). Optional cookie-free analytics via Plausible.
 
-## Add real guides and books
+## Selling with Stripe
 
-Edit `dist/guides.json`:
+- **Buy now** opens that title's Stripe checkout. Simplest setup: a Stripe **Payment Link** per title, no server needed. Set the link's confirmation page to redirect to `https://your-domain.com/thank-you.html?session_id={CHECKOUT_SESSION_ID}`.
+- **Checkout with Stripe** in the cart pays for everything at once. It needs the Worker deployed and a Stripe **Price ID** per title. Without the Worker, the cart shows a Buy with Stripe button per title instead.
+- **Secure delivery**: with the Worker, buyers get time-limited download links on the thank-you page and by e-mail. Files live in a private R2 bucket; each Stripe product needs metadata `file` set to the object key (for example `vancouver.pdf`). Nothing is served from a public URL.
 
-```json
-{
-  "storeName": "Marufi Digital",
-  "currency": "CAD",
-  "checkoutEndpoint": "https://marufi-checkout.your-account.workers.dev",
-  "contactEmail": "hello@example.com",
-  "social": { "instagram": "https://instagram.com/your-handle", "tiktok": "", "youtube": "" },
-  "guides": [
-    {
-      "id": "bc-vancouver",
-      "type": "Guide",
-      "country": "Canada",
-      "state": "British Columbia",
-      "title": "Vancouver and the Sea-to-Sky",
-      "description": "One or two sentences that say what the buyer receives.",
-      "longDescription": "A fuller paragraph shown in the quick view and the featured spotlight.",
-      "highlights": ["Neighbourhood-by-neighbourhood map", "Day-by-day Whistler drive", "Where to eat late"],
-      "format": "PDF · 84 pages",
-      "price": 19,
-      "badge": "New",
-      "featured": true,
-      "cover": "assets/covers/bc-vancouver.webp",
-      "coverAlt": "Cover of Vancouver and the Sea-to-Sky",
-      "priceId": "price_1ABC...",
-      "paymentLink": "https://buy.stripe.com/..."
-    }
-  ]
-}
-```
+## Edit the catalog: `dist/guides.json`
 
-Required for each title: `title`, `description`, a numeric `price`, and at least one of `paymentLink` (a Stripe Payment Link URL) or `priceId` (a Stripe Price ID, which only works once `checkoutEndpoint` is set). Titles missing any of these are skipped.
+Store-wide fields:
 
-Optional fields:
+| Field | Purpose |
+|---|---|
+| `currency` | Base currency code, the one your Stripe prices use. |
+| `currencies` | Codes offered in the display switcher, e.g. `["CAD","USD","EUR"]`. Add `prices` per title for each; missing ones fall back to the base price. |
+| `checkoutEndpoint` | The Worker URL once deployed. Enables cart checkout, notify-me, resend, and secure downloads. |
+| `siteUrl` | Your live URL, used in structured data. |
+| `contactEmail`, `social` | Footer links. Leave empty to hide. |
+| `refundPolicy` | Text for the "What if a guide is not what I expected?" FAQ. Empty hides it. |
+| `author` | `name`, `role`, `photo`, `bio` (blank line = new paragraph), `note`. Section hides until `name` and `bio` are set. |
+| `reviews` | `[{ "quote", "name", "place", "rating" }]`. Section hides when empty. |
+| `zones` | `[{ "city", "country", "state", "tagline", "why", "bestTime", "knownFor": [], "image", "guideId" }]`. Section hides when empty. |
+| `regions` | `{ "Canada": ["Alberta", ...] }`. Full state lists so the atlas can show "Coming soon" entries. Canada, US, Australia, Germany, Italy, Spain, France, UK, and Japan are pre-filled; add others as you publish. |
+| `analytics.plausibleDomain` | Your domain in Plausible to enable analytics. |
 
-- `type`: `Guide` or `Book`. Defaults to `Guide`. The Guides / Books filter appears once both types exist.
-- `country` and `state`: recommended. Books that are not tied to a place can leave them out.
-- `cover`: a file inside `dist/assets/` (for example `assets/covers/name.webp`) or an HTTPS URL. Portrait 4:5 around 800 x 1000 pixels looks best. Titles without a cover get a typographic cover generated from the country and state.
-- `coverAlt`, `longDescription`, `highlights` (up to six short lines), `format` (shown in the quick view), `badge` (short label on the cover such as `New` or `Bestseller`).
-- `featured: true` on one title shows it as the Editor's pick spotlight above the grid.
+Per title (required: `title`, `description`, numeric `price`, and `paymentLink` or `priceId`):
 
-Store-wide: `currency` is the ISO code used to format prices (Stripe charges whatever the Price or Payment Link is set to, so keep them consistent). `contactEmail` adds an Email us link to the footer and thank-you page. `social` adds Follow links; leave a value empty to hide it.
+| Field | Purpose |
+|---|---|
+| `id` | Stable id used by bundles, zones, saved items, and the cart. |
+| `type` | `Guide`, `Book`, or `Bundle`. |
+| `country`, `state` | Filing place. `coordinates: [lat, lng]` places the pin on the atlas. |
+| `cover`, `coverAlt`, `badge`, `featured` | Presentation. Portrait 4:5 covers look best. |
+| `longDescription`, `highlights`, `format`, `pages`, `updated` | Shown in quick view and compare. |
+| `prices` | `{ "USD": 14 }` display prices per currency. |
+| `salePrice`, `saleEnds`, `salePrices` | Launch or sale pricing with a countdown badge. `saleEnds` is an ISO date. |
+| `variants` | Editions: `[{ "label", "format", "price", "prices", "priceId", "paymentLink" }]`. `variantLabel` names the base edition. |
+| `sample` or `samplePages` | A PDF (or single image) URL, or a list of page images, for "Read a sample". Put them in `dist/assets/samples/`. |
+| `reviews` | Per-title quotes shown in quick view. |
+| `includes` | For bundles: ids of the included titles. |
 
-## Deploy the cart checkout endpoint (optional)
+## Deploy the Worker (optional but recommended)
 
-`checkout/worker.js` is a dependency-free Cloudflare Worker that creates one Stripe Checkout Session for the Price IDs in the cart.
+1. `npm i -g wrangler`, then `wrangler login`.
+2. In `checkout/wrangler.toml` set `SUCCESS_URL`, `CANCEL_URL`, `ALLOWED_ORIGINS`, `FROM_EMAIL`, `CONTACT_EMAIL`. Create the bucket with `wrangler r2 bucket create marufi-files` and upload your files to it. Optionally create the KV namespace for notify-me and gifts.
+3. From `checkout/`, set secrets: `wrangler secret put STRIPE_SECRET_KEY`, `wrangler secret put DOWNLOAD_SECRET` (any long random string), `wrangler secret put RESEND_API_KEY` (for e-mail, from resend.com), `wrangler secret put ADMIN_TOKEN` (for announcements).
+4. `wrangler deploy`, then put the Worker URL in `guides.json` as `checkoutEndpoint`.
+5. In Stripe, add metadata `file` to every product with the R2 object key of its download.
 
-1. Install Wrangler (`npm i -g wrangler`) and sign in with `wrangler login`.
-2. In `checkout/wrangler.toml`, set `SUCCESS_URL`, `CANCEL_URL`, and `ALLOWED_ORIGINS` to your real domain. Optionally list the Price IDs you sell in `ALLOWED_PRICES`.
-3. From the `checkout/` folder run `wrangler secret put STRIPE_SECRET_KEY` and paste your Stripe secret key, then `wrangler deploy`.
-4. Put the Worker URL in `dist/guides.json` as `checkoutEndpoint`.
-
-The secret key never leaves the Worker. The site only ever sends Price IDs to it.
+To e-mail every buyer of a title about an update, POST to `<worker>/announce` with header `Authorization: Bearer <ADMIN_TOKEN>` and body `{ "priceId": "price_...", "subject": "...", "message": "..." }`.
 
 ## Preview locally
 
-Open the site through an HTTP server; opening `index.html` as a file prevents the catalog from loading. For example, run `python3 -m http.server 8765 -d dist` and visit `http://localhost:8765/`.
+Serve the site over HTTP; opening `index.html` as a file blocks the catalog. For example `python3 -m http.server 8765 -d dist` then open `http://localhost:8765/`.
 
 ## Let Codex and Claude work together
 

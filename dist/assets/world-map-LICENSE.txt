@@ -1,0 +1,1 @@
+world-map.svg is derived from "World map - low resolution.svg" by Al MacDonald (hyper-metrix.com), Wikimedia Commons, CC BY-SA 3.0. Styling attributes were removed; geometry is unchanged.

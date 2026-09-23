@@ -3,8 +3,23 @@ main = "worker.js"
 compatibility_date = "2026-01-01"
 
 [vars]
-SUCCESS_URL = "https://your-domain.com/thank-you.html"
+SUCCESS_URL = "https://your-domain.com/thank-you.html?session_id={CHECKOUT_SESSION_ID}"
 CANCEL_URL = "https://your-domain.com/#guides"
 ALLOWED_ORIGINS = "https://your-domain.com,https://www.your-domain.com"
+DOWNLOAD_HOURS = "72"
+FROM_EMAIL = "Marufi Digital <orders@your-domain.com>"
+CONTACT_EMAIL = "hello@your-domain.com"
 # ALLOWED_PRICES = "price_123,price_456"
-# Set the secret with: wrangler secret put STRIPE_SECRET_KEY
+
+# Secrets, set with `wrangler secret put NAME`:
+#   STRIPE_SECRET_KEY, DOWNLOAD_SECRET, RESEND_API_KEY (optional), ADMIN_TOKEN (for /announce)
+
+# Purchased files live in this R2 bucket. Create it with `wrangler r2 bucket create marufi-files`.
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "marufi-files"
+
+# Optional KV store for "notify me" requests and gift bookkeeping. Create with `wrangler kv namespace create NOTIFY`.
+# [[kv_namespaces]]
+# binding = "NOTIFY"
+# id = "paste-the-id-here"
