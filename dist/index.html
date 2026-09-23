@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#10283a" />
-    <meta name="description" content="Digital guides organized by country and state, from Marufi Digital." />
-    <title>Marufi Digital | Guides by place</title>
+    <meta name="theme-color" content="#102b32" />
+    <meta name="description" content="Discover digital field guides organized by country and state. Find your place with Marufi Digital." />
+    <title>Marufi Digital — A clearer way to explore</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
     <script src="site.js" defer></script>
@@ -13,44 +13,57 @@
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
-    <div class="announcement">A growing library of digital guides, organized by place</div>
+    <div class="announcement">
+      <span class="announcement-mark" aria-hidden="true"></span>
+      <span>Independent digital field guides, organized by place</span>
+      <span class="announcement-end" aria-hidden="true">COUNTRY / STATE / EXPLORE</span>
+    </div>
     <header class="site-header">
       <a class="brand" href="#top" aria-label="Marufi Digital home">
         <span class="brand-mark" aria-hidden="true">M<span class="brand-dot">.</span></span>
         <span class="brand-name">MARUFI <span>DIGITAL</span></span>
       </a>
       <nav aria-label="Main navigation">
-        <a href="#guides">Guides</a>
+        <a href="#guides">The guides</a>
         <a href="#approach">Our approach</a>
-        <a class="nav-shop" href="#guides" id="nav-shop">Explore the collection <span aria-hidden="true">↓</span></a>
+        <a class="nav-shop" href="#guides" id="nav-shop">Explore collection <span aria-hidden="true">↗</span></a>
       </nav>
     </header>
 
     <main id="main" tabindex="-1">
       <section class="hero" id="top" aria-labelledby="hero-title">
-        <div class="hero-copy">
-          <div class="eyebrow"><span class="eyebrow-line"></span> A clearer way to explore</div>
-          <h1 id="hero-title">Go further.<br /><span class="accent">Know more.</span></h1>
-          <p>Discover digital guides for the countries and states you care about. Find your place, get the details, and move forward with confidence.</p>
-          <div class="hero-actions">
-            <a class="primary-button" href="#guides">Explore guides <span aria-hidden="true">↓</span></a>
-            <span class="hero-note">Organized by country &amp; state</span>
+        <div class="hero-main">
+          <div class="hero-copy">
+            <div class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> THE WORLD, A LITTLE CLOSER</div>
+            <h1 id="hero-title">See a place <em>more clearly.</em></h1>
+            <p>Digital guides to the countries and states on your mind. Find the place, get the details, and explore with a little more confidence.</p>
+            <div class="hero-actions">
+              <a class="primary-button" href="#guides">Explore the guides <span aria-hidden="true">↗</span></a>
+              <a class="hero-secondary" href="#approach">How it works <span aria-hidden="true">↓</span></a>
+            </div>
+          </div>
+          <div class="hero-visual">
+            <picture>
+              <source media="(max-width: 700px)" srcset="assets/travel-planning-800.webp" type="image/webp" />
+              <img src="assets/travel-planning.webp" alt="A map and notebook by a window overlooking mountains and water" width="1536" height="1024" fetchpriority="high" />
+            </picture>
+            <div class="photo-index" aria-hidden="true"><span>FIELD NOTES</span><span>001 / 001</span></div>
+            <div class="photo-caption" aria-hidden="true"><span>LOOK CLOSER.</span><span>GO FURTHER.</span></div>
           </div>
         </div>
-        <div class="hero-visual">
-          <picture>
-            <source media="(max-width: 700px)" srcset="assets/travel-planning-800.webp" type="image/webp" />
-            <img src="assets/travel-planning.webp" alt="A map and notebook beside a window overlooking a landscape" width="1536" height="1024" fetchpriority="high" />
-          </picture>
-          <div class="image-label" aria-hidden="true"><span>01 / FIELD NOTES</span><span>CURIOUS BY NATURE</span></div>
+        <div class="hero-rail" aria-hidden="true">
+          <span>AN ATLAS FOR THE CURIOUS</span>
+          <span class="rail-line"></span>
+          <span>COUNTRY BY COUNTRY &nbsp;·&nbsp; STATE BY STATE</span>
         </div>
       </section>
 
       <section class="collection-section" id="guides" aria-labelledby="collection-title">
+        <div class="section-index"><span>01 / THE COLLECTION</span><span>FIND YOUR PLACE</span></div>
         <div class="section-head">
           <div>
-            <div class="eyebrow eyebrow-dark"><span class="eyebrow-line"></span> The collection</div>
-            <h2 id="collection-title">Find a guide for<br /><span class="accent">your next place.</span></h2>
+            <div class="eyebrow eyebrow-dark"><span class="eyebrow-line" aria-hidden="true"></span> A PLACE TO BEGIN</div>
+            <h2 id="collection-title">Choose the place. <em>Find your perspective.</em></h2>
           </div>
           <p>Browse by country and state. When you choose a guide, checkout opens securely in the Marufi Digital Stan store.</p>
         </div>
@@ -68,28 +81,44 @@
         <p id="guide-count" class="sr-only" aria-live="polite"></p>
         <div id="guide-list" class="guide-grid"></div>
         <div id="catalog-message" class="catalog-message">
-          <div class="message-symbol" aria-hidden="true">✳</div>
-          <h3>The library is taking shape.</h3>
-          <p>Guides will appear here as they are added to the collection.</p>
+          <div class="message-symbol" aria-hidden="true">◆</div>
+          <div class="message-copy">
+            <span class="message-overline">THE COLLECTION / IN PROGRESS</span>
+            <h3>The library is taking shape.</h3>
+            <p>Guides will appear here as they are added to the collection.</p>
+          </div>
+          <span class="message-corner" aria-hidden="true">M/D</span>
         </div>
       </section>
 
       <section class="approach-section" id="approach" aria-labelledby="approach-title">
-        <div class="approach-intro">
-          <div class="eyebrow"><span class="eyebrow-line"></span> Made for the curious</div>
-          <h2 id="approach-title">One place at a time.<br /><span class="accent">All in one place.</span></h2>
+        <div class="section-index section-index-light"><span>02 / OUR APPROACH</span><span>MADE FOR THE CURIOUS</span></div>
+        <div class="approach-grid">
+          <div class="approach-intro">
+            <h2 id="approach-title">From somewhere in mind <em>to something in hand.</em></h2>
+          </div>
+          <div class="approach-content">
+            <p>Finding the right information should feel simple. Our collection brings place guides together in one clear country and state directory, so you can get to the place that matters to you.</p>
+            <a href="#guides">See the guide library <span aria-hidden="true">↗</span></a>
+          </div>
         </div>
-        <div class="approach-content">
-          <p>Finding the right information should feel simple. Our collection brings place guides together in a clear country and state directory, so you can get to the place that matters to you.</p>
-          <a href="#guides">See the guide library <span aria-hidden="true">↑</span></a>
+        <div class="approach-steps" aria-label="How the guide library works">
+          <div><span>01</span><strong>Find your place</strong><p>Search the country or state that interests you.</p></div>
+          <div><span>02</span><strong>Choose a guide</strong><p>See what each digital guide covers.</p></div>
+          <div><span>03</span><strong>Open on Stan</strong><p>Checkout securely in our Stan store.</p></div>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
-      <div class="footer-brand">MARUFI <span>DIGITAL</span><span class="brand-dot">.</span></div>
-      <p>Digital guides for wherever curiosity leads.</p>
-      <a href="#top">Back to top <span aria-hidden="true">↑</span></a>
+      <div class="footer-top">
+        <div class="footer-brand">MARUFI <span>DIGITAL</span><span class="brand-dot">.</span></div>
+        <p>For wherever curiosity leads.</p>
+      </div>
+      <div class="footer-bottom">
+        <span>INDEPENDENT DIGITAL FIELD GUIDES</span>
+        <a href="#top">Back to top <span aria-hidden="true">↑</span></a>
+      </div>
     </footer>
   </body>
 </html>
