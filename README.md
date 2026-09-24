@@ -134,6 +134,10 @@ The home page uses GSAP 3.15 with ScrollTrigger and Lenis smooth scrolling, load
 
 To try the Worker locally without deploying: `node checkout/dev-server.mjs` starts it on `http://localhost:8787` with in-memory storage (password `letmein`, override with `ADMIN_PASSWORD=...`). Stripe and e-mail calls need real keys in the environment; everything else works offline.
 
+## Live site on GitHub Pages
+
+Every push to `main` publishes `dist/` to **https://aliakrammarufi.github.io/guide-01/** through `.github/workflows/pages.yml` (about a minute). The admin is at `/guide-01/admin/`, the kind pages at `/guide-01/travel-guides/` and so on. Set `siteUrl` in `guides.json` to that address (or your own domain once you point one at Pages) so structured data and the sitemap use it.
+
 ## Preview locally
 
 Serve the site over HTTP; opening `index.html` as a file blocks the catalog. For example `python3 -m http.server 8765 -d dist` then open `http://localhost:8765/`.
