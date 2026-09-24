@@ -183,9 +183,10 @@ main { counter-reset: section; }
 .section-head-stack { grid-template-columns: 1fr; align-items: start; margin-bottom: 0; }
 
 /* ---------- Reveal ---------- */
-.reveal { opacity: 0; transform: translateY(18px); transition: opacity .8s var(--ease-out), transform .9s var(--ease-out); }
-.reveal.is-visible { opacity: 1; transform: none; }
-.reveal-ready .hero .reveal:nth-child(2) { transition-delay: .15s; }
+/* .reveal marks elements that get a gentle entrance from Motion (site.js). Nothing is hidden by CSS,
+   so the page reads fully with JavaScript off, when the library fails to load, or under reduced motion. */
+.reveal { will-change: auto; }
+[data-motion] { backface-visibility: hidden; }
 
 /* ---------- Collection ---------- */
 .catalog-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; padding: 1.25rem 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
@@ -835,6 +836,5 @@ main { counter-reset: section; }
   .atlas-map .pin-halo { animation: none; opacity: .25; }
   .button:hover, .guide-card:hover { transform: none; }
   .marquee-track { animation: none; flex-wrap: wrap; width: auto; }
-  .reveal { opacity: 1; transform: none; transition: none; }
   .cart-count.is-bumped { animation: none; }
 }

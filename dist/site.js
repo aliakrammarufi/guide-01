@@ -777,7 +777,7 @@ function buildCard(guide) {
 }
 
 function buildFeatured(guide) {
-  const block = el('article', 'featured-card reveal is-visible');
+  const block = el('article', 'featured-card');
   block.setAttribute('aria-label', `Featured: ${guide.title}`);
   const cover = el('button', 'featured-cover');
   cover.type = 'button';
@@ -830,10 +830,17 @@ function renderGuides(guides, filtering) {
     return;
   }
   for (const guide of rest) list.append(buildCard(guide));
+  // Entrance for the first render only; re-renders from search and filters stay instant so typing never flickers.
+  if (!catalogAnimated) {
+    catalogAnimated = true;
+    if (featured) revealOnView(featuredBox.firstElementChild, { y: 16, amount: 0.15 });
+    revealBatch($$('.guide-card', list));
+  }
   renderCart();
   renderSaved();
   renderCompareBar();
 }
+let catalogAnimated = false;
 
 function setType(type) {
   activeType = type;
@@ -1393,6 +1400,7 @@ function renderZones(zones) {
     card.append(visual, body);
     track.append(card);
   });
+  revealBatch($$('.zone', track), { y: 12, step: 0.07, max: 5 });
   const scroller = $('#zones-track');
   $('#zones-prev').addEventListener('click', () => scroller.scrollBy({ left: -scroller.clientWidth * 0.8, behavior: 'smooth' }));
   $('#zones-next').addEventListener('click', () => scroller.scrollBy({ left: scroller.clientWidth * 0.8, behavior: 'smooth' }));
@@ -1569,17 +1577,54 @@ if ('IntersectionObserver' in window) {
   new IntersectionObserver(([entry]) => {
     masthead.classList.toggle('is-stuck', !entry.isIntersecting);
   }, { threshold: 0 }).observe(topbar);
+}
 
-  const revealer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('is-visible');
-        revealer.unobserve(entry.target);
-      }
-    }
-  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.1 });
-  document.documentElement.classList.add('reveal-ready');
-  for (const node of $$('.reveal')) revealer.observe(node);
-} else {
-  for (const node of $$('.reveal')) node.classList.add('is-visible');
+/* ---------- Scroll entrances (Motion, https://motion.dev) ----------
+   Progressive enhancement: elements are fully visible until this runs, and it only runs when the
+   pinned Motion bundle loaded and the visitor has not asked for reduced motion. Each element animates
+   once, on first entry into view, using opacity and transform only. */
+const motionLib = window.Motion && typeof window.Motion.inView === 'function' && typeof window.Motion.animate === 'function' ? window.Motion : null;
+const motionOn = Boolean(motionLib) && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const EASE_OUT = [0.16, 1, 0.3, 1];
+
+function revealOnView(node, { y = 16, scale = 1, delay = 0, duration = 0.7, amount = 0.2 } = {}) {
+  if (!motionOn || !node || node.dataset.motion) return;
+  node.dataset.motion = 'pending';
+  const from = `translateY(${y}px)${scale !== 1 ? ` scale(${scale})` : ''}`;
+  node.style.opacity = '0';
+  node.style.transform = from;
+  try {
+    motionLib.inView(node, () => {
+      node.dataset.motion = 'playing';
+      const controls = motionLib.animate(node, { opacity: [0, 1], transform: [from, 'translateY(0px) scale(1)'] }, { duration, delay, ease: EASE_OUT });
+      // Once finished, hand control back to the stylesheet so hover lifts and other CSS transforms work again.
+      const done = () => {
+        if (controls && typeof controls.stop === 'function') controls.stop();
+        node.style.opacity = '';
+        node.style.transform = '';
+        requestAnimationFrame(() => { node.style.opacity = ''; node.style.transform = ''; });
+        node.dataset.motion = 'done';
+      };
+      (controls && controls.finished ? controls.finished : Promise.resolve()).then(done, done);
+    }, { amount, margin: '0px 0px -8% 0px' });
+  } catch {
+    node.style.opacity = '';
+    node.style.transform = '';
+    delete node.dataset.motion;
+  }
+}
+
+/** Staggers a batch of siblings (cards) that enter together; elements further down the batch wait a little longer. */
+function revealBatch(nodes, { y = 14, step = 0.06, max = 8 } = {}) {
+  nodes.forEach((node, index) => revealOnView(node, { y, delay: Math.min(index, max) * step, amount: 0.15 }));
+}
+
+if (motionOn) {
+  // Hero: copy rises softly, the plate settles in a beat later.
+  revealOnView($('.hero-copy'), { y: 18, duration: 0.8, amount: 0.1 });
+  revealOnView($('#hero-plate'), { y: 12, scale: 0.98, delay: 0.12, duration: 0.9, amount: 0.1 });
+  // Section headings and other marked blocks.
+  for (const node of $$('.reveal')) if (!node.dataset.motion) revealOnView(node, { y: 16 });
+  // Static sample cards, staggered.
+  revealBatch($$('.sample-grid .guide-card'));
 }
