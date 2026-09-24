@@ -19,12 +19,12 @@ const store = { name: 'Marufi Digital', currency: 'CAD', currencies: [], endpoin
    Every title belongs to one category. The defaults below cover what the store sells today; guides.json may
    add or rename categories through a `categories` array of { key, name, single, format, blurb, icon }. */
 const DEFAULT_CATEGORIES = [
-  { key: 'Guide', name: 'Travel guides', single: 'Travel guide', format: 'Digital guide', icon: 'compass', blurb: 'One place, read in one sitting: where to stay, what to skip, and how to move around.' },
-  { key: 'Book', name: 'Books', single: 'Book', format: 'Digital book', icon: 'book', blurb: 'Longer reads on a country or a region, for the flight over or the year after.' },
-  { key: 'Immigration', name: 'Immigration and settling in', single: 'Immigration help', format: 'Digital help guide', icon: 'passport', blurb: 'Permits, paperwork, housing, banking, and the first weeks, in the order you will meet them.' },
-  { key: 'Food', name: 'Restaurant and food lists', single: 'Restaurant list', format: 'Digital list', icon: 'fork', blurb: 'Short, curated lists of where to eat, what to order, and when to go.' },
-  { key: 'Checklist', name: 'Checklists and templates', single: 'Checklist', format: 'Digital checklist', icon: 'check', blurb: 'Packing lists, moving timelines, budget sheets, and the templates that save a week.' },
-  { key: 'Bundle', name: 'Bundles', single: 'Bundle', format: '', icon: 'layers', blurb: 'Several titles for one place, priced together.' }
+  { key: 'Guide', slug: 'travel-guides', name: 'Travel guides', single: 'Travel guide', format: 'Digital guide', icon: 'compass', blurb: 'One place, read in one sitting: where to stay, what to skip, and how to move around.' },
+  { key: 'Book', slug: 'books', name: 'Books', single: 'Book', format: 'Digital book', icon: 'book', blurb: 'Longer reads on a country or a region, for the flight over or the year after.' },
+  { key: 'Immigration', slug: 'immigration', name: 'Immigration and settling in', single: 'Immigration help', format: 'Digital help guide', icon: 'passport', blurb: 'Permits, paperwork, housing, banking, and the first weeks, in the order you will meet them.' },
+  { key: 'Food', slug: 'food', name: 'Restaurant and food lists', single: 'Restaurant list', format: 'Digital list', icon: 'fork', blurb: 'Short, curated lists of where to eat, what to order, and when to go.' },
+  { key: 'Checklist', slug: 'checklists', name: 'Checklists and templates', single: 'Checklist', format: 'Digital checklist', icon: 'check', blurb: 'Packing lists, moving timelines, budget sheets, and the templates that save a week.' },
+  { key: 'Bundle', slug: 'bundles', name: 'Bundles', single: 'Bundle', format: '', icon: 'layers', blurb: 'Several titles for one place, priced together.' }
 ];
 const CATEGORY_ICONS = {
   compass: '<circle cx="12" cy="12" r="9.5"/><path d="M15.5 8.5 13.6 13.6 8.5 15.5l1.9-5.1z"/>',
@@ -36,8 +36,8 @@ const CATEGORY_ICONS = {
 };
 function setCategories(list) {
   const custom = Array.isArray(list) ? list.filter((c) => c && typeof c.key === 'string' && /^[A-Za-z][\w-]{0,30}$/.test(c.key) && typeof c.name === 'string' && c.name.trim()) : [];
-  const merged = DEFAULT_CATEGORIES.map((d) => ({ ...d, ...(custom.find((c) => c.key.toLowerCase() === d.key.toLowerCase()) || {}), key: d.key }));
-  for (const c of custom) if (!merged.some((m) => m.key.toLowerCase() === c.key.toLowerCase())) merged.push({ single: c.name.replace(/s$/, ''), format: 'Digital download', icon: 'layers', blurb: '', ...c });
+  const merged = DEFAULT_CATEGORIES.map((d) => ({ ...d, ...(custom.find((c) => c.key.toLowerCase() === d.key.toLowerCase()) || {}), key: d.key, slug: d.slug }));
+  for (const c of custom) if (!merged.some((m) => m.key.toLowerCase() === c.key.toLowerCase())) merged.push({ single: c.name.replace(/s$/, ''), format: 'Digital download', icon: 'layers', blurb: '', slug: slugify(c.name), ...c });
   store.categories = merged.map((c) => ({ ...c, name: String(c.name).trim(), single: String(c.single || c.name).trim(), format: String(c.format || ''), blurb: String(c.blurb || ''), icon: CATEGORY_ICONS[c.icon] ? c.icon : 'layers', hidden: c.hidden === true }));
 }
 setCategories([]);
@@ -1409,23 +1409,15 @@ function renderNeeds() {
   for (const c of visible) {
     const count = catalog.filter((g) => g.type === c.key).length;
     const places = new Set(catalog.filter((g) => g.type === c.key).map((g) => g.country).filter(Boolean));
-    const card = el('button', `need${count ? '' : ' is-empty'}`);
-    card.type = 'button';
+    const card = el('a', `need${count ? '' : ' is-empty'}`);
+    card.href = `${c.slug}/`;
     card.dataset.category = c.key;
     const top = el('div', 'need-top');
     top.append(categoryIcon(c.icon), el('span', 'need-count', count ? `${count} ${count === 1 ? 'title' : 'titles'}${places.size ? ` · ${places.size} ${places.size === 1 ? 'country' : 'countries'}` : ''}` : 'Coming soon'));
     const foot = el('div', 'need-foot');
-    foot.append(el('span', null, count ? `Browse ${c.name.toLowerCase()} →` : 'Ask for a place →'), el('span', 'pill-soft', c.format || 'Digital'));
+    foot.append(el('span', null, `Open ${c.name.toLowerCase()} →`), el('span', 'pill-soft', c.format || 'Digital'));
     card.append(top, el('h3', null, c.name), el('p', null, c.blurb), foot);
-    card.setAttribute('aria-label', count ? `Browse ${c.name}` : `${c.name}: coming soon. Ask for a place.`);
-    card.addEventListener('click', () => {
-      if (!count) { scrollToSection('#notify-form'); setTimeout(() => $('#notify-place')?.focus({ preventScroll: true }), 600); return; }
-      search.value = '';
-      countryFilter.value = '';
-      activeRegion = '';
-      setType(c.key);
-      scrollToSection('#guides');
-    });
+    card.setAttribute('aria-label', count ? `Open ${c.name}` : `${c.name}: coming soon`);
     grid.append(card);
   }
   if (!setupNeedsScene(grid)) revealBatch($$('.need', grid), { y: 60, rotate: 4, step: 0.08 });
@@ -1661,6 +1653,10 @@ fetch('guides.json', { cache: 'no-cache' })
     if (activeType) for (const chip of typeFilter.querySelectorAll('.chip')) chip.classList.toggle('is-active', chip.dataset.type === activeType);
     update();
     if ([...params.keys()].some((k) => ['country', 'state', 'type', 'q'].includes(k))) setTimeout(() => $('#guides').scrollIntoView(), 50);
+    // Kind pages link back here for the quick view (?open=<id>) and the cart (#cart).
+    const wanted = params.get('open') ? catalog.find((guide) => guide.id === params.get('open')) : null;
+    if (wanted) setTimeout(() => { $('#guides').scrollIntoView(); openQuick(wanted); }, 80);
+    if (location.hash === '#cart') setTimeout(openCart, 80);
     renderAtlas();
     renumberGhosts();
     injectStructuredData();

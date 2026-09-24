@@ -79,6 +79,10 @@ Open `https://your-domain.com/admin/` (locally, `http://localhost:8765/admin/`).
 
 **Password recovery.** "Forgot password?" on the sign-in screen e-mails a reset code to the Worker's `CONTACT_EMAIL` when e-mail is configured. Without e-mail, reset by running `wrangler secret put ADMIN_PASSWORD` and deleting the KV key `auth:password`.
 
+## Kind pages
+
+Every kind of help has its own page: `/travel-guides/`, `/books/`, `/immigration/`, `/food/`, `/checklists/` (and `/bundles/` once a bundle exists; custom kinds get a slug from their name). The "Browse by need" tiles link to them. Each page is a small static shell written by `node scripts/build-pages.mjs` and filled in the browser by `dist/kind.js` from the same catalog as the home page, so publishing from the admin updates them instantly with no rebuild. They have a search box, a country filter, Buy and Add to cart (the cart is shared with the home page), free help filed under that kind, and links to the other kinds. Rebuild only when you rename a kind or add one in Store settings.
+
 ## Country landing pages
 
 `node scripts/build-pages.mjs` writes one static page per country (`dist/canada/index.html` and so on) with the state list, the titles, and Product structured data, plus `sitemap.xml` and `robots.txt` using the `siteUrl` from the catalog. It reads the live catalog from the Worker when `checkoutEndpoint` is set. Run it after publishing new countries and push the result. Turn on "Link to country landing pages" in Store settings so the storefront links to them. Drafts and unreleased scheduled titles are excluded.
