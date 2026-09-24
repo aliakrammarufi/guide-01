@@ -211,7 +211,7 @@
       if (count) count.textContent = all.length ? `${shown.length} of ${all.length} ${all.length === 1 ? 'title' : 'titles'}` : '';
       if (empty) {
         empty.hidden = shown.length > 0;
-        const h = empty.querySelector('h3'); const p = empty.querySelector('p');
+        const h = empty.querySelector('h2, h3'); const p = empty.querySelector('p');
         if (!all.length) { h.textContent = `The first ${cat.name.toLowerCase()} are being written.`; p.textContent = 'Tell us the place you need and we will write to you when it is ready.'; }
         else { h.textContent = 'Nothing matches your search.'; p.textContent = 'Try a different place or a different word.'; }
       }

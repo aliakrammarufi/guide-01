@@ -12,13 +12,15 @@
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Travel guides by country and state · Marufi Digital" />
     <meta property="og:description" content="One place, read in one sitting: where to stay, what to skip, and how to move around. Filed by country and state as each one is published. Secure checkout with Stripe, instant download." />
-    <meta property="og:image" content="https://aliakrammarufi.github.io/guide-01/assets/travel-planning.webp" />
+    <meta property="og:image" content="https://aliakrammarufi.github.io/guide-01/assets/share.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../styles.css" />
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"CollectionPage","name":"Travel guides by country and state · Marufi Digital","description":"One place, read in one sitting: where to stay, what to skip, and how to move around. Filed by country and state as each one is published. Secure checkout with Stripe, instant download.","url":"https://aliakrammarufi.github.io/guide-01/travel-guides/","isPartOf":{"@type":"WebSite","name":"Marufi Digital","url":"https://aliakrammarufi.github.io/guide-01"}}</script>
+    <script src="../page.js" defer></script>
     <script src="../kind.js" defer></script>
   </head>
   <body class="kind-page">
@@ -87,12 +89,43 @@
         </div>
       </section>
     </main>
-    <footer class="site-footer">
+    <footer class="site-footer sub-footer">
+      <div class="footer-grid wrap">
+        <div class="footer-brand">
+          <div class="footer-wordmark">Marufi <em>Digital</em></div>
+          <p>Guides, books, immigration help, restaurant lists, and checklists, organized by country and state. Payments are processed securely by Stripe.</p>
+          <form class="subscribe-form" aria-label="Newsletter" hidden>
+            <label class="sr-only" for="subscribe-email-kind-travel-guides">E-mail for new titles and free help</label>
+            <div class="subscribe-row"><input id="subscribe-email-kind-travel-guides" type="email" placeholder="Your e-mail for new titles and free help" autocomplete="email" required /><button type="submit" class="button button-sm">Subscribe</button></div>
+            <p class="subscribe-note hint">One e-mail when something new is worth your time. Unsubscribe in one click.</p>
+          </form>
+        </div>
+        <nav class="footer-col" aria-label="Explore">
+          <h2>Explore</h2>
+          <a href="../#needs">Browse by need</a>
+          <a href="../#guides">The library</a>
+          <a href="../#atlas">The atlas</a>
+          <a href="../articles/">Journal</a>
+          <a href="../gift/">Gift cards</a>
+        </nav>
+        <nav class="footer-col" aria-label="Support">
+          <h2>Support</h2>
+          <a href="../contact/">Contact</a>
+          <a href="../account/">My purchases</a>
+          <a href="../#faq">Questions</a>
+          <a href="../#footer">Resend my download</a>
+        </nav>
+        <nav class="footer-col" aria-label="Legal">
+          <h2>Legal</h2>
+          <a href="../privacy/">Privacy policy</a>
+          <a href="../terms/">Terms of sale</a>
+        </nav>
+      </div>
       <div class="footer-bottom wrap">
-        <span>© 2026 Marufi Digital</span>
-        <span class="footer-legal"><a href="../contact/">Contact</a> · <a href="../privacy/">Privacy</a> · <a href="../terms/">Terms</a></span>
+        <span>© <span data-year>2026</span> <span data-store-name>Marufi Digital</span> · Independent publisher</span>
         <a href="../">Back to the library <span aria-hidden="true">→</span></a>
       </div>
     </footer>
+
   </body>
 </html>

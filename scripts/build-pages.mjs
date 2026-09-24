@@ -43,6 +43,9 @@ if (endpoint) {
 }
 
 const siteUrl = String(catalog.siteUrl || '').replace(/\/+$/, '');
+// Absolute path of the site on its host ("/guide-01/" on GitHub Pages project sites, "/" on a domain); used by 404.html, which is served at any URL.
+let siteBase = './';
+try { if (siteUrl) siteBase = new URL(siteUrl).pathname.replace(/\/?$/, '/'); } catch { siteBase = './'; }
 const storeName = catalog.storeName || 'Marufi Digital';
 const currency = catalog.currency || 'CAD';
 const slug = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -108,13 +111,15 @@ function page(country) {
     <meta property="og:type" content="website" />
     <meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
-    ${siteUrl ? `<meta property="og:image" content="${esc(siteUrl)}/assets/travel-planning.webp" />` : ''}
+    <meta property="og:image" content="${siteUrl ? `${esc(siteUrl)}/assets/share.jpg` : '../assets/share.jpg'}" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../styles.css" />
     <script type="application/ld+json">${JSON.stringify(jsonld)}</script>
+    <script src="../page.js" defer></script>
     <style>
       .country-hero { padding: clamp(3rem, 6vw, 5rem) var(--gutter) clamp(2rem, 4vw, 3rem); background: var(--paper); background-image: var(--contour); background-size: 420px 420px; }
       .country-hero h1 { max-width: 14ch; margin: 1.2rem 0 1rem; font-size: clamp(2.6rem, 1.4rem + 4.5vw, 5.5rem); line-height: .98; font-weight: 300; }
@@ -134,11 +139,12 @@ function page(country) {
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="masthead">
       <div class="masthead-row wrap">
-        <a class="wordmark" href="../" aria-label="${esc(storeName)} home">Marufi <em>Digital</em><small aria-hidden="true">Guides by place</small></a>
+        <a class="wordmark" href="../" aria-label="${esc(storeName)} home">Marufi <em>Digital</em><small aria-hidden="true">Help by place</small></a>
         <nav class="site-nav" aria-label="Main navigation">
-          <a href="../#guides">Collection</a>
+          <a href="../#needs">Browse</a>
           <a href="../#atlas">Atlas</a>
           <a href="../#faq">Questions</a>
+          <a href="../account/">Account</a>
           <a class="nav-shop" href="../?country=${encodeURIComponent(country)}#guides">Shop ${esc(country)} <span aria-hidden="true">→</span></a>
         </nav>
       </div>
@@ -165,12 +171,7 @@ function page(country) {
         </div>
       </section>
     </main>
-    <footer class="site-footer">
-      <div class="footer-bottom wrap">
-        <span>© ${new Date().getFullYear()} ${esc(storeName)}</span>
-        <a href="../">Back to the collection <span aria-hidden="true">→</span></a>
-      </div>
-    </footer>
+${footerHtml('../', `country-${slug(country)}`)}
   </body>
 </html>
 `;
@@ -206,13 +207,15 @@ function kindPage(cat) {
     <meta property="og:type" content="website" />
     <meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
-    ${siteUrl ? `<meta property="og:image" content="${esc(siteUrl)}/assets/travel-planning.webp" />` : ''}
+    <meta property="og:image" content="${siteUrl ? `${esc(siteUrl)}/assets/share.jpg` : '../assets/share.jpg'}" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../styles.css" />
     <script type="application/ld+json">${JSON.stringify(jsonld)}</script>
+    <script src="../page.js" defer></script>
     <script src="../kind.js" defer></script>
   </head>
   <body class="kind-page">
@@ -281,13 +284,7 @@ function kindPage(cat) {
         </div>
       </section>
     </main>
-    <footer class="site-footer">
-      <div class="footer-bottom wrap">
-        <span>© ${new Date().getFullYear()} ${esc(storeName)}</span>
-        <span class="footer-legal"><a href="../contact/">Contact</a> · <a href="../privacy/">Privacy</a> · <a href="../terms/">Terms</a></span>
-        <a href="../">Back to the library <span aria-hidden="true">→</span></a>
-      </div>
-    </footer>
+${footerHtml('../', `kind-${cat.slug}`)}
   </body>
 </html>
 `;
@@ -302,6 +299,44 @@ for (const cat of kindPages) {
 // Secondary pages: privacy, terms, contact, purchase history, gift cards, articles, 404. All share one shell and
 // are filled by page.js at runtime (store name, contact e-mail, forms, articles), so they never go stale.
 const contactEmail = String(catalog.contactEmail || '').trim();
+function footerHtml(base, page = 'page') { return `    <footer class="site-footer sub-footer">
+      <div class="footer-grid wrap">
+        <div class="footer-brand">
+          <div class="footer-wordmark">Marufi <em>Digital</em></div>
+          <p>Guides, books, immigration help, restaurant lists, and checklists, organized by country and state. Payments are processed securely by Stripe.</p>
+          <form class="subscribe-form" aria-label="Newsletter" hidden>
+            <label class="sr-only" for="subscribe-email-${esc(page)}">E-mail for new titles and free help</label>
+            <div class="subscribe-row"><input id="subscribe-email-${esc(page)}" type="email" placeholder="Your e-mail for new titles and free help" autocomplete="email" required /><button type="submit" class="button button-sm">Subscribe</button></div>
+            <p class="subscribe-note hint">One e-mail when something new is worth your time. Unsubscribe in one click.</p>
+          </form>
+        </div>
+        <nav class="footer-col" aria-label="Explore">
+          <h2>Explore</h2>
+          <a href="${base}#needs">Browse by need</a>
+          <a href="${base}#guides">The library</a>
+          <a href="${base}#atlas">The atlas</a>
+          <a href="${base}articles/">Journal</a>
+          <a href="${base}gift/">Gift cards</a>
+        </nav>
+        <nav class="footer-col" aria-label="Support">
+          <h2>Support</h2>
+          <a href="${base}contact/">Contact</a>
+          <a href="${base}account/">My purchases</a>
+          <a href="${base}#faq">Questions</a>
+          <a href="${base}#footer">Resend my download</a>
+        </nav>
+        <nav class="footer-col" aria-label="Legal">
+          <h2>Legal</h2>
+          <a href="${base}privacy/">Privacy policy</a>
+          <a href="${base}terms/">Terms of sale</a>
+        </nav>
+      </div>
+      <div class="footer-bottom wrap">
+        <span>© <span data-year>${new Date().getFullYear()}</span> <span data-store-name>${esc(storeName)}</span> · Independent publisher</span>
+        <a href="${base}">Back to the library <span aria-hidden="true">→</span></a>
+      </div>
+    </footer>
+`; }
 function shell({ base, page, title, description, body, article = '', canonicalPath = '' }) {
   const url = siteUrl && canonicalPath ? `${siteUrl}/${canonicalPath}` : '';
   const nav = [['#needs', 'Browse'], ['#atlas', 'Atlas'], ['articles/', 'Journal'], ['contact/', 'Contact'], ['account/', 'Account']];
@@ -343,43 +378,7 @@ function shell({ base, page, title, description, body, article = '', canonicalPa
     <main id="main" tabindex="-1">
 ${body}
     </main>
-    <footer class="site-footer sub-footer">
-      <div class="footer-grid wrap">
-        <div class="footer-brand">
-          <div class="footer-wordmark">Marufi <em>Digital</em></div>
-          <p>Guides, books, immigration help, restaurant lists, and checklists, organized by country and state. Payments are processed securely by Stripe.</p>
-          <form class="subscribe-form" aria-label="Newsletter" hidden>
-            <label class="sr-only" for="subscribe-email-${esc(page)}">E-mail for new titles and free help</label>
-            <div class="subscribe-row"><input id="subscribe-email-${esc(page)}" type="email" placeholder="Your e-mail for new titles and free help" autocomplete="email" required /><button type="submit" class="button button-sm">Subscribe</button></div>
-            <p class="subscribe-note hint">One e-mail when something new is worth your time. Unsubscribe in one click.</p>
-          </form>
-        </div>
-        <nav class="footer-col" aria-label="Explore">
-          <h2>Explore</h2>
-          <a href="${base}#needs">Browse by need</a>
-          <a href="${base}#guides">The library</a>
-          <a href="${base}#atlas">The atlas</a>
-          <a href="${base}articles/">Journal</a>
-          <a href="${base}gift/">Gift cards</a>
-        </nav>
-        <nav class="footer-col" aria-label="Support">
-          <h2>Support</h2>
-          <a href="${base}contact/">Contact</a>
-          <a href="${base}account/">My purchases</a>
-          <a href="${base}#faq">Questions</a>
-          <a href="${base}#footer">Resend my download</a>
-        </nav>
-        <nav class="footer-col" aria-label="Legal">
-          <h2>Legal</h2>
-          <a href="${base}privacy/">Privacy policy</a>
-          <a href="${base}terms/">Terms of sale</a>
-        </nav>
-      </div>
-      <div class="footer-bottom wrap">
-        <span>© <span data-year>${new Date().getFullYear()}</span> <span data-store-name>${esc(storeName)}</span> · Independent publisher</span>
-        <a href="${base}">Back to the library <span aria-hidden="true">→</span></a>
-      </div>
-    </footer>
+${footerHtml(base, page)}
   </body>
 </html>
 `;
@@ -608,7 +607,7 @@ for (const [dir, opts] of staticPages) {
   await mkdir(path.join(dist, dir), { recursive: true });
   await writeFile(path.join(dist, dir, 'index.html'), shell({ base: '../', canonicalPath: `${dir}/`, ...opts }));
 }
-await writeFile(path.join(dist, '404.html'), shell({ base: './', page: '404', title: 'Page not found', description: 'That page is not in the atlas.', body: notFoundBody }));
+await writeFile(path.join(dist, '404.html'), shell({ base: siteBase, page: '404', title: 'Page not found', description: 'That page is not in the atlas.', body: notFoundBody }));
 // Static article pages for articles already in guides.json (clean URLs); page.js also serves ?a=<slug> for new ones.
 const articles = (Array.isArray(catalog.articles) ? catalog.articles : []).filter((a) => a && a.title && a.status !== 'draft' && !(a.date && Date.parse(a.date) > Date.now()));
 const articleSlugs = [];

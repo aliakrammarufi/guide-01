@@ -97,9 +97,9 @@ Every kind of help has its own page: `/travel-guides/`, `/books/`, `/immigration
 | `/account/` | Customer account and dashboard. Passwordless: create an account or sign in with a six-digit e-mail code, then a 30-day session. Overview, downloads (fresh signed links each visit), orders, saved titles (synced with the heart button on the home page), gift cards bought or received, place requests, and profile (name, country, newsletter, close account). Needs the Worker and e-mail; locally, `dev-server.mjs` prints codes to its console. |
 | `/gift/` | Gift cards. Stripe Checkout for a chosen amount; on payment the Worker creates a single-use promotion code, e-mails it to the recipient (and the buyer), and shows it on the thank-you page. Amounts and on/off live in Store settings. |
 | `/articles/` | The journal. Articles are written in the admin (Journal view) with a small Markdown subset; the latest three appear on the home page. `/articles/?a=<slug>` works immediately; rerun the build for clean `/articles/<slug>/` URLs. |
-| `404.html` | On-brand not-found page (served automatically by GitHub Pages and Cloudflare Pages). |
+| `404.html` | On-brand not-found page (served automatically by GitHub Pages and Cloudflare Pages). Its links are absolute, based on `siteUrl`, because the host serves it at any missing path. |
 
-Every page's footer has the newsletter form (double opt-in when e-mail is configured; Newsletter view in the admin lists subscribers, exports CSV, and sends a plain-text newsletter with unsubscribe links).
+Every page (home, kind pages, country pages, and the secondary pages) shares one footer with the newsletter form (double opt-in when e-mail is configured; Newsletter view in the admin lists subscribers, exports CSV, and sends a plain-text newsletter with unsubscribe links).
 
 ## Analytics
 
