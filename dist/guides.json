@@ -199,5 +199,15 @@
     ]
   },
   "guides": [],
-  "heroVideo": null
+  "heroVideo": {
+    "src": "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",
+    "poster": "assets/travel-planning-800.webp",
+    "aspect": "4 / 5",
+    "tag": "Watch",
+    "playLabel": "Play with sound",
+    "captionLeft": "Film 01",
+    "captionRight": "Sample clip · replace with your presenter video",
+    "autoplay": true,
+    "loop": true
+  }
 }
