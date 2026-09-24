@@ -454,7 +454,7 @@ function renderSaved() {
 $('#saved-open').addEventListener('click', () => {
   setMenu(false);
   setType('saved');
-  $('#guides').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  scrollToSection('#guides');
 });
 
 /* ---------- Compare ---------- */
@@ -833,14 +833,22 @@ function renderGuides(guides, filtering) {
   // Entrance for the first render only; re-renders from search and filters stay instant so typing never flickers.
   if (!catalogAnimated) {
     catalogAnimated = true;
-    if (featured) revealOnView(featuredBox.firstElementChild, { y: 16, amount: 0.15 });
+    if (featured) revealOnView(featuredBox.firstElementChild, { y: 40, scale: 0.98 });
     revealBatch($$('.guide-card', list));
   }
+  if (motionOn) window.ScrollTrigger.refresh();
   renderCart();
   renderSaved();
   renderCompareBar();
 }
 let catalogAnimated = false;
+
+function scrollToSection(target) {
+  const node = typeof target === 'string' ? $(target) : target;
+  if (!node) return;
+  if (lenis) lenis.scrollTo(node, { offset: -80 });
+  else node.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
 
 function setType(type) {
   activeType = type;
@@ -1021,6 +1029,15 @@ async function renderAtlas() {
       pin.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); go(); } });
       layer.append(pin);
     }
+    if (motionOn) {
+      const land = [...svg.querySelectorAll('.land path')];
+      const pins = [...layer.querySelectorAll('.pin')];
+      const tl = gsapLib.timeline({ scrollTrigger: { trigger: mapBox, start: 'top 78%', once: true } });
+      tl.from(land, { opacity: 0, duration: 0.8, stagger: { each: 0.004, from: 'start' }, ease: 'power1.out', clearProps: 'opacity' }, 0)
+        .from(pins, { scale: 0, transformOrigin: 'center', duration: 0.7, ease: 'back.out(2.2)', stagger: 0.08 }, 0.9);
+      revealBatch([...countryBox.querySelectorAll('.country-tile')], { y: 30, rotate: 0, scale: 0.96, step: 0.07, duration: 0.8 });
+      window.ScrollTrigger.refresh();
+    }
   } catch {
     mapBox.replaceChildren(el('p', 'atlas-fallback', 'The map could not load. Use the country list instead.'));
   }
@@ -1068,7 +1085,7 @@ function showRegions(country, highlight) {
       all.append(arrow);
       all.addEventListener('click', () => {
         setCountry(country, name);
-        $('#guides').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        scrollToSection('#guides');
       });
       li.append(all);
     } else {
@@ -1240,6 +1257,7 @@ function applyStore(data) {
       card.append(cite);
       grid.append(card);
     }
+    revealBatch([...grid.children], { y: 36, step: 0.12 });
   }
 
   // Author
@@ -1393,14 +1411,15 @@ function renderZones(zones) {
       link.append(arrow);
       link.addEventListener('click', () => {
         setCountry(zone.country, '');
-        $('#guides').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        scrollToSection('#guides');
       });
       body.append(link);
     }
     card.append(visual, body);
     track.append(card);
   });
-  revealBatch($$('.zone', track), { y: 12, step: 0.07, max: 5 });
+  revealBatch($$('.zone', track), { y: 60, rotate: 0, scale: 0.96, step: 0.12 });
+  if (motionOn) gsapLib.from(track, { x: 120, duration: 1.4, ease: 'power3.out', clearProps: 'transform', scrollTrigger: { trigger: track, start: 'top 90%', once: true } });
   const scroller = $('#zones-track');
   $('#zones-prev').addEventListener('click', () => scroller.scrollBy({ left: -scroller.clientWidth * 0.8, behavior: 'smooth' }));
   $('#zones-next').addEventListener('click', () => scroller.scrollBy({ left: scroller.clientWidth * 0.8, behavior: 'smooth' }));
@@ -1579,52 +1598,170 @@ if ('IntersectionObserver' in window) {
   }, { threshold: 0 }).observe(topbar);
 }
 
-/* ---------- Scroll entrances (Motion, https://motion.dev) ----------
-   Progressive enhancement: elements are fully visible until this runs, and it only runs when the
-   pinned Motion bundle loaded and the visitor has not asked for reduced motion. Each element animates
-   once, on first entry into view, using opacity and transform only. */
-const motionLib = window.Motion && typeof window.Motion.inView === 'function' && typeof window.Motion.animate === 'function' ? window.Motion : null;
-const motionOn = Boolean(motionLib) && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-const EASE_OUT = [0.16, 1, 0.3, 1];
+/* ---------- Scroll animation (GSAP + ScrollTrigger + Lenis) ----------
+   Progressive enhancement: nothing is hidden by CSS. This only runs when the pinned bundles loaded and the visitor
+   has not asked for reduced motion. Entrances play once, on first entry into view, using opacity, transform, and
+   clip-path only, and hand control back to the stylesheet when they finish. Smooth scrolling is native scroll with
+   eased wheel input (Lenis); it pauses while a dialog is open and is skipped entirely under reduced motion. */
+const gsapLib = window.gsap && window.ScrollTrigger ? window.gsap : null;
+const motionOn = Boolean(gsapLib) && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SMOOTH_SCROLL = true;
+let lenis = null;
+if (motionOn) {
+  gsapLib.registerPlugin(window.ScrollTrigger);
+  gsapLib.defaults({ ease: 'power3.out', overwrite: 'auto' });
+}
+const CLEAR = 'opacity,transform,clipPath';
+const markDone = (node) => { node.dataset.motion = 'done'; };
 
-function revealOnView(node, { y = 16, scale = 1, delay = 0, duration = 0.7, amount = 0.2 } = {}) {
+/** Wraps every word of a heading in a masked box so words can slide up into view. Keeps <em> styling. */
+function splitWords(node) {
+  if (!node || node.dataset.split) return [];
+  node.dataset.split = '1';
+  const words = [];
+  const wrap = (textNode) => {
+    const parts = textNode.textContent.split(/(\s+)/);
+    const frag = document.createDocumentFragment();
+    for (const part of parts) {
+      if (!part) continue;
+      if (/^\s+$/.test(part)) { frag.append(document.createTextNode(' ')); continue; }
+      const box = el('span', 'w');
+      const inner = el('span', 'wi', part);
+      box.append(inner);
+      frag.append(box);
+      words.push(inner);
+    }
+    textNode.replaceWith(frag);
+  };
+  for (const child of [...node.childNodes]) {
+    if (child.nodeType === Node.TEXT_NODE) wrap(child);
+    else if (child.nodeType === Node.ELEMENT_NODE) for (const grand of [...child.childNodes]) if (grand.nodeType === Node.TEXT_NODE) wrap(grand);
+  }
+  return words;
+}
+
+/** One block rises and fades in when it scrolls into view. */
+function revealOnView(node, { y = 56, scale = 1, delay = 0, duration = 1.1, start = 'top 88%' } = {}) {
   if (!motionOn || !node || node.dataset.motion) return;
   node.dataset.motion = 'pending';
-  const from = `translateY(${y}px)${scale !== 1 ? ` scale(${scale})` : ''}`;
-  node.style.opacity = '0';
-  node.style.transform = from;
-  try {
-    motionLib.inView(node, () => {
-      node.dataset.motion = 'playing';
-      const controls = motionLib.animate(node, { opacity: [0, 1], transform: [from, 'translateY(0px) scale(1)'] }, { duration, delay, ease: EASE_OUT });
-      // Once finished, hand control back to the stylesheet so hover lifts and other CSS transforms work again.
-      const done = () => {
-        if (controls && typeof controls.stop === 'function') controls.stop();
-        node.style.opacity = '';
-        node.style.transform = '';
-        requestAnimationFrame(() => { node.style.opacity = ''; node.style.transform = ''; });
-        node.dataset.motion = 'done';
-      };
-      (controls && controls.finished ? controls.finished : Promise.resolve()).then(done, done);
-    }, { amount, margin: '0px 0px -8% 0px' });
-  } catch {
-    node.style.opacity = '';
-    node.style.transform = '';
-    delete node.dataset.motion;
+  gsapLib.from(node, { opacity: 0, y, scale, duration, delay, clearProps: CLEAR, scrollTrigger: { trigger: node, start, once: true, onEnter: () => { node.dataset.motion = 'playing'; } }, onComplete: () => markDone(node) });
+}
+
+/** Cards and tiles enter with depth: a slight tilt, a rise, and a stagger as each one reaches the viewport. */
+function revealBatch(nodes, { y = 70, scale = 0.94, rotate = 6, step = 0.1, duration = 1.1, start = 'top 92%' } = {}) {
+  if (!motionOn || !nodes.length) return;
+  const fresh = nodes.filter((n) => !n.dataset.motion);
+  if (!fresh.length) return;
+  for (const n of fresh) { n.dataset.motion = 'pending'; if (n.parentElement) n.parentElement.classList.add('depth'); }
+  gsapLib.set(fresh, { opacity: 0, y, scale, rotateX: rotate, transformOrigin: '50% 100%' });
+  window.ScrollTrigger.batch(fresh, {
+    start,
+    once: true,
+    onEnter: (batch) => {
+      for (const n of batch) n.dataset.motion = 'playing';
+      gsapLib.to(batch, { opacity: 1, y: 0, scale: 1, rotateX: 0, duration, stagger: step, ease: 'power4.out', clearProps: CLEAR, onComplete: () => batch.forEach(markDone) });
+    }
+  });
+}
+
+/** Headings: the rule draws across, the words slide up out of their masks, and the intro text follows. */
+function revealHeading(head, { start = 'top 82%' } = {}) {
+  if (!motionOn || !head || head.dataset.motion) return;
+  head.dataset.motion = 'pending';
+  const index = head.previousElementSibling && head.previousElementSibling.classList.contains('section-index') ? head.previousElementSibling : null;
+  const h = head.querySelector('h1, h2, h3');
+  const words = h ? splitWords(h) : [];
+  const rest = [...head.children].filter((c) => c !== h);
+  const tl = gsapLib.timeline({ scrollTrigger: { trigger: head, start, once: true, onEnter: () => { head.dataset.motion = 'playing'; } }, onComplete: () => markDone(head) });
+  if (index) tl.from(index, { clipPath: 'inset(0 100% 0 0)', duration: 1.2, ease: 'power4.out', clearProps: CLEAR }, 0);
+  if (words.length) tl.from(words, { yPercent: 115, rotate: 3, duration: 1, stagger: 0.045, ease: 'power4.out', clearProps: CLEAR }, 0.1);
+  else if (h) tl.from(h, { opacity: 0, y: 48, duration: 1, clearProps: CLEAR }, 0.1);
+  if (rest.length) tl.from(rest, { opacity: 0, y: 32, duration: 0.9, stagger: 0.1, clearProps: CLEAR }, 0.5);
+}
+
+/** Stroked SVG icons draw themselves in. */
+function drawIcons(paths, trigger) {
+  if (!motionOn || !paths.length) return;
+  for (const path of paths) {
+    let length = 100;
+    try { length = path.getTotalLength(); } catch { /* not a path-like element */ }
+    path.style.strokeDasharray = String(length);
+    path.style.strokeDashoffset = String(length);
   }
+  gsapLib.to(paths, { strokeDashoffset: 0, duration: 1.4, ease: 'power2.inOut', stagger: 0.06, clearProps: 'strokeDasharray,strokeDashoffset', scrollTrigger: { trigger, start: 'top 85%', once: true } });
 }
 
-/** Staggers a batch of siblings (cards) that enter together; elements further down the batch wait a little longer. */
-function revealBatch(nodes, { y = 14, step = 0.06, max = 8 } = {}) {
-  nodes.forEach((node, index) => revealOnView(node, { y, delay: Math.min(index, max) * step, amount: 0.15 }));
+function setupHeroIntro() {
+  const copy = $('.hero-copy');
+  const plate = $('#hero-plate');
+  if (!copy || !plate) return;
+  copy.dataset.motion = plate.dataset.motion = 'playing';
+  const media = $('#plate-img > picture, #plate-img > video');
+  const words = splitWords(copy.querySelector('h1'));
+  const tl = gsapLib.timeline({ defaults: { ease: 'power3.out' }, onComplete: () => { markDone(copy); markDone(plate); } });
+  tl.from(copy.querySelector('.eyebrow'), { opacity: 0, x: -24, duration: 0.8, clearProps: CLEAR }, 0.1)
+    .from(words, { yPercent: 115, rotate: 4, duration: 1.1, stagger: 0.07, ease: 'power4.out', clearProps: CLEAR }, 0.2)
+    .from(copy.querySelector('.deck'), { opacity: 0, y: 34, duration: 1, clearProps: CLEAR }, 0.75)
+    .from(copy.querySelectorAll('.hero-actions > *'), { opacity: 0, y: 26, duration: 0.8, stagger: 0.12, clearProps: CLEAR }, 0.95)
+    .from(copy.querySelectorAll('.hero-facts li'), { opacity: 0, y: 20, duration: 0.7, stagger: 0.1, clearProps: CLEAR }, 1.15)
+    .from(plate, { opacity: 0, y: 60, scale: 0.94, rotate: -1.5, duration: 1.3, clearProps: CLEAR }, 0.35)
+    .from($('#plate-img'), { clipPath: 'inset(100% 0 0 0)', duration: 1.5, ease: 'power4.out', clearProps: CLEAR }, 0.45)
+    .from(plate.querySelector('figcaption'), { opacity: 0, y: 12, duration: 0.7, clearProps: CLEAR }, 1.4);
+  if (media) {
+    gsapLib.set(media, { scale: 1.14, transformOrigin: 'center' });
+    tl.from(media, { scale: 1.4, duration: 1.8, ease: 'power3.out' }, 0.45);
+    gsapLib.to(media, { yPercent: 9, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.5 } });
+  }
+  // Depth as you leave the hero: the copy recedes faster than the plate.
+  gsapLib.to(copy, { y: -110, opacity: 0.25, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.4 } });
+  gsapLib.to(plate, { y: -50, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.6 } });
+  const side = $('.hero-side');
+  if (side) gsapLib.to(side, { y: -140, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true } });
 }
 
-if (motionOn) {
-  // Hero: copy rises softly, the plate settles in a beat later.
-  revealOnView($('.hero-copy'), { y: 18, duration: 0.8, amount: 0.1 });
-  revealOnView($('#hero-plate'), { y: 12, scale: 0.98, delay: 0.12, duration: 0.9, amount: 0.1 });
-  // Section headings and other marked blocks.
-  for (const node of $$('.reveal')) if (!node.dataset.motion) revealOnView(node, { y: 16 });
-  // Static sample cards, staggered.
+function setupSmoothScroll() {
+  if (!SMOOTH_SCROLL || typeof window.Lenis !== 'function' || matchMedia('(pointer: coarse)').matches) return;
+  try {
+    lenis = new window.Lenis({ lerp: 0.09, wheelMultiplier: 1, anchors: true, autoRaf: false });
+    lenis.on('scroll', window.ScrollTrigger.update);
+    gsapLib.ticker.add((time) => lenis.raf(time * 1000));
+    gsapLib.ticker.lagSmoothing(0);
+    // Dialogs and the mobile menu lock the page; pause smooth scrolling while they are open.
+    new MutationObserver(() => {
+      const locked = document.body.classList.contains('cart-open') || document.body.classList.contains('nav-open');
+      if (locked) lenis.stop(); else lenis.start();
+    }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    for (const panel of $$('.cart, .quick, .compare, .sample-viewer, .resend, .region-list, .zones-track')) panel.setAttribute('data-lenis-prevent', '');
+  } catch { lenis = null; }
+}
+
+function setupScrollAnimation() {
+  if (!motionOn) return;
+  setupSmoothScroll();
+  const bar = $('#scroll-progress');
+  if (bar) { bar.classList.add('is-on'); gsapLib.to(bar, { scaleX: 1, ease: 'none', scrollTrigger: { start: 0, end: 'max', scrub: 0.3 } }); }
+  setupHeroIntro();
+  for (const head of $$('.section-head, .footer-cta-copy')) revealHeading(head);
+  // Containers whose children animate individually (zones, reviews) are skipped here.
+  for (const node of $$('.reveal')) if (!node.dataset.motion && !node.matches('.zones-track, .reviews-grid')) revealOnView(node, { y: 56 });
   revealBatch($$('.sample-grid .guide-card'));
+  revealBatch($$('.features li'), { y: 48, rotate: 8, step: 0.12 });
+  drawIcons($$('.features svg path, .features svg rect'), '.features');
+  revealBatch($$('.steps li'), { y: 40, rotate: 0, scale: 1, step: 0.15 });
+  revealBatch($$('.faq-list details'), { y: 28, rotate: 0, scale: 1, step: 0.08, duration: 0.8 });
+  revealBatch($$('.footer-grid > *'), { y: 30, rotate: 0, scale: 1, step: 0.1, duration: 0.9, start: 'top 95%' });
+  revealBatch($$('.contents li'), { y: 24, rotate: 0, scale: 1, step: 0.08, duration: 0.7, start: 'top 95%' });
+  // The marquee band slides in as the hero ends.
+  const band = $('.marquee');
+  if (band) gsapLib.from(band, { opacity: 0, y: 30, duration: 0.9, clearProps: CLEAR, scrollTrigger: { trigger: band, start: 'top 96%', once: true } });
+  // Dark sections wipe in from the bottom edge as they arrive.
+  for (const section of $$('.approach-section, .site-footer')) {
+    gsapLib.from(section, { clipPath: 'inset(0 0 100% 0)', ease: 'none', scrollTrigger: { trigger: section, start: 'top 95%', end: 'top 35%', scrub: 0.4, once: true, onLeave: () => { section.style.clipPath = ''; } } });
+  }
+  // The giant footer wordmark drifts sideways as the footer scrolls.
+  const mark = $('.footer-mark');
+  if (mark) gsapLib.fromTo(mark, { xPercent: -60 }, { xPercent: -40, ease: 'none', scrollTrigger: { trigger: '.site-footer', start: 'top bottom', end: 'bottom bottom', scrub: 0.5 } });
+  window.addEventListener('load', () => window.ScrollTrigger.refresh());
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => window.ScrollTrigger.refresh());
 }
+setupScrollAnimation();
