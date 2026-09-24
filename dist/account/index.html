@@ -5,12 +5,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#14201c" />
-    <title>My purchases · Marufi Digital</title>
+    <title>Your account · Marufi Digital</title>
     <meta name="description" content="See every order and get fresh download links with a one-time code sent to your e-mail." />
     <link rel="canonical" href="https://aliakrammarufi.github.io/guide-01/account/" />
     
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="My purchases · Marufi Digital" />
+    <meta property="og:title" content="Your account · Marufi Digital" />
     <meta property="og:description" content="See every order and get fresh download links with a one-time code sent to your e-mail." />
     <meta property="og:image" content="https://aliakrammarufi.github.io/guide-01/assets/share.jpg" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -20,6 +20,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../styles.css" />
     <script src="../page.js" defer></script>
+    <script src="../account.js" defer></script>
   </head>
   <body class="sub-page" data-page="account">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -31,6 +32,7 @@
           <a href="../#atlas">Atlas</a>
           <a href="../articles/">Journal</a>
           <a href="../contact/">Contact</a>
+          <a href="../account/">Account</a>
           <a class="nav-shop" href="../#cart">Cart <span class="cart-count" id="kind-cart-count" hidden>0</span></a>
         </nav>
       </div>
@@ -38,26 +40,67 @@
     <main id="main" tabindex="-1">
       <section class="sub-hero">
         <div class="wrap">
-          <nav class="crumbs" aria-label="Breadcrumb"><a href="../">Marufi Digital</a><span>/</span><span>My purchases</span></nav>
-          <h1>Your <em>purchases.</em></h1>
-          <p class="deck">Enter the e-mail you used at checkout. We send a one-time code, then show every order with fresh download links.</p>
+          <nav class="crumbs" aria-label="Breadcrumb"><a href="../">Marufi Digital</a><span>/</span><span>Your account</span></nav>
+          <h1>Your <em>account.</em></h1>
+          <p class="deck">Downloads that never expire on you, orders, saved titles, and gift cards, in one place. No password: we send a code to your e-mail.</p>
         </div>
       </section>
-      <section class="section"><div class="wrap narrow">
-        <form class="form-card" id="account-email-form" novalidate>
-          <label class="field"><span>E-mail used at checkout</span><input type="email" name="email" autocomplete="email" required /></label>
-          <div class="form-actions"><button type="submit" class="button" name="send">Send me a code <span aria-hidden="true">→</span></button><span class="hint">No password. The code works for ten minutes.</span></div>
-        </form>
-        <form class="form-card" id="account-code-form" hidden novalidate>
-          <p class="hint" id="account-code-note"></p>
-          <label class="field"><span>Six-digit code</span><input type="text" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required /></label>
-          <div class="form-actions"><button type="submit" class="button" name="verify">Show my purchases <span aria-hidden="true">→</span></button><button type="button" class="button-ghost" id="account-restart">Use another e-mail</button></div>
-        </form>
+      <section class="section account-section"><div class="wrap">
+        <div class="auth-panel" id="auth-panel">
+          <div class="auth-card">
+            <div class="auth-tabs" role="tablist"><button type="button" class="auth-tab is-active" data-tab="signup" role="tab">Create account</button><button type="button" class="auth-tab" data-tab="signin" role="tab">Sign in</button></div>
+            <form id="signup-form" novalidate>
+              <p class="auth-lead">Use the e-mail you buy with, so your purchases find you.</p>
+              <label class="field"><span>Your name</span><input type="text" name="name" autocomplete="name" maxlength="80" required /></label>
+              <label class="field"><span>E-mail</span><input type="email" name="email" autocomplete="email" required /></label>
+              <div class="form-actions"><button type="submit" class="button" name="send">Create my account <span aria-hidden="true">→</span></button></div>
+              <p class="hint">By continuing you accept the <a href="../terms/">terms</a> and <a href="../privacy/">privacy policy</a>.</p>
+            </form>
+            <form id="signin-form" hidden novalidate>
+              <p class="auth-lead">Welcome back. We will send a six-digit code.</p>
+              <label class="field"><span>E-mail</span><input type="email" name="email" autocomplete="email" required /></label>
+              <div class="form-actions"><button type="submit" class="button" name="send">Send me a code <span aria-hidden="true">→</span></button></div>
+            </form>
+            <form id="code-form" hidden novalidate>
+              <p class="auth-lead" id="code-note"></p>
+              <label class="field"><span>Six-digit code</span><input type="text" name="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required /></label>
+              <div class="form-actions"><button type="submit" class="button" name="verify">Continue <span aria-hidden="true">→</span></button><button type="button" class="button-ghost" id="code-restart">Use another e-mail</button></div>
+            </form>
+          </div>
+          <aside class="auth-side">
+            <div class="side-note"><span class="message-overline">What you get</span><ul class="plain-steps"><li>Every download, with a fresh link whenever you visit.</li><li>Orders and receipts in one list.</li><li>Saved titles that follow you across devices.</li><li>Gift cards you bought or received, with their codes.</li><li>The places you asked us to cover.</li></ul></div>
+            <div class="side-note"><span class="message-overline">No password</span><p>We e-mail you a code each time. Nothing to remember, nothing to leak.</p></div>
+          </aside>
+        </div>
         <div class="catalog-message" id="account-offline" hidden>
           <div class="message-symbol" aria-hidden="true">Soon</div>
-          <div class="message-copy"><span class="message-overline">Not connected yet</span><h2>Purchase history needs the store's server.</h2><p>Until it is connected, your Stripe receipt has your download links, and "Resend my download" in the footer of the home page sends fresh ones.</p></div>
+          <div class="message-copy"><span class="message-overline">Not connected yet</span><h2>Accounts open once the store's server is connected.</h2><p>Until then, your Stripe receipt has your download links, and "Resend my download" in the footer of the home page sends fresh ones.</p></div>
         </div>
-        <div id="account-orders" hidden></div>
+        <div class="dashboard" id="dashboard" hidden>
+          <aside class="dash-side">
+            <div class="dash-identity"><span class="dash-avatar" id="dash-avatar" aria-hidden="true"></span><div><strong id="dash-name"></strong><span id="dash-email"></span></div></div>
+            <nav class="dash-nav" aria-label="Account">
+              <button type="button" data-view="overview" class="is-active"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/></svg>Overview</button>
+              <button type="button" data-view="downloads"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>Downloads</button>
+              <button type="button" data-view="orders"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 4h12v16l-3-2-3 2-3-2-3 2z"/><path d="M9 9h6M9 13h6"/></svg>Orders</button>
+              <button type="button" data-view="saved"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 20s-7-4.6-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.4-7 10-7 10z"/></svg>Saved</button>
+              <button type="button" data-view="gifts"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="9" width="16" height="11"/><path d="M4 13h16M12 9v11M8.5 9a2.5 2.5 0 1 1 3.5-2.3A2.5 2.5 0 1 1 15.5 9"/></svg>Gift cards</button>
+              <button type="button" data-view="requests"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="10" r="3"/><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/></svg>Requests</button>
+              <button type="button" data-view="profile"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Profile</button>
+            </nav>
+            <button type="button" class="dash-signout" id="dash-signout">Sign out</button>
+          </aside>
+          <div class="dash-main">
+            <header class="dash-head"><p class="eyebrow" id="dash-since"></p><h2 id="dash-greeting"></h2></header>
+            <section class="dash-view" data-view="overview"><div class="dash-body"></div></section>
+            <section class="dash-view" data-view="downloads" hidden><div class="dash-title"><h3>Downloads</h3><p>Every title you have bought. Links are signed for you and renew each visit.</p></div><div class="dash-body"></div></section>
+            <section class="dash-view" data-view="orders" hidden><div class="dash-title"><h3>Orders</h3><p>Everything paid with your e-mail address.</p></div><div class="dash-body"></div></section>
+            <section class="dash-view" data-view="saved" hidden><div class="dash-title"><h3>Saved titles</h3><p>Kept on your account, so they follow you to any device.</p></div><div class="dash-body"></div></section>
+            <section class="dash-view" data-view="gifts" hidden><div class="dash-title"><h3>Gift cards</h3><p>Cards you bought or received, with their codes.</p></div><div class="dash-body"></div></section>
+            <section class="dash-view" data-view="requests" hidden><div class="dash-title"><h3>Place requests</h3><p>Places and topics you asked us to cover.</p></div><div class="dash-body"></div></section>
+            <section class="dash-view" data-view="profile" hidden><div class="dash-title"><h3>Profile</h3><p>Your details and preferences.</p></div><div class="dash-body"></div></section>
+          </div>
+        </div>
       </div></section>
     </main>
     <footer class="site-footer sub-footer">

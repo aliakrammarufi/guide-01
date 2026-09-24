@@ -12,8 +12,10 @@
  *   POST /contact   { name, email, message }                               → { ok }   stored, and e-mailed to CONTACT_EMAIL
  *   POST /subscribe { email }                                              → { ok, doubleOptIn }   newsletter; confirmation e-mail when e-mail is configured
  *   GET  /confirm?t=<token>, GET /unsubscribe?t=<token>                    → HTML pages
- *   POST /account/code   { email }                                         → { ok, challenge }   e-mails a six-digit code
- *   POST /account/orders { challenge, code }                               → { email, orders: [{ created, total, currency, items: [{ name, url, expires }] }] }
+ *   POST /account/code   { email, name? }                                  → { ok, challenge }   e-mails a six-digit code (creates the account on verify)
+ *   POST /account/verify { challenge, code }                               → { token, exp, account }   30-day customer session
+ *   Customer routes (Bearer session token): GET/PUT/DELETE /account/me, GET /account/orders (with download links),
+ *     GET /account/gifts, GET /account/requests, PUT /account/newsletter { subscribed }
  *   POST /gift-card/session { amount, to, from, message }                  → { url }   Stripe Checkout for a gift card; the code is created on payment
  *
  * Admin routes (Bearer session token from /admin/login, or Bearer ADMIN_TOKEN):
@@ -92,7 +94,18 @@ export default {
       if (path === '/confirm' && request.method === 'GET') return confirmSubscription(url.searchParams.get('t'), env);
       if (path === '/unsubscribe' && request.method === 'GET') return unsubscribe(url.searchParams.get('t'), env);
       if (path === '/account/code' && request.method === 'POST') return json(await accountCode(request, await readJson(request), env));
-      if (path === '/account/orders' && request.method === 'POST') return json(await accountOrders(request, await readJson(request), env, url));
+      if (path === '/account/verify' && request.method === 'POST') return json(await accountVerify(request, await readJson(request), env));
+      if (path.startsWith('/account/')) {
+        const who = await requireCustomer(request, env);
+        const sub = path.slice('/account'.length);
+        if (sub === '/me' && request.method === 'GET') return json(await accountMe(who, env));
+        if (sub === '/me' && request.method === 'PUT') return json(await accountUpdate(who, await readJson(request), env));
+        if (sub === '/me' && request.method === 'DELETE') return json(await accountDelete(who, env));
+        if (sub === '/orders' && request.method === 'GET') return json(await accountOrders(who, env, url));
+        if (sub === '/gifts' && request.method === 'GET') return json(await accountGifts(who, env));
+        if (sub === '/requests' && request.method === 'GET') return json(await accountRequests(who, env));
+        if (sub === '/newsletter' && request.method === 'PUT') return json(await accountNewsletter(who, await readJson(request), env));
+      }
       if (path === '/gift-card/session' && request.method === 'POST') return json(await giftCardSession(request, await readJson(request), env));
 
       // Admin
@@ -1169,23 +1182,76 @@ async function newsletter(request, body, env, url) {
   return { sent, recipients: recipients.length };
 }
 
-/* ---------- Purchase history (e-mail + one-time code) ---------- */
+/* ---------- Customer accounts (passwordless: e-mail + one-time code, 30-day signed session) ---------- */
+async function accountKey(email) { return `acct:${b64url(await sha256(String(email).trim().toLowerCase()))}`; }
+function publicAccount(record) {
+  return { email: record.email, name: record.name || '', country: record.country || '', saved: Array.isArray(record.saved) ? record.saved : [], createdAt: record.createdAt, lastSeen: record.lastSeen || '' };
+}
 async function accountCode(request, body, env) {
   if (!isEmail(body.email)) throw fail('Please enter a valid e-mail address');
-  if (!env.STORE) throw fail('Purchase history is not configured yet', 500);
-  if (!env.RESEND_API_KEY || !env.FROM_EMAIL) throw fail('E-mail is not configured on the server', 500);
+  if (!env.STORE) throw fail('Accounts are not configured yet', 500);
+  const canMail = Boolean(env.RESEND_API_KEY && env.FROM_EMAIL);
+  if (!canMail && env.DEV_MODE !== '1') throw fail('E-mail is not configured on the server', 500);
   await throttle(env, 'account', request, 6, 900);
+  const email = body.email.trim();
+  const name = String(body.name || '').trim().slice(0, 80);
   const code = sixDigits();
   const id = crypto.randomUUID();
-  await env.STORE.put(`account:${id}`, JSON.stringify({ hash: b64url(await sha256(code)), attempts: 0, email: body.email.trim() }), { expirationTtl: 600 });
-  await sendEmail(env, body.email.trim(), 'Your sign-in code', `<div style="font-family:sans-serif;line-height:1.6"><p>Your code to see your purchases:</p><p style="font-size:2em;letter-spacing:.2em"><strong>${code}</strong></p><p style="color:#666">It works for ten minutes. If you did not ask for it, ignore this e-mail.</p></div>`);
-  return { ok: true, challenge: id };
+  const exists = Boolean(await env.STORE.get(await accountKey(email)));
+  await env.STORE.put(`account:${id}`, JSON.stringify({ hash: b64url(await sha256(code)), attempts: 0, email, name }), { expirationTtl: 600 });
+  const intro = exists ? 'Your sign-in code:' : 'Welcome. Your code to finish creating your account:';
+  if (canMail) await sendEmail(env, email, exists ? 'Your sign-in code' : 'Your account code', `<div style="font-family:sans-serif;line-height:1.6"><p>${intro}</p><p style="font-size:2em;letter-spacing:.2em"><strong>${code}</strong></p><p style="color:#666">It works for ten minutes. If you did not ask for it, ignore this e-mail.</p></div>`);
+  else console.log(`[dev] account code for ${email}: ${code}`);
+  return { ok: true, challenge: id, existing: exists };
 }
-async function accountOrders(request, body, env, url) {
+async function accountVerify(request, body, env) {
   const raw = env.STORE ? await env.STORE.get(`account:${String(body.challenge || '')}`) : null;
-  const email = raw ? JSON.parse(raw).email : '';
+  const pending = raw ? JSON.parse(raw) : null;
   await checkCode(env, 'account', body.challenge, body.code);
-  if (!isEmail(email)) throw fail('Invalid or expired code', 401);
+  if (!pending || !isEmail(pending.email)) throw fail('Invalid or expired code', 401);
+  const key = await accountKey(pending.email);
+  const existing = await env.STORE.get(key);
+  const now = new Date().toISOString();
+  const record = existing ? JSON.parse(existing) : { email: pending.email, name: pending.name || '', country: '', saved: [], createdAt: now };
+  if (!record.name && pending.name) record.name = pending.name;
+  record.lastSeen = now;
+  await env.STORE.put(key, JSON.stringify(record));
+  const exp = Date.now() + 30 * 86400000;
+  const token = await signToken(env, { email: record.email, a: 1, exp });
+  await logEvent(env, request, existing ? 'customer-signin' : 'customer-signup', maskEmail(record.email));
+  return { token, exp, account: publicAccount(record), created: !existing };
+}
+async function requireCustomer(request, env) {
+  const header = request.headers.get('Authorization') || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  const payload = await verifyToken(env, token);
+  if (!payload || payload.a !== 1 || !isEmail(payload.email)) throw fail('Please sign in again', 401);
+  const key = await accountKey(payload.email);
+  const raw = env.STORE ? await env.STORE.get(key) : null;
+  if (!raw) throw fail('Please sign in again', 401);
+  return { email: payload.email, key, record: JSON.parse(raw) };
+}
+async function accountMe(who, env) {
+  const sub = await env.STORE.get(await subscriberKey(who.email));
+  return { account: publicAccount(who.record), subscribed: Boolean(sub && JSON.parse(sub).confirmed) };
+}
+async function accountUpdate(who, body, env) {
+  const record = who.record;
+  if (typeof body.name === 'string') record.name = body.name.trim().slice(0, 80);
+  if (typeof body.country === 'string') record.country = body.country.trim().slice(0, 60);
+  if (Array.isArray(body.saved)) record.saved = [...new Set(body.saved.filter((id) => typeof id === 'string' && id.length < 120))].slice(0, 200);
+  record.updatedAt = new Date().toISOString();
+  await env.STORE.put(who.key, JSON.stringify(record));
+  return { ok: true, account: publicAccount(record) };
+}
+async function accountDelete(who, env) {
+  await env.STORE.delete(who.key);
+  await env.STORE.delete(await subscriberKey(who.email));
+  const list = await env.STORE.list({ prefix: 'notify:', limit: 1000 });
+  for (const k of list.keys) { const raw = await env.STORE.get(k.name); if (raw && JSON.parse(raw).email === who.email) await env.STORE.delete(k.name); }
+  return { ok: true };
+}
+async function ordersForEmail(email, env, base) {
   const params = new URLSearchParams();
   params.set('customer_details[email]', email);
   params.set('status', 'complete');
@@ -1195,9 +1261,44 @@ async function accountOrders(request, body, env, url) {
   const orders = [];
   for (const session of result.data || []) {
     if (session.payment_status !== 'paid') continue;
-    orders.push({ id: session.id, created: new Date(session.created * 1000).toISOString(), total: (session.amount_total || 0) / 100, currency: String(session.currency || '').toUpperCase(), items: await downloadLinks(env, session, url.origin), lines: ((session.line_items && session.line_items.data) || []).map((l) => l.description) });
+    const lines = (session.line_items && session.line_items.data) || [];
+    orders.push({
+      id: session.id,
+      created: new Date(session.created * 1000).toISOString(),
+      total: (session.amount_total || 0) / 100,
+      currency: String(session.currency || '').toUpperCase(),
+      giftCard: session.metadata && session.metadata.gift_card ? Number(session.metadata.gift_card) : 0,
+      items: await downloadLinks(env, session, base),
+      lines: lines.map((l) => ({ name: l.description, priceId: l.price && l.price.id, amount: (l.amount_total || 0) / 100 }))
+    });
   }
-  return { email, orders: orders.sort((a, b) => (a.created < b.created ? 1 : -1)) };
+  return orders.sort((a, b) => (a.created < b.created ? 1 : -1));
+}
+async function accountOrders(who, env, url) {
+  if (!env.STRIPE_SECRET_KEY) return { email: who.email, orders: [], stripe: false };
+  return { email: who.email, orders: await ordersForEmail(who.email, env, url.origin), stripe: true };
+}
+async function accountGifts(who, env) {
+  const { items } = await listKeyed('giftcard:', env);
+  const mine = items.filter((g) => g.to === who.email || g.buyer === who.email);
+  for (const g of mine) {
+    g.received = g.to === who.email;
+    if (env.STRIPE_SECRET_KEY) {
+      try { const r = await stripe(env, 'GET', '/promotion_codes', new URLSearchParams({ code: g.code, limit: '1' })); const p = (r.data || [])[0]; if (p) { g.redeemed = p.times_redeemed > 0; g.active = p.active; } } catch { /* leave unknown */ }
+    }
+    delete g.key;
+  }
+  return { gifts: mine };
+}
+async function accountRequests(who, env) {
+  const { items } = await listKeyed('notify:', env);
+  return { requests: items.filter((r) => r.email === who.email).map(({ key, ...r }) => r) };
+}
+async function accountNewsletter(who, body, env) {
+  const key = await subscriberKey(who.email);
+  if (body.subscribed) await env.STORE.put(key, JSON.stringify({ email: who.email, source: 'account', at: new Date().toISOString(), confirmed: true, confirmedAt: new Date().toISOString() }));
+  else await env.STORE.delete(key);
+  return { ok: true, subscribed: Boolean(body.subscribed) };
 }
 
 /* ---------- Gift cards ---------- */
@@ -1249,7 +1350,7 @@ async function issueGiftCard(session, env) {
   await stripe(env, 'POST', '/promotion_codes', new URLSearchParams({ coupon: coupon.id, code, max_redemptions: '1' }));
   const to = session.metadata.gift_to || '';
   const buyer = session.customer_details && session.customer_details.email;
-  const record = { code, amount, currency: currency.toUpperCase(), to, sentTo: [], at: new Date().toISOString() };
+  const record = { code, amount, currency: currency.toUpperCase(), to, buyer: buyer || '', from: session.metadata.gift_from || '', sentTo: [], at: new Date().toISOString() };
   if (env.RESEND_API_KEY && env.FROM_EMAIL) {
     const note = session.metadata.gift_message ? `<blockquote style="border-left:3px solid #9a3a20;margin:1em 0;padding:.25em 1em;color:#333">${escapeHtml(session.metadata.gift_message)}</blockquote>` : '';
     const body = (intro) => `<div style="font-family:sans-serif;line-height:1.6"><p>${intro}</p>${note}<p style="font-size:1.6em;letter-spacing:.15em"><strong>${code}</strong></p><p>Worth ${amount} ${currency.toUpperCase()}. Enter it in the promotion code box at checkout${env.SITE_URL ? ` on <a href="${env.SITE_URL}">${env.SITE_URL}</a>` : ''}. It can be used once, so choose a cart worth at least the full amount.</p></div>`;

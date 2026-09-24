@@ -466,12 +466,21 @@ let saved = readStore(SAVED_KEY);
 function isSaved(guide) {
   return saved.includes(guide.id);
 }
+/** When the visitor has an account session in this browser, saved titles are written to it too. */
+function syncSavedToAccount() {
+  let session = null;
+  try { session = JSON.parse(localStorage.getItem('marufi-session') || 'null'); } catch { session = null; }
+  if (!session || !session.token || session.exp < Date.now() || !store.endpoint) return;
+  fetch(`${store.endpoint}/account/me`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` }, body: JSON.stringify({ saved }) }).catch(() => {});
+}
+
 function toggleSaved(guide) {
   saved = isSaved(guide) ? saved.filter((id) => id !== guide.id) : [...saved, guide.id];
   writeStore(SAVED_KEY, saved);
   showToast(isSaved(guide) ? `Saved “${guide.title}” for later` : `Removed “${guide.title}” from saved`);
   renderSaved();
   if (activeType === 'saved') update();
+  syncSavedToAccount();
 }
 function renderSaved() {
   saved = saved.filter(byId);

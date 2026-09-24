@@ -38,6 +38,7 @@ const env = {
   CANCEL_URL: 'http://localhost:8766/#guides',
   ALLOWED_ORIGINS: '',
   SITE_URL: 'http://localhost:8766',
+  DEV_MODE: '1', // prints one-time codes to the console instead of e-mailing them
   FILES: R2,
   STORE: KV
 };

@@ -104,69 +104,6 @@
     });
   }
 
-  /* ---------- Purchase history ---------- */
-  function setupAccount() {
-    const stepEmail = $('#account-email-form');
-    const stepCode = $('#account-code-form');
-    const out = $('#account-orders');
-    if (!stepEmail || !stepCode || !out) return;
-    const offline = $('#account-offline');
-    if (!store.endpoint) { stepEmail.hidden = true; if (offline) offline.hidden = false; return; }
-    let challenge = '';
-    stepEmail.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const f = stepEmail.elements;
-      if (!isEmail(f.email.value)) { toast('Please enter a valid e-mail address', true); return; }
-      busy(f.send, true);
-      try {
-        const r = await post('/account/code', { email: f.email.value.trim() });
-        challenge = r.challenge;
-        stepEmail.hidden = true;
-        stepCode.hidden = false;
-        $('#account-code-note').textContent = `We sent a six-digit code to ${f.email.value.trim()}. It works for ten minutes.`;
-        stepCode.elements.code.focus();
-      } catch (error) { toast(error.message, true); }
-      busy(f.send, false);
-    });
-    stepCode.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const f = stepCode.elements;
-      busy(f.verify, true);
-      try {
-        const r = await post('/account/orders', { challenge, code: f.code.value.trim() });
-        stepCode.hidden = true;
-        renderOrders(r);
-      } catch (error) { toast(error.message, true); }
-      busy(f.verify, false);
-    });
-    $('#account-restart')?.addEventListener('click', () => { stepCode.hidden = true; stepEmail.hidden = false; challenge = ''; });
-    function renderOrders(r) {
-      out.hidden = false;
-      out.replaceChildren();
-      const head = el('div', 'account-head');
-      head.append(el('span', 'message-overline', `Purchases for ${r.email}`), el('h2', null, r.orders.length ? `${r.orders.length} ${r.orders.length === 1 ? 'order' : 'orders'}` : 'No orders under this e-mail yet'));
-      out.append(head);
-      if (!r.orders.length) { out.append(el('p', 'hint', 'If you paid with a different e-mail address, try that one. Receipts from Stripe show the address used.')); return; }
-      for (const order of r.orders) {
-        const card = el('article', 'order-card');
-        const meta = el('div', 'order-meta');
-        meta.append(el('span', null, formatDate(order.created)), el('strong', null, formatMoney(order.total, order.currency)));
-        card.append(meta);
-        const list = el('ul', 'downloads');
-        const names = order.items.length ? order.items : order.lines.map((name) => ({ name }));
-        for (const item of names) {
-          const li = el('li');
-          if (item.url) { const a = el('a', null, item.name); a.href = item.url; li.append(a, el('span', 'note', `link valid until ${formatDate(item.expires)}`)); }
-          else if (item.preorder) li.append(el('span', null, item.name), el('span', 'note', 'Pre-order: we e-mail the download on release'));
-          else li.append(el('span', null, item.name));
-          list.append(li);
-        }
-        card.append(list);
-        out.append(card);
-      }
-    }
-  }
-
   /* ---------- Gift cards ---------- */
   function setupGift() {
     const form = $('#gift-form');
@@ -288,8 +225,10 @@
     store.articles = Array.isArray(data.articles) ? data.articles : [];
     fillChrome();
     setupSubscribe();
+    // Hand the catalog to page-specific scripts (account.js) that load after this one.
+    window.marufiStore = { endpoint: store.endpoint, currency: store.currency, name: store.name, contactEmail: store.contactEmail, guides: (Array.isArray(data.guides) ? data.guides : []).filter((g) => g && g.title && g.status !== 'draft').map((g) => ({ id: String(g.id || g.priceId || ''), title: g.title, country: g.country || '', state: g.state || '', cover: g.cover || '', format: g.format || '', priceId: g.priceId || '', variants: Array.isArray(g.variants) ? g.variants.map((v) => ({ priceId: v.priceId || '', label: v.label })) : [] })) };
+    window.dispatchEvent(new CustomEvent('marufi:ready', { detail: window.marufiStore }));
     if (page === 'contact') setupContact();
-    if (page === 'account') setupAccount();
     if (page === 'gift') setupGift();
     if (page === 'articles') setupArticles();
   }
