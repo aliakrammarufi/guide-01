@@ -112,6 +112,14 @@ The clip plays silently as a living poster (never when the visitor prefers reduc
 - **Kinds of help.** Store settings → Kinds of help renames the categories, edits the card wording, hides one, or adds a new one. Titles pick their kind in the editor.
 - **Free help.** The Free help view manages resources: a title, a kind, an optional place, and a URL. PDFs upload as public media (up to 12 MB) so they open without a signed link.
 
+## Scroll animation
+
+The home page uses GSAP 3.15 with ScrollTrigger and Lenis smooth scrolling, loaded from jsDelivr with Subresource Integrity, no build step. Everything is progressive enhancement: with JavaScript off, a blocked CDN, or `prefers-reduced-motion`, every element is visible and static.
+
+- **Everywhere:** an arrival curtain once per session, masked word reveals, staggered card entrances with depth, icon draws, the atlas land wave and pins, dark-section wipes, a reading-progress line.
+- **Large screens with a mouse only:** the hero pins while the film grows to fill the screen, Browse by need becomes a horizontal gallery, the statement fills word by word, steps draw in sequence, ghost numerals drift behind sections, grids lean with scroll speed, buttons are magnetic, cards tilt, and a cursor ring follows the pointer.
+- **Turn parts off:** delete the `#arrival` block in `index.html` to drop the curtain; set `SMOOTH_SCROLL = false` in `site.js` to keep native scrolling; the cinematic functions are called one per line at the top of `setupScrollAnimation` in `site.js`, so remove any you do not want.
+
 ## Deploy the Worker
 
 1. `npm i -g wrangler`, then `wrangler login`.

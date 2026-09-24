@@ -21,10 +21,17 @@
     <script src="https://cdn.jsdelivr.net/npm/lenis@1.3.26/dist/lenis.min.js" integrity="sha384-jqpi9VmOdhyLoLURgjCn7EpnG9BbnHW57ibIZoeaIU+erWDH3k8fQQg0xH2ySjnw" crossorigin="anonymous" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js" integrity="sha384-XmJ9SoHtVOHoQUcKvFAzVXwdkKo1Ie3bhmSoIAkcdsHGaIrVJIkmozyq0FJeb/Ly" crossorigin="anonymous" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/ScrollTrigger.min.js" integrity="sha384-wl5TeDVvOWt30Pbf8aSo2ZrzsOjddu3avOBvHe+p+OhJt9gP6w9YXmDkN5DK2/dF" crossorigin="anonymous" defer></script>
+    <script>(function(){try{if(!matchMedia('(prefers-reduced-motion: reduce)').matches&&!sessionStorage.getItem('arrived')){document.documentElement.classList.add('arriving');setTimeout(function(){document.documentElement.classList.remove('arriving');},4000);}}catch(e){}})();</script>
     <script src="site.js" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+    <div class="arrival" id="arrival" aria-hidden="true">
+      <div class="arrival-panel arrival-top"></div>
+      <div class="arrival-panel arrival-bottom"></div>
+      <div class="arrival-mark"><span class="arrival-word">Marufi <em>Digital</em></span><small>Everything for the place you are going</small></div>
+      <i class="arrival-line"></i>
+    </div>
     <div class="scroll-progress" id="scroll-progress" aria-hidden="true"></div>
 
     <div class="topbar" id="topbar">
@@ -277,6 +284,7 @@
             <h2 id="inside-title">Made to be read, <em>not scrolled past.</em></h2>
             <p>Every kind of title is built the same way, so once you have used one you know exactly what the next one gives you.</p>
           </div>
+          <p class="statement">We write for the person with a flight next week and a job that starts the week after: the guide that fits in one sitting, the paperwork in the order you will meet it, and the table that is worth the walk.</p>
           <ul class="features reveal">
             <li>
               <svg aria-hidden="true" viewBox="0 0 32 32"><path d="M4 8l8-3 8 3 8-3v19l-8 3-8-3-8 3z"/><path d="M12 5v19M20 8v19"/></svg>

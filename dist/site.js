@@ -1428,7 +1428,8 @@ function renderNeeds() {
     });
     grid.append(card);
   }
-  revealBatch($$('.need', grid), { y: 60, rotate: 4, step: 0.08 });
+  if (!setupNeedsScene(grid)) revealBatch($$('.need', grid), { y: 60, rotate: 4, step: 0.08 });
+  renumberGhosts();
 }
 
 function renderResources(resources) {
@@ -1661,6 +1662,7 @@ fetch('guides.json', { cache: 'no-cache' })
     update();
     if ([...params.keys()].some((k) => ['country', 'state', 'type', 'q'].includes(k))) setTimeout(() => $('#guides').scrollIntoView(), 50);
     renderAtlas();
+    renumberGhosts();
     injectStructuredData();
     // Refresh sale countdowns once a minute.
     setInterval(() => { if (catalog.some(saleActive)) update(); }, 60000);
@@ -1788,32 +1790,254 @@ function drawIcons(paths, trigger) {
   gsapLib.to(paths, { strokeDashoffset: 0, duration: 1.4, ease: 'power2.inOut', stagger: 0.06, clearProps: 'strokeDasharray,strokeDashoffset', scrollTrigger: { trigger, start: 'top 85%', once: true } });
 }
 
-function setupHeroIntro() {
+function setupHeroIntro(delay = 0) {
   const copy = $('.hero-copy');
   const plate = $('#hero-plate');
   if (!copy || !plate) return;
   copy.dataset.motion = plate.dataset.motion = 'playing';
   const media = $('#plate-img > picture, #plate-img > video');
   const words = splitWords(copy.querySelector('h1'));
-  const tl = gsapLib.timeline({ defaults: { ease: 'power3.out' }, onComplete: () => { markDone(copy); markDone(plate); } });
+  const tl = gsapLib.timeline({ delay, defaults: { ease: 'power3.out' }, onComplete: () => { markDone(copy); markDone(plate); } });
   tl.from(copy.querySelector('.eyebrow'), { opacity: 0, x: -24, duration: 0.8, clearProps: CLEAR }, 0.1)
     .from(words, { yPercent: 115, rotate: 4, duration: 1.1, stagger: 0.07, ease: 'power4.out', clearProps: CLEAR }, 0.2)
     .from(copy.querySelector('.deck'), { opacity: 0, y: 34, duration: 1, clearProps: CLEAR }, 0.75)
     .from(copy.querySelectorAll('.hero-actions > *'), { opacity: 0, y: 26, duration: 0.8, stagger: 0.12, clearProps: CLEAR }, 0.95)
     .from(copy.querySelectorAll('.hero-facts li'), { opacity: 0, y: 20, duration: 0.7, stagger: 0.1, clearProps: CLEAR }, 1.15)
-    .from(plate, { opacity: 0, y: 60, scale: 0.94, rotate: -1.5, duration: 1.3, clearProps: CLEAR }, 0.35)
-    .from($('#plate-img'), { clipPath: 'inset(100% 0 0 0)', duration: 1.5, ease: 'power4.out', clearProps: CLEAR }, 0.45)
+    // Only clipPath and opacity are cleared here: the scroll scenes own the transforms of the plate and its image.
+    .from(plate, { opacity: 0, y: 60, scale: 0.94, rotate: -1.5, duration: 1.3, clearProps: 'opacity' }, 0.35)
+    .from($('#plate-img'), { clipPath: 'inset(100% 0 0 0)', duration: 1.5, ease: 'power4.out', clearProps: 'clipPath' }, 0.45)
     .from(plate.querySelector('figcaption'), { opacity: 0, y: 12, duration: 0.7, clearProps: CLEAR }, 1.4);
   if (media) {
     gsapLib.set(media, { scale: 1.14, transformOrigin: 'center' });
     tl.from(media, { scale: 1.4, duration: 1.8, ease: 'power3.out' }, 0.45);
-    gsapLib.to(media, { yPercent: 9, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.5 } });
   }
-  // Depth as you leave the hero: the copy recedes faster than the plate.
-  gsapLib.to(copy, { y: -110, opacity: 0.25, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.4 } });
-  gsapLib.to(plate, { y: -50, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.6 } });
-  const side = $('.hero-side');
-  if (side) gsapLib.to(side, { y: -140, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true } });
+  // Small screens and touch: depth as you leave the hero, the copy recedes faster than the plate.
+  // Large screens get the pinned scene in setupHeroScene instead.
+  mm.add(SMALL_MOTION, () => {
+    if (media) gsapLib.to(media, { yPercent: 9, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.5 } });
+    gsapLib.to(copy, { y: -110, opacity: 0.25, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.4 } });
+    gsapLib.to(plate, { y: -50, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: 0.6 } });
+    const side = $('.hero-side');
+    if (side) gsapLib.to(side, { y: -140, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true } });
+  });
+}
+
+/* ---------- Cinematic layer ----------
+   Arrival curtain, a pinned hero where the film grows to fill the screen, a horizontal gallery for Browse by need,
+   scroll-filled statement text, drawing step lines, ghost numerals, velocity skew, magnetic buttons, a cursor ring,
+   and card tilt. Pinned scenes and pointer effects run only on large screens with a mouse; touch and small
+   screens keep the lighter entrances. Nothing here changes markup that the page needs without JavaScript. */
+const DESKTOP_MOTION = '(min-width: 1000px) and (pointer: fine)';
+const SMALL_MOTION = '(max-width: 999px), (pointer: coarse)';
+const mm = motionOn ? gsapLib.matchMedia() : null;
+const arriving = document.documentElement.classList.contains('arriving');
+
+/** The curtain: wordmark rises, a rule draws, then two panels part to reveal the page. Once per session. */
+function setupArrival() {
+  const overlay = $('#arrival');
+  const finish = () => { document.documentElement.classList.remove('arriving'); if (overlay) overlay.remove(); if (lenis) lenis.start(); };
+  if (!motionOn || !arriving || !overlay) { finish(); return 0; }
+  try { sessionStorage.setItem('arrived', '1'); } catch { /* private mode */ }
+  const words = splitWords(overlay.querySelector('.arrival-word'));
+  const small = overlay.querySelector('small');
+  const line = overlay.querySelector('.arrival-line');
+  const tl = gsapLib.timeline({ defaults: { ease: 'power4.out' }, onComplete: finish });
+  tl.from(words, { yPercent: 115, rotate: 5, duration: 1.1, stagger: 0.09 }, 0.1)
+    .fromTo(line, { scaleX: 0, transformOrigin: 'left' }, { scaleX: 1, duration: 1.1, ease: 'power3.inOut' }, 0.35)
+    .from(small, { opacity: 0, y: 12, duration: 0.7 }, 0.8)
+    .to([overlay.querySelector('.arrival-mark'), line], { opacity: 0, y: -40, duration: 0.5, ease: 'power2.in' }, 1.55)
+    .to(overlay.querySelector('.arrival-top'), { yPercent: -100, duration: 1.05, ease: 'power4.inOut' }, 1.75)
+    .to(overlay.querySelector('.arrival-bottom'), { yPercent: 100, duration: 1.05, ease: 'power4.inOut' }, 1.75);
+  return 1.9;
+}
+
+/** Large screens: the hero pins and the film plate grows until it fills the viewport, then the page moves on. */
+function setupHeroScene() {
+  const hero = $('.hero');
+  const plateImg = $('#plate-img');
+  const copy = $('.hero-copy');
+  const plate = $('#hero-plate');
+  if (!hero || !plateImg || !copy || !plate) return;
+  mm.add(DESKTOP_MOTION, () => {
+    hero.classList.add('is-scene');
+    const hint = el('div', 'scroll-hint');
+    hint.setAttribute('aria-hidden', 'true');
+    hint.append(el('span', null, 'Scroll'), el('i'));
+    hero.append(hint);
+    const chrome = $$('.plate-tag, .plate-controls', plateImg);
+    const play = plateImg.querySelector('.plate-play');
+    const fit = () => Math.max(innerWidth / plateImg.offsetWidth, innerHeight / plateImg.offsetHeight) * 1.02;
+    // Layout offsets ignore transforms, so the target is stable however far the scrub has run.
+    const within = () => { let x = 0, y = 0, node = plateImg; while (node && node !== hero) { x += node.offsetLeft; y += node.offsetTop; node = node.offsetParent; } return { x, y }; };
+    const shiftX = () => innerWidth / 2 - (within().x + plateImg.offsetWidth / 2);
+    const shiftY = () => innerHeight / 2 - (within().y + plateImg.offsetHeight / 2);
+    const tl = gsapLib.timeline({ defaults: { ease: 'none' }, scrollTrigger: { trigger: hero, start: 'top top', end: '+=120%', pin: true, scrub: 0.6, anticipatePin: 1, invalidateOnRefresh: true } });
+    tl.to(copy, { x: -140, opacity: 0, scale: 0.94, duration: 0.45, ease: 'power2.in' }, 0)
+      .to([$('.hero-side'), plate.querySelector('figcaption'), hint].filter(Boolean), { opacity: 0, duration: 0.25 }, 0)
+      .to(plateImg, { scale: fit, x: shiftX, y: shiftY, duration: 0.7, ease: 'power2.inOut' }, 0.05)
+      .to(chrome, { scale: () => 1 / fit(), duration: 0.7, ease: 'power2.inOut' }, 0.05)
+      .to({}, { duration: 0.25 });
+    // The play button is hidden until the video is ready, so its CSS centering transform is set here explicitly.
+    if (play) tl.fromTo(play, { xPercent: -50, yPercent: -50, scale: 1 }, { xPercent: -50, yPercent: -50, scale: () => 1 / fit(), duration: 0.7, ease: 'power2.inOut' }, 0.05);
+    return () => { hero.classList.remove('is-scene'); hint.remove(); };
+  });
+}
+
+/** Large screens: Browse by need becomes a pinned horizontal gallery that scrolls sideways with the wheel. */
+function setupNeedsScene(grid) {
+  if (!mm) return false;
+  const section = $('#needs');
+  const cards = $$('.need', grid);
+  if (!section || cards.length < 4) return false;
+  let active = false;
+  mm.add(DESKTOP_MOTION, () => {
+    active = true;
+    grid.classList.add('is-track');
+    section.classList.add('is-scene');
+    const progress = el('div', 'needs-progress');
+    progress.append(el('i'));
+    grid.after(progress);
+    const distance = () => Math.max(0, grid.scrollWidth - grid.parentElement.clientWidth);
+    const tween = gsapLib.to(grid, { x: () => -distance(), ease: 'none', scrollTrigger: { trigger: section, start: 'top top', end: () => `+=${distance() + innerHeight * 0.3}`, pin: true, scrub: 0.5, anticipatePin: 1, invalidateOnRefresh: true, onUpdate: (self) => gsapLib.set(progress.firstElementChild, { scaleX: self.progress }) } });
+    const visibleWidth = grid.parentElement.clientWidth;
+    cards.forEach((card, i) => {
+      const onScreenAtStart = card.offsetLeft < visibleWidth * 0.95;
+      gsapLib.from(card, { y: 90, rotate: 2.5, opacity: 0, duration: 1.1, ease: 'power4.out', delay: onScreenAtStart ? i * 0.1 : 0, clearProps: CLEAR,
+        scrollTrigger: onScreenAtStart ? { trigger: section, start: 'top 80%', once: true } : { trigger: card, containerAnimation: tween, start: 'left 95%', once: true } });
+    });
+    return () => { grid.classList.remove('is-track'); section.classList.remove('is-scene'); progress.remove(); active = false; };
+  });
+  return active;
+}
+
+/** The statement fills in word by word as it crosses the middle of the screen. */
+function setupStatement() {
+  const p = $('.statement');
+  if (!p) return;
+  const words = splitWords(p);
+  gsapLib.set(words, { opacity: 0.14 });
+  gsapLib.to(words, { opacity: 1, stagger: 0.04, ease: 'none', scrollTrigger: { trigger: p, start: 'top 78%', end: 'bottom 42%', scrub: 0.4 } });
+}
+
+/** The three steps light up in turn while their rule draws across. */
+function setupSteps() {
+  const steps = $$('.steps li');
+  if (!steps.length) return;
+  const tl = gsapLib.timeline({ scrollTrigger: { trigger: '.steps', start: 'top 78%', end: 'bottom 50%', scrub: 0.5 } });
+  steps.forEach((li, i) => {
+    const line = el('i', 'step-line');
+    li.prepend(line);
+    tl.from(line, { scaleX: 0, ease: 'none', duration: 1 }, i * 0.85)
+      .from(li, { opacity: 0.28, y: 24, ease: 'none', duration: 0.7 }, i * 0.85);
+  });
+}
+
+/** Ghost numerals sit behind every section and drift the other way as you scroll. */
+function setupGhostIndex() {
+  for (const section of $$('.section')) {
+    if (!section.querySelector('.section-index')) continue;
+    const ghost = el('span', 'ghost-index');
+    ghost.setAttribute('aria-hidden', 'true');
+    section.prepend(ghost);
+    gsapLib.fromTo(ghost, { yPercent: 45 }, { yPercent: -45, ease: 'none', scrollTrigger: { trigger: section, start: 'top bottom', end: 'bottom top', scrub: 0.6 } });
+  }
+  renumberGhosts();
+}
+function renumberGhosts() {
+  let n = 0;
+  for (const section of $$('.section')) {
+    const ghost = section.querySelector(':scope > .ghost-index');
+    if (!ghost) continue;
+    if (section.hidden) { ghost.textContent = ''; continue; }
+    n += 1;
+    ghost.textContent = String(n).padStart(2, '0');
+  }
+}
+
+/** Grids lean with the speed of the scroll and settle when it stops. */
+function setupVelocitySkew() {
+  const targets = $$('#guide-list, .sample-grid, #help-grid, #needs-grid, #zones-track, .reviews-grid, .features, #featured');
+  if (!targets.length) return;
+  const proxy = { skew: 0 };
+  const set = gsapLib.quickSetter(targets, 'skewY', 'deg');
+  const clamp = gsapLib.utils.clamp(-7, 7);
+  window.ScrollTrigger.create({ onUpdate: (self) => {
+    const skew = clamp(self.getVelocity() / -320);
+    if (Math.abs(skew) > Math.abs(proxy.skew)) {
+      proxy.skew = skew;
+      gsapLib.to(proxy, { skew: 0, duration: 0.9, ease: 'power3', overwrite: true, onUpdate: () => set(proxy.skew) });
+    }
+  } });
+}
+
+/** Buttons lean toward the pointer and spring back. */
+function setupMagnetic() {
+  mm.add(DESKTOP_MOTION, () => {
+    const bound = [];
+    for (const target of $$('.button, .nav-shop, .plate-control')) {
+      const xTo = gsapLib.quickTo(target, 'x', { duration: 0.5, ease: 'power3' });
+      const yTo = gsapLib.quickTo(target, 'y', { duration: 0.5, ease: 'power3' });
+      const move = (e) => { const r = target.getBoundingClientRect(); xTo((e.clientX - (r.left + r.width / 2)) * 0.28); yTo((e.clientY - (r.top + r.height / 2)) * 0.28); };
+      const leave = () => { xTo(0); yTo(0); };
+      target.addEventListener('mousemove', move);
+      target.addEventListener('mouseleave', leave);
+      bound.push([target, move, leave]);
+    }
+    return () => { for (const [t, move, leave] of bound) { t.removeEventListener('mousemove', move); t.removeEventListener('mouseleave', leave); gsapLib.set(t, { clearProps: 'x,y' }); } };
+  });
+}
+
+/** A ring follows the pointer with a little lag, opens over links and buttons, and hides over text fields. */
+function setupCursor() {
+  mm.add(DESKTOP_MOTION, () => {
+    const cursor = el('div', 'cursor');
+    cursor.setAttribute('aria-hidden', 'true');
+    const ring = el('i', 'cursor-ring'); ring.append(el('b'));
+    const dot = el('i', 'cursor-dot'); dot.append(el('b'));
+    cursor.append(ring, dot);
+    document.body.append(cursor);
+    const rx = gsapLib.quickTo(ring, 'x', { duration: 0.45, ease: 'power3' }), ry = gsapLib.quickTo(ring, 'y', { duration: 0.45, ease: 'power3' });
+    const dx = gsapLib.quickTo(dot, 'x', { duration: 0.12, ease: 'power3' }), dy = gsapLib.quickTo(dot, 'y', { duration: 0.12, ease: 'power3' });
+    const move = (e) => { rx(e.clientX); ry(e.clientY); dx(e.clientX); dy(e.clientY); cursor.classList.add('is-on'); };
+    const over = (e) => {
+      const t = e.target instanceof Element ? e.target : null;
+      cursor.classList.toggle('is-hover', Boolean(t && t.closest('a, button, label, select, summary, [role="button"], .need, .guide-card')));
+      cursor.classList.toggle('is-text', Boolean(t && t.closest('input:not([type="checkbox"]):not([type="radio"]), textarea')));
+    };
+    const down = () => cursor.classList.add('is-down');
+    const up = () => cursor.classList.remove('is-down');
+    const out = () => cursor.classList.remove('is-on');
+    window.addEventListener('mousemove', move, { passive: true });
+    document.addEventListener('mouseover', over);
+    document.addEventListener('mousedown', down);
+    document.addEventListener('mouseup', up);
+    document.documentElement.addEventListener('mouseleave', out);
+    return () => { window.removeEventListener('mousemove', move); document.removeEventListener('mouseover', over); document.removeEventListener('mousedown', down); document.removeEventListener('mouseup', up); document.documentElement.removeEventListener('mouseleave', out); cursor.remove(); };
+  });
+}
+
+/** Cards tilt toward the pointer in three dimensions and ease back when it leaves. */
+function setupTilt() {
+  mm.add(DESKTOP_MOTION, () => {
+    const SEL = '.need, .guide-card, .zone-card, .help-card, .review';
+    let current = null;
+    const reset = (node) => gsapLib.to(node, { rotateX: 0, rotateY: 0, y: 0, duration: 0.8, ease: 'power3.out', clearProps: 'transform' });
+    const move = (e) => {
+      const t = e.target instanceof Element ? e.target.closest(SEL) : null;
+      if (t !== current) {
+        if (current) reset(current);
+        current = t && (!t.dataset.motion || t.dataset.motion === 'done') ? t : null;
+        if (current && current.parentElement) current.parentElement.classList.add('depth');
+      }
+      if (!current) return;
+      const r = current.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width - 0.5;
+      const py = (e.clientY - r.top) / r.height - 0.5;
+      gsapLib.to(current, { rotateY: px * 9, rotateX: -py * 9, y: -6, duration: 0.5, ease: 'power2.out', transformPerspective: 900 });
+    };
+    document.addEventListener('mousemove', move, { passive: true });
+    return () => { document.removeEventListener('mousemove', move); if (current) reset(current); };
+  });
 }
 
 function setupSmoothScroll() {
@@ -1821,6 +2045,7 @@ function setupSmoothScroll() {
   try {
     lenis = new window.Lenis({ lerp: 0.09, wheelMultiplier: 1, anchors: true, autoRaf: false });
     lenis.on('scroll', window.ScrollTrigger.update);
+    if (arriving) lenis.stop();
     gsapLib.ticker.add((time) => lenis.raf(time * 1000));
     gsapLib.ticker.lagSmoothing(0);
     // Dialogs and the mobile menu lock the page; pause smooth scrolling while they are open.
@@ -1833,18 +2058,27 @@ function setupSmoothScroll() {
 }
 
 function setupScrollAnimation() {
+  // The arrival curtain is cleared first so a failed library load never leaves it on screen.
+  const introDelay = setupArrival();
   if (!motionOn) return;
   setupSmoothScroll();
   const bar = $('#scroll-progress');
   if (bar) { bar.classList.add('is-on'); gsapLib.to(bar, { scaleX: 1, ease: 'none', scrollTrigger: { start: 0, end: 'max', scrub: 0.3 } }); }
-  setupHeroIntro();
+  setupHeroIntro(introDelay);
+  setupHeroScene();
+  setupGhostIndex();
+  setupStatement();
+  setupSteps();
+  setupVelocitySkew();
+  setupMagnetic();
+  setupCursor();
+  setupTilt();
   for (const head of $$('.section-head, .footer-cta-copy')) revealHeading(head);
   // Containers whose children animate individually (zones, reviews) are skipped here.
   for (const node of $$('.reveal')) if (!node.dataset.motion && !node.matches('.zones-track, .reviews-grid')) revealOnView(node, { y: 56 });
   revealBatch($$('.sample-grid .guide-card'));
   revealBatch($$('.features li'), { y: 48, rotate: 8, step: 0.12 });
   drawIcons($$('.features svg path, .features svg rect'), '.features');
-  revealBatch($$('.steps li'), { y: 40, rotate: 0, scale: 1, step: 0.15 });
   revealBatch($$('.faq-list details'), { y: 28, rotate: 0, scale: 1, step: 0.08, duration: 0.8 });
   revealBatch($$('.footer-grid > *'), { y: 30, rotate: 0, scale: 1, step: 0.1, duration: 0.9, start: 'top 95%' });
   revealBatch($$('.contents li'), { y: 24, rotate: 0, scale: 1, step: 0.08, duration: 0.7, start: 'top 95%' });
@@ -1856,6 +2090,8 @@ function setupScrollAnimation() {
     gsapLib.from(section, { clipPath: 'inset(0 0 100% 0)', ease: 'none', scrollTrigger: { trigger: section, start: 'top 95%', end: 'top 35%', scrub: 0.4, once: true, onLeave: () => { section.style.clipPath = ''; } } });
   }
   // The giant footer wordmark drifts sideways as the footer scrolls.
+  const footer = $('.site-footer');
+  if (footer) gsapLib.fromTo([...footer.children].filter((c) => !c.classList.contains('footer-mark')), { yPercent: -14 }, { yPercent: 0, ease: 'none', scrollTrigger: { trigger: footer, start: 'top bottom', end: 'top 25%', scrub: 0.5 } });
   const mark = $('.footer-mark');
   if (mark) gsapLib.fromTo(mark, { xPercent: -60 }, { xPercent: -40, ease: 'none', scrollTrigger: { trigger: '.site-footer', start: 'top bottom', end: 'bottom bottom', scrub: 0.5 } });
   window.addEventListener('load', () => window.ScrollTrigger.refresh());
