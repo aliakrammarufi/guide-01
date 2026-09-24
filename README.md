@@ -160,6 +160,13 @@ The home page uses GSAP 3.15 with ScrollTrigger and Lenis smooth scrolling, load
 - **Large screens with a mouse only:** the hero pins while the film grows to fill the screen, Browse by need becomes a horizontal gallery, the statement fills word by word, steps draw in sequence, ghost numerals drift behind sections, the header hides while you read down and returns when you scroll up, buttons are gently magnetic, cards tilt a few degrees, and a thin cursor ring follows the pointer.
 - **Turn parts off:** delete the `#arrival` block in `index.html` to drop the curtain; set `SMOOTH_SCROLL = false` in `site.js` to keep native scrolling; the cinematic functions are called one per line at the top of `setupScrollAnimation` in `site.js`, so remove any you do not want.
 
+## The deployed Worker (done on September 24, 2026)
+
+- Address: `https://marufi-checkout.marufidigital.workers.dev` (account subdomain `marufidigital`), set as `checkoutEndpoint` in `dist/guides.json`.
+- Storage: the `STORE` KV namespace (id in `checkout/wrangler.toml`). Files live in KV too (25 MB per file, 1 GB total free) until R2 is enabled; see the comment in `wrangler.toml` to switch.
+- Secrets set: `DOWNLOAD_SECRET`, `ADMIN_PASSWORD`. Still to set: `STRIPE_SECRET_KEY` (checkout, gift cards, orders), `RESEND_API_KEY` plus a real `FROM_EMAIL` and `CONTACT_EMAIL` in `wrangler.toml` (receipts, download links, sign-in codes, newsletter). Run `cd checkout && npx wrangler secret put STRIPE_SECRET_KEY`, then `npx wrangler deploy` after editing `wrangler.toml`.
+- Public `GET /status` tells the storefront which of these are connected, so pages show an honest notice instead of a form that cannot succeed.
+
 ## Deploy the Worker
 
 1. `npm i -g wrangler`, then `wrangler login`.
