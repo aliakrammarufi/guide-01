@@ -3,3 +3,4 @@ __pycache__/
 automation/queue/
 automation/completed/
 automation/paused/
+.vercel

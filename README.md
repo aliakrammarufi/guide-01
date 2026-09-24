@@ -177,9 +177,9 @@ The home page uses GSAP 3.15 with ScrollTrigger and Lenis smooth scrolling, load
 
 To try the Worker locally without deploying: `node checkout/dev-server.mjs` starts it on `http://localhost:8787` with in-memory storage (password `letmein`, override with `ADMIN_PASSWORD=...`). Stripe and e-mail calls need real keys in the environment; everything else works offline.
 
-## Live site on GitHub Pages
+## Live site on Vercel
 
-Every push to `main` publishes `dist/` to **https://aliakrammarufi.github.io/guide-01/** through `.github/workflows/pages.yml` (about a minute). The admin is at `/guide-01/admin/`, the kind pages at `/guide-01/travel-guides/` and so on. Set `siteUrl` in `guides.json` to that address (or your own domain once you point one at Pages) so structured data and the sitemap use it.
+The site is served from **https://marufi-digital.vercel.app** (Vercel project `marufi-digital`, static output from `dist/`, config in `vercel.json`). Deploy with `npx vercel deploy --prod` from the repo root, or connect the GitHub repository in the Vercel dashboard so every push to `main` deploys itself. `siteUrl` in `guides.json` is set to that address; change it (and `checkout/wrangler.toml`) when you attach your own domain. Vercel's free Hobby plan is for non-commercial use, so move to Pro before real sales.
 
 ## Preview locally
 
