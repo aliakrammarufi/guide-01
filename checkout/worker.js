@@ -56,7 +56,8 @@
  *   RESEND_API_KEY      secret, optional; e-mail through resend.com
  *   ADMIN_TOKEN         secret, optional; alternative bearer token for scripts
  * Bindings:
- *   FILES   R2 bucket: media/... (public) and files/... (purchased downloads, private)
+ *   FILES   R2 bucket, optional: media/... (public) and files/... (purchased downloads, private).
+ *           Without it, files are kept in the STORE KV namespace (25 MB per file, 1 GB total on the free plan, no card needed).
  *   STORE   KV namespace: catalog, backups, notify requests, gift bookkeeping, login throttling
  */
 export default {
@@ -427,7 +428,8 @@ function status(env) {
   return {
     stripe: Boolean(env.STRIPE_SECRET_KEY),
     stripeMode: env.STRIPE_SECRET_KEY ? (String(env.STRIPE_SECRET_KEY).startsWith('sk_live') ? 'live' : 'test') : '',
-    files: Boolean(env.FILES),
+    files: Boolean(files(env)),
+    fileStorage: files(env) ? files(env).kind : '',
     store: Boolean(env.STORE),
     email: Boolean(env.RESEND_API_KEY && env.FROM_EMAIL),
     downloads: Boolean(env.DOWNLOAD_SECRET),
@@ -513,47 +515,87 @@ function safeName(name) {
   return base || 'file';
 }
 
+/* ---------- File storage: R2 when bound, otherwise the KV namespace (no card needed; 25 MB per file) ---------- */
+const KV_FILE_LIMIT = 25 * 1024 * 1024 - 4096;
+function files(env) {
+  if (env.FILES) return {
+    kind: 'r2',
+    limit: Infinity,
+    put: (key, body, contentType) => env.FILES.put(key, body, { httpMetadata: { contentType } }),
+    get: async (key) => { const o = await env.FILES.get(key); return o ? { body: o.body, contentType: o.httpMetadata && o.httpMetadata.contentType } : null; },
+    head: (key) => env.FILES.head(key),
+    delete: (key) => env.FILES.delete(key),
+    list: async (prefix) => (await env.FILES.list({ prefix, limit: 500 })).objects.map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded }))
+  };
+  if (env.STORE) return {
+    kind: 'kv',
+    limit: KV_FILE_LIMIT,
+    put: async (key, body, contentType) => {
+      const bytes = await new Response(body).arrayBuffer();
+      if (bytes.byteLength > KV_FILE_LIMIT) throw fail('Files are limited to 25 MB each on KV storage. Enable R2 in Cloudflare for larger files.', 413);
+      await env.STORE.put(`blob:${key}`, bytes);
+      await env.STORE.put(`blobmeta:${key}`, JSON.stringify({ size: bytes.byteLength, uploaded: new Date().toISOString(), contentType }));
+    },
+    get: async (key) => { const meta = await env.STORE.get(`blobmeta:${key}`); if (!meta) return null; const body = await env.STORE.get(`blob:${key}`, 'stream'); return body ? { body, contentType: JSON.parse(meta).contentType } : null; },
+    head: async (key) => { const meta = await env.STORE.get(`blobmeta:${key}`); return meta ? JSON.parse(meta) : null; },
+    delete: async (key) => { await env.STORE.delete(`blob:${key}`); await env.STORE.delete(`blobmeta:${key}`); },
+    list: async (prefix) => {
+      const l = await env.STORE.list({ prefix: `blobmeta:${prefix}`, limit: 500 });
+      const out = [];
+      for (const k of l.keys) { const meta = JSON.parse((await env.STORE.get(k.name)) || '{}'); out.push({ key: k.name.slice('blobmeta:'.length), size: meta.size || 0, uploaded: meta.uploaded }); }
+      return out;
+    }
+  };
+  return null;
+}
+
 async function upload(request, url, env) {
-  if (!env.FILES) throw fail('The FILES R2 bucket is not bound', 500);
+  const store = files(env);
+  if (!store) throw fail('File storage is not configured (bind FILES or STORE)', 500);
   const kind = url.searchParams.get('kind') === 'file' ? 'file' : 'media';
   const name = safeName(url.searchParams.get('name') || request.headers.get('X-File-Name'));
   const ext = name.includes('.') ? name.split('.').pop() : '';
   const types = kind === 'file' ? FILE_TYPES : MEDIA_TYPES;
   if (!types[ext]) throw fail(`Unsupported ${kind} type .${ext}`);
   const length = Number(request.headers.get('Content-Length')) || 0;
-  const limit = kind === 'file' || /^(mp4|webm|mov)$/.test(ext) ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
+  const limit = Math.min(store.limit, kind === 'file' || /^(mp4|webm|mov)$/.test(ext) ? 95 * 1024 * 1024 : 12 * 1024 * 1024);
   if (length > limit) throw fail(`File too large (limit ${Math.round(limit / 1048576)} MB)`);
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const key = `${kind === 'file' ? 'files' : 'media'}/${stamp}-${crypto.randomUUID().slice(0, 8)}-${name}`;
-  await env.FILES.put(key, request.body, { httpMetadata: { contentType: types[ext] } });
+  await store.put(key, request.body, types[ext]);
   await logEvent(env, request, 'upload', key);
   return { key, url: kind === 'media' ? `${url.origin}/media/${key.slice('media/'.length)}` : '', kind, name, size: length };
 }
 
 async function removeUpload(key, env) {
-  if (!env.FILES) throw fail('The FILES R2 bucket is not bound', 500);
+  const store = files(env);
+  if (!store) throw fail('File storage is not configured', 500);
   if (!/^(media|files)\/[a-z0-9._\/-]+$/i.test(String(key || ''))) throw fail('Invalid key');
-  await env.FILES.delete(key);
+  await store.delete(key);
   return { ok: true };
 }
 
 async function listFiles(kind, env, url) {
-  if (!env.FILES) throw fail('The FILES R2 bucket is not bound', 500);
+  const store = files(env);
+  if (!store) throw fail('File storage is not configured', 500);
   const prefix = kind === 'file' ? 'files/' : 'media/';
-  const list = await env.FILES.list({ prefix, limit: 500 });
+  const objects = await store.list(prefix);
   return {
-    objects: list.objects.map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded, url: prefix === 'media/' ? `${url.origin}/media/${o.key.slice(6)}` : '' }))
+    storage: store.kind,
+    limitMb: Number.isFinite(store.limit) ? Math.floor(store.limit / 1048576) : 0,
+    objects: objects.map((o) => ({ key: o.key, size: o.size, uploaded: o.uploaded, url: prefix === 'media/' ? `${url.origin}/media/${o.key.slice(6)}` : '' }))
   };
 }
 
 async function serveMedia(key, env, cors) {
-  if (!env.FILES) return new Response('Not configured', { status: 500 });
+  const store = files(env);
+  if (!store) return new Response('Not configured', { status: 500 });
   if (!/^[a-z0-9._\/-]+$/i.test(key) || key.includes('..')) return new Response('Not found', { status: 404 });
-  const object = await env.FILES.get(`media/${key}`);
+  const object = await store.get(`media/${key}`);
   if (!object) return new Response('Not found', { status: 404 });
   return new Response(object.body, {
     headers: {
-      'Content-Type': (object.httpMetadata && object.httpMetadata.contentType) || 'application/octet-stream',
+      'Content-Type': object.contentType || 'application/octet-stream',
       'Cache-Control': 'public, max-age=31536000, immutable',
       'Access-Control-Allow-Origin': '*'
     }
@@ -795,7 +837,7 @@ async function health(env) {
     if (!g.file && !isPreorderPending(g)) push('warn', g, 'No product file: buyers would get nothing to download');
     if (g.status === 'scheduled' && g.publishAt && Date.parse(g.publishAt) <= Date.now()) push('info', g, 'Scheduled date has passed; it is live now');
     if (isPreorderPending(g) && g.file) push('info', g, 'Pre-order has a file attached: ready to deliver');
-    if (g.file && env.FILES) { const head = await env.FILES.head(g.file); if (!head) push('error', g, `Product file missing from the bucket: ${g.file}`); }
+    if (g.file && files(env)) { const head = await files(env).head(g.file); if (!head) push('error', g, `Product file missing from storage: ${g.file}`); }
     if (g.priceId && env.STRIPE_SECRET_KEY) {
       try {
         const price = await stripe(env, 'GET', `/prices/${g.priceId}`);
@@ -987,13 +1029,14 @@ async function orderDetails(sessionId, env, url) {
 async function serveFile(token, env) {
   const payload = await verifyToken(env, token);
   if (!payload || !payload.key) return new Response('This download link has expired. Use "Resend my download" on the store to get a new one.', { status: 403 });
-  if (!env.FILES) return new Response('File storage is not configured', { status: 500 });
-  const object = await env.FILES.get(payload.key);
+  const store = files(env);
+  if (!store) return new Response('File storage is not configured', { status: 500 });
+  const object = await store.get(payload.key);
   if (!object) return new Response('File not found', { status: 404 });
   const filename = payload.key.split('/').pop();
   return new Response(object.body, {
     headers: {
-      'Content-Type': (object.httpMetadata && object.httpMetadata.contentType) || 'application/octet-stream',
+      'Content-Type': object.contentType || 'application/octet-stream',
       'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '')}"`,
       'Cache-Control': 'private, no-store'
     }

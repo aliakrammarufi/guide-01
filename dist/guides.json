@@ -8,7 +8,7 @@
     "EUR",
     "GBP"
   ],
-  "checkoutEndpoint": "",
+  "checkoutEndpoint": "https://marufi-checkout.marufidigital.workers.dev",
   "contactEmail": "",
   "social": {
     "instagram": "",

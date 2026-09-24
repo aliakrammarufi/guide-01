@@ -3,10 +3,10 @@ main = "worker.js"
 compatibility_date = "2026-01-01"
 
 [vars]
-SITE_URL = "https://your-domain.com"
-SUCCESS_URL = "https://your-domain.com/thank-you.html?session_id={CHECKOUT_SESSION_ID}"
-CANCEL_URL = "https://your-domain.com/#guides"
-ALLOWED_ORIGINS = "https://your-domain.com,https://www.your-domain.com"
+SITE_URL = "https://aliakrammarufi.github.io/guide-01"
+SUCCESS_URL = "https://aliakrammarufi.github.io/guide-01/thank-you.html?session_id={CHECKOUT_SESSION_ID}"
+CANCEL_URL = "https://aliakrammarufi.github.io/guide-01/#guides"
+ALLOWED_ORIGINS = "https://aliakrammarufi.github.io,http://localhost:8765"
 DOWNLOAD_HOURS = "72"
 FROM_EMAIL = "Marufi Digital <orders@your-domain.com>"
 CONTACT_EMAIL = "hello@your-domain.com"
@@ -19,14 +19,15 @@ CONTACT_EMAIL = "hello@your-domain.com"
 #   RESEND_API_KEY      optional, for e-mail through resend.com
 #   ADMIN_TOKEN         optional, bearer token for scripts
 
-# Uploaded covers (public) and purchased files (private) live in this R2 bucket.
-# Create it with: wrangler r2 bucket create marufi-files
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "marufi-files"
+# Uploaded covers (public) and purchased files (private). Without R2 they live in the STORE KV namespace below
+# (25 MB per file, 1 GB total on the free plan, no card needed). To move to R2 later: enable R2 in the dashboard,
+# run `wrangler r2 bucket create marufi-files`, uncomment these three lines, and redeploy.
+# [[r2_buckets]]
+# binding = "FILES"
+# bucket_name = "marufi-files"
 
 # The live catalog, backups, reader requests, and login throttling live in this KV namespace.
 # Create it with: wrangler kv namespace create STORE   (then paste the id below)
 [[kv_namespaces]]
 binding = "STORE"
-id = "paste-the-kv-namespace-id-here"
+id = "4ea3f8d4be8f4043a7150f50e69e10a5"
