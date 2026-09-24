@@ -2,7 +2,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const KEYS = { endpoint: 'marufi-admin-endpoint', token: 'marufi-admin-token', draft: 'marufi-admin-draft', remember: 'marufi-admin-remember' };
-const state = { mode: 'offline', endpoint: '', token: '', catalog: null, dirty: false, status: {}, orders: null, requests: [], media: [], files: [], view: 'overview', editing: null, backups: [] };
+const state = { mode: 'offline', endpoint: '', token: '', catalog: null, dirty: false, status: {}, orders: null, ordersError: '', requests: [], media: [], files: [], view: 'overview', editing: null, backups: [], titlesSort: { key: 'title', dir: 'asc' }, titlesPage: 1, selected: new Set(), health: null, templates: null, coupons: null, loginChallenge: '', resetChallenge: '' };
 
 /* ---------- Utilities ---------- */
 function el(tag, className, text) {
@@ -68,13 +68,53 @@ async function api(path, options = {}) {
   return data;
 }
 
-async function uploadFile(file, kind) {
-  if (state.mode !== 'online') throw new Error('Uploads need the Worker. Offline, put the file in dist/assets/ and paste its path instead.');
-  const name = encodeURIComponent(file.name);
-  const response = await fetch(`${state.endpoint}/admin/upload?kind=${kind}&name=${name}`, { method: 'PUT', headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': file.type || 'application/octet-stream' }, body: file });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Upload failed');
-  return data;
+function setProgress(fraction) {
+  const bar = $('#progress');
+  if (fraction === null) { bar.style.transform = 'scaleX(0)'; bar.classList.remove('is-active'); return; }
+  bar.classList.add('is-active');
+  bar.style.transform = `scaleX(${Math.max(0.03, Math.min(1, fraction))})`;
+}
+
+/** Crops (optional) and resizes an image in the browser before upload, returning a WebP file. */
+async function processImage(file, { aspect = 0, maxWidth = 1400, quality = 0.86 } = {}) {
+  if (!/^image\/(jpeg|png|webp|avif|gif)$/.test(file.type)) return file;
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return file;
+  let sx = 0; let sy = 0; let sw = bitmap.width; let sh = bitmap.height;
+  if (aspect > 0) {
+    const current = sw / sh;
+    if (current > aspect) { sw = Math.round(sh * aspect); sx = Math.round((bitmap.width - sw) / 2); }
+    else if (current < aspect) { sh = Math.round(sw / aspect); sy = Math.round((bitmap.height - sh) / 2); }
+  }
+  const scale = Math.min(1, maxWidth / sw);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(sw * scale);
+  canvas.height = Math.round(sh * scale);
+  canvas.getContext('2d').drawImage(bitmap, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
+  if (!blob) return file;
+  const name = file.name.replace(/\.[^.]+$/, '') + '.webp';
+  return new File([blob], name, { type: 'image/webp' });
+}
+
+function uploadFile(file, kind, onProgress) {
+  if (state.mode !== 'online') return Promise.reject(new Error('Uploads need the Worker. Offline, put the file in dist/assets/ and paste its path instead.'));
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', `${state.endpoint}/admin/upload?kind=${kind}&name=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader('Authorization', `Bearer ${state.token}`);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) { setProgress(event.loaded / event.total); if (onProgress) onProgress(event.loaded / event.total); } };
+    xhr.onload = () => {
+      setProgress(null);
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data); else reject(new Error(data.error || `Upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => { setProgress(null); reject(new Error('Upload failed: network error')); };
+    setProgress(0.02);
+    xhr.send(file);
+  });
 }
 
 /* ---------- Catalog state ---------- */
@@ -98,7 +138,9 @@ function normaliseCatalog(raw) {
     g.samplePages = Array.isArray(g.samplePages) ? g.samplePages : [];
     g.prices = g.prices && typeof g.prices === 'object' ? g.prices : {};
     if (!g.id) g.id = slug(g.title) || `title-${Date.now()}`;
+    if (!['draft', 'scheduled', 'published'].includes(g.status)) g.status = 'published';
   }
+  c.cartDiscount = c.cartDiscount && typeof c.cartDiscount === 'object' ? c.cartDiscount : {};
   delete c._empty;
   return c;
 }
@@ -136,11 +178,23 @@ async function publish() {
 }
 
 /* ---------- Auth and boot ---------- */
-async function signIn(endpoint, password, remember) {
+async function signIn(endpoint, password, remember, code) {
   const base = endpoint.replace(/\/+$/, '');
-  const response = await fetch(`${base}/admin/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+  const response = state.loginChallenge && code
+    ? await fetch(`${base}/admin/login/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge: state.loginChallenge, code }) })
+    : await fetch(`${base}/admin/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Sign in failed');
+  if (data.challenge) {
+    state.loginChallenge = data.challenge;
+    $('#login-step-code').hidden = false;
+    $('#login-sent-to').textContent = data.sentTo || 'your e-mail';
+    $('#login-code').focus();
+    const pending = new Error('Enter the code we just e-mailed you.');
+    pending.pending = true;
+    throw pending;
+  }
+  state.loginChallenge = '';
   state.endpoint = base;
   state.token = data.token;
   state.mode = 'online';
@@ -195,6 +249,8 @@ function restoreDraft() {
 }
 
 async function enterApp() {
+  // Deep link to a section: /admin/#view=titles
+  try { const wanted = new URLSearchParams(location.hash.slice(1)).get('view'); if (wanted && VIEW_TITLES[wanted]) state.view = wanted; } catch { /* ignore */ }
   $('#login').hidden = true;
   $('#app').hidden = false;
   $('#mode-pill').textContent = state.mode === 'online' ? 'Connected' : 'Offline · guides.json';
@@ -237,11 +293,12 @@ $('#login-form').addEventListener('submit', async (event) => {
   const endpoint = $('#login-endpoint').value.trim();
   const password = $('#login-password').value;
   if (!isHttps(endpoint)) { note.textContent = 'Enter your Worker URL (https://…workers.dev), or work offline below.'; return; }
-  if (!password) { note.textContent = 'Enter the admin password.'; return; }
+  if (!password && !state.loginChallenge) { note.textContent = 'Enter the admin password.'; return; }
   $('#login-submit').disabled = true;
   note.textContent = '';
   try {
-    await signIn(endpoint, password, $('#login-remember').checked);
+    await signIn(endpoint, password, $('#login-remember').checked, $('#login-code').value.trim());
+    $('#login-step-code').hidden = true;
     if (!restoreDraft()) await loadCatalogOnline();
     await enterApp();
   } catch (error) {
@@ -249,6 +306,35 @@ $('#login-form').addEventListener('submit', async (event) => {
   } finally {
     $('#login-submit').disabled = false;
   }
+});
+$('#login-forgot').addEventListener('click', async () => {
+  const endpoint = $('#login-endpoint').value.trim().replace(/\/+$/, '');
+  const note = $('#login-note');
+  if (!isHttps(endpoint)) { note.textContent = 'Enter your Worker URL first.'; return; }
+  try {
+    const response = await fetch(`${endpoint}/admin/recover`, { method: 'POST' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Could not start recovery');
+    state.resetChallenge = data.challenge;
+    $('#reset-hint').textContent = `A six-digit code has been sent to ${data.sentTo}. It expires in 15 minutes.`;
+    $('#login-form').hidden = true;
+    $('#reset-form').hidden = false;
+    $('#reset-code').focus();
+  } catch (error) { note.textContent = error.message; }
+});
+$('#reset-back').addEventListener('click', () => { $('#reset-form').hidden = true; $('#login-form').hidden = false; });
+$('#reset-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const endpoint = $('#login-endpoint').value.trim().replace(/\/+$/, '');
+  const note = $('#reset-note');
+  try {
+    const response = await fetch(`${endpoint}/admin/reset`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ challenge: state.resetChallenge, code: $('#reset-code').value.trim(), password: $('#reset-password').value }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Reset failed');
+    $('#reset-form').hidden = true; $('#login-form').hidden = false;
+    $('#login-password').value = '';
+    $('#login-note').textContent = 'Password changed. Sign in with the new one.';
+  } catch (error) { note.textContent = error.message; }
 });
 $('#login-offline').addEventListener('click', async () => {
   state.mode = 'offline';
@@ -267,6 +353,7 @@ const VIEW_TITLES = {
   reviews: ['Reviews', 'Reader quotes shown on the home page.'],
   media: ['Media & files', 'Images for the site and the products buyers download.'],
   orders: ['Orders', 'Paid Stripe checkouts.'],
+  coupons: ['Coupons', 'Discount codes buyers enter at checkout.'],
   requests: ['Requests', 'Places readers asked for.'],
   announce: ['Announce', 'Email buyers about an updated title.'],
   settings: ['Store settings', 'Name, currencies, contact, author, and regions.'],
@@ -279,7 +366,7 @@ function showView(view) {
   const [title, sub] = VIEW_TITLES[view] || [view, ''];
   $('#view-title').textContent = title;
   $('#view-sub').textContent = sub;
-  const renderers = { overview: renderOverview, titles: renderTitles, zones: renderZones, reviews: renderReviews, media: renderMedia, orders: renderOrders, requests: renderRequests, announce: renderAnnounce, settings: renderSettings, tools: renderTools };
+  const renderers = { overview: renderOverview, titles: renderTitles, zones: renderZones, reviews: renderReviews, media: renderMedia, orders: renderOrders, coupons: renderCoupons, requests: renderRequests, announce: renderAnnounce, settings: renderSettings, tools: renderTools };
   if (renderers[view]) renderers[view]();
   window.scrollTo({ top: 0 });
 }
@@ -356,44 +443,185 @@ function renderOverview() {
   ];
   for (const [label, done] of checks) list.append(el('li', done ? 'done' : '', label));
   renderOrdersTable($('#overview-orders'), state.orders ? state.orders.orders.slice(0, 6) : [], true);
+  renderHealth();
 }
+
+function renderHealth() {
+  const box = $('#health-list');
+  box.replaceChildren();
+  if (state.mode !== 'online') { box.append(el('div', 'empty', 'Health checks compare the catalog with Stripe and the file bucket. Connect the Worker to run them.')); return; }
+  if (!state.health) { box.append(el('div', 'empty', 'Not checked yet. Run the check to compare prices with Stripe and confirm every product file exists.')); return; }
+  if (!state.health.issues.length) { box.append(el('div', 'empty', `All ${state.health.titles} titles look healthy. Checked ${formatDate(state.health.checkedAt)}.`)); return; }
+  for (const issue of state.health.issues) {
+    const row = el('div', `health-item ${issue.level}`);
+    row.append(el('span', 'level'));
+    const text = el('span');
+    if (issue.title) text.append(el('strong', null, issue.title + ' · '));
+    text.append(document.createTextNode(issue.message));
+    row.append(text);
+    if (issue.guideId) { const open = el('button', 'link-button', 'Open'); open.type = 'button'; open.addEventListener('click', () => { const g = state.catalog.guides.find((x) => x.id === issue.guideId); if (g) openTitleEditor(g); }); row.append(open); } else row.append(el('span'));
+    box.append(row);
+  }
+}
+$('#health-run').addEventListener('click', async () => {
+  const button = $('#health-run');
+  button.textContent = 'Checking…';
+  try { state.health = await api('/admin/health'); renderHealth(); }
+  catch (error) { toast(error.message, true); }
+  finally { button.textContent = 'Run check'; }
+});
 
 /* ---------- Titles ---------- */
 function coverThumb(guide) {
   if (guide.cover) { const img = el('img', 'thumb'); img.src = assetUrl(guide.cover); img.alt = ''; return img; }
   return el('div', 'thumb-art', (guide.state || guide.title || '').slice(0, 10));
 }
-function renderTitles() {
-  const wrap = $('#titles-table');
+function statusOf(g) {
+  if (g.status === 'draft') return ['draft', 'off'];
+  if (g.status === 'scheduled' && g.publishAt && Date.parse(g.publishAt) > Date.now()) return [`scheduled · ${new Date(g.publishAt).toLocaleDateString()}`, 'warn'];
+  if (g.preorder || (g.releaseDate && Date.parse(g.releaseDate) > Date.now())) return ['pre-order', 'warn'];
+  return ['live', 'ok'];
+}
+function filteredTitles() {
   const query = $('#titles-search').value.trim().toLowerCase();
   const type = $('#titles-type').value;
-  const rows = state.catalog.guides.filter((g) => (!type || g.type === type) && (!query || `${g.title} ${g.country} ${g.state} ${g.type}`.toLowerCase().includes(query)));
+  const status = $('#titles-status').value;
+  let rows = state.catalog.guides.filter((g) => (!type || g.type === type) && (!query || `${g.title} ${g.country} ${g.state} ${g.type} ${g.id}`.toLowerCase().includes(query)));
+  if (status === 'preorder') rows = rows.filter((g) => statusOf(g)[0] === 'pre-order');
+  else if (status === 'published') rows = rows.filter((g) => statusOf(g)[1] === 'ok');
+  else if (status) rows = rows.filter((g) => g.status === status);
+  const { key, dir } = state.titlesSort;
+  const value = (g) => key === 'price' ? Number(g.price) || 0 : key === 'place' ? `${g.country || ''} ${g.state || ''}` : key === 'status' ? statusOf(g)[0] : String(g[key] || '');
+  rows.sort((a, b) => { const va = value(a); const vb = value(b); const c = typeof va === 'number' ? va - vb : String(va).localeCompare(String(vb)); return dir === 'asc' ? c : -c; });
+  return rows;
+}
+function renderTitles() {
+  const wrap = $('#titles-table');
+  const all = filteredTitles();
+  const pageSize = 25;
+  const pages = Math.max(1, Math.ceil(all.length / pageSize));
+  if (state.titlesPage > pages) state.titlesPage = pages;
+  const rows = all.slice((state.titlesPage - 1) * pageSize, state.titlesPage * pageSize);
   wrap.replaceChildren();
-  if (!rows.length) { wrap.append(el('div', 'empty', state.catalog.guides.length ? 'Nothing matches.' : 'No titles yet. Add your first guide or book.')); return; }
+  renderBulkBar();
+  if (!rows.length) { wrap.append(el('div', 'empty', state.catalog.guides.length ? 'Nothing matches.' : 'No titles yet. Add your first guide or book.')); $('#titles-pager').replaceChildren(); return; }
   const table = el('table');
   const head = el('tr');
-  for (const h of ['', 'Title', 'Type', 'Place', 'Price', 'Stripe', 'Flags', '']) head.append(el('th', null, h));
+  const selectAll = document.createElement('input'); selectAll.type = 'checkbox'; selectAll.setAttribute('aria-label', 'Select all on this page');
+  selectAll.checked = rows.every((g) => state.selected.has(g.id));
+  selectAll.addEventListener('change', () => { for (const g of rows) { if (selectAll.checked) state.selected.add(g.id); else state.selected.delete(g.id); } renderTitles(); });
+  const th0 = el('th', 'select-cell'); th0.append(selectAll); head.append(th0, el('th', null, ''));
+  for (const [label, key] of [['Title', 'title'], ['Type', 'type'], ['Place', 'place'], ['Price', 'price'], ['Status', 'status'], ['Stripe', ''], ['Flags', ''], ['', '']]) {
+    const th = el('th', key ? `sortable${state.titlesSort.key === key ? ' ' + state.titlesSort.dir : ''}` : '', label);
+    if (key) th.addEventListener('click', () => { state.titlesSort = { key, dir: state.titlesSort.key === key && state.titlesSort.dir === 'asc' ? 'desc' : 'asc' }; renderTitles(); });
+    head.append(th);
+  }
   table.append(head);
   for (const g of rows) {
     const tr = el('tr');
+    const c0 = el('td', 'select-cell'); const box = document.createElement('input'); box.type = 'checkbox'; box.checked = state.selected.has(g.id); box.setAttribute('aria-label', `Select ${g.title}`);
+    box.addEventListener('change', () => { if (box.checked) state.selected.add(g.id); else state.selected.delete(g.id); renderBulkBar(); }); c0.append(box);
     const c1 = el('td'); c1.append(coverThumb(g));
     const c2 = el('td'); c2.append(el('div', 'row-title', g.title), el('span', 'row-sub', g.id));
     const c5 = el('td'); c5.textContent = Number.isFinite(Number(g.price)) ? money(Number(g.price)) : '—';
+    const [statusText, statusClass] = statusOf(g);
+    const cs = el('td'); cs.append(Object.assign(el('span', `pill ${statusClass}`), { textContent: statusText }));
     const stripeOk = Boolean(g.priceId || g.paymentLink);
     const c6 = el('td'); c6.append(Object.assign(el('span', `pill ${stripeOk ? 'ok' : 'warn'}`), { textContent: stripeOk ? 'ready' : 'not linked' }));
-    const flags = [g.featured ? 'Featured' : '', g.badge, g.salePrice ? 'Sale' : '', g.file ? 'File' : '', g.samplePages.length || g.sample ? 'Sample' : ''].filter(Boolean).join(' · ');
+    const flags = [g.featured ? 'Featured' : '', g.badge, g.salePrice ? 'Sale' : '', g.file ? 'File' : '', (g.samplePages || []).length || g.sample ? 'Sample' : ''].filter(Boolean).join(' · ');
     const c7 = el('td'); c7.append(el('span', 'row-sub', flags));
     const c8 = el('td', 'row-actions');
     const edit = el('button', 'link-button', 'Edit'); edit.type = 'button'; edit.addEventListener('click', () => openTitleEditor(g));
-    const dup = el('button', 'link-button', 'Duplicate'); dup.type = 'button'; dup.addEventListener('click', () => { const copy = JSON.parse(JSON.stringify(g)); copy.id = `${g.id}-copy`; copy.title = `${g.title} (copy)`; delete copy.priceId; delete copy.productId; delete copy.paymentLink; copy.featured = false; state.catalog.guides.push(copy); markDirty(); renderTitles(); toast('Duplicated'); });
+    const dup = el('button', 'link-button', 'Duplicate'); dup.type = 'button'; dup.addEventListener('click', () => { const copy = JSON.parse(JSON.stringify(g)); copy.id = `${g.id}-copy`; copy.title = `${g.title} (copy)`; copy.status = 'draft'; delete copy.priceId; delete copy.productId; delete copy.paymentLink; copy.featured = false; state.catalog.guides.push(copy); markDirty(); renderTitles(); toast('Duplicated as a draft'); });
     c8.append(edit, dup);
-    tr.append(c1, c2, el('td', null, g.type || 'Guide'), el('td', null, [g.country, g.state].filter(Boolean).join(' / ') || '—'), c5, c6, c7, c8);
+    tr.append(c0, c1, c2, el('td', null, g.type || 'Guide'), el('td', null, [g.country, g.state].filter(Boolean).join(' / ') || '—'), c5, cs, c6, c7, c8);
     table.append(tr);
   }
   wrap.append(table);
+  const pager = $('#titles-pager');
+  pager.replaceChildren();
+  pager.append(el('span', null, `${all.length} ${all.length === 1 ? 'title' : 'titles'} · page ${state.titlesPage} of ${pages}`));
+  const buttons = el('div', 'pages');
+  for (let i = 1; i <= pages; i += 1) { const b = el('button', i === state.titlesPage ? 'is-active' : '', String(i)); b.type = 'button'; b.addEventListener('click', () => { state.titlesPage = i; renderTitles(); }); buttons.append(b); }
+  if (pages > 1) pager.append(buttons);
 }
-$('#titles-search').addEventListener('input', renderTitles);
-$('#titles-type').addEventListener('change', renderTitles);
+function renderBulkBar() {
+  const bar = $('#bulk-bar');
+  state.selected = new Set([...state.selected].filter((id) => state.catalog.guides.some((g) => g.id === id)));
+  bar.hidden = state.selected.size === 0;
+  $('#bulk-count').textContent = `${state.selected.size} selected`;
+}
+$('#bulk-action').addEventListener('change', () => {
+  const action = $('#bulk-action').value;
+  const value = $('#bulk-value');
+  value.hidden = !['price-pct', 'price-cur', 'badge'].includes(action);
+  value.placeholder = action === 'price-pct' ? 'e.g. -10 or 15' : action === 'price-cur' ? 'e.g. USD 14' : 'Badge text';
+});
+$('#bulk-apply').addEventListener('click', () => {
+  const action = $('#bulk-action').value;
+  const value = $('#bulk-value').value.trim();
+  const targets = state.catalog.guides.filter((g) => state.selected.has(g.id));
+  if (!action || !targets.length) return;
+  if (action === 'delete') { const button = $('#bulk-apply'); if (!button.dataset.armed) { button.dataset.armed = '1'; button.textContent = 'Confirm delete'; setTimeout(() => { delete button.dataset.armed; button.textContent = 'Apply'; }, 4000); return; } state.catalog.guides = state.catalog.guides.filter((g) => !state.selected.has(g.id)); state.selected.clear(); }
+  else if (action === 'publish') for (const g of targets) g.status = 'published';
+  else if (action === 'draft') for (const g of targets) g.status = 'draft';
+  else if (action === 'badge') for (const g of targets) g.badge = value.slice(0, 24);
+  else if (action === 'price-pct') { const pct = Number(value); if (!Number.isFinite(pct)) { toast('Enter a percentage such as -10 or 15.', true); return; } for (const g of targets) g.price = Math.round(Number(g.price) * (1 + pct / 100) * 100) / 100; }
+  else if (action === 'price-cur') { const m = value.toUpperCase().match(/^([A-Z]{3})\s+([\d.]+)$/); if (!m) { toast('Use the form "USD 14".', true); return; } for (const g of targets) { g.prices = g.prices || {}; g.prices[m[1]] = Number(m[2]); } }
+  const button = $('#bulk-apply'); delete button.dataset.armed; button.textContent = 'Apply';
+  markDirty(); renderTitles(); toast(`Applied to ${targets.length} ${targets.length === 1 ? 'title' : 'titles'}. Publish to make it live.`);
+});
+$('#bulk-clear').addEventListener('click', () => { state.selected.clear(); renderTitles(); });
+const CSV_COLUMNS = ['id', 'type', 'status', 'title', 'country', 'state', 'price', 'salePrice', 'saleEnds', 'badge', 'featured', 'format', 'pages', 'updated', 'description', 'longDescription', 'highlights', 'cover', 'coverAlt', 'file', 'priceId', 'paymentLink', 'lat', 'lng', 'preorder', 'releaseDate', 'publishAt'];
+$('#titles-export').addEventListener('click', () => {
+  const rows = state.catalog.guides.map((g) => CSV_COLUMNS.map((c) => c === 'highlights' ? (g.highlights || []).join(' | ') : c === 'lat' ? (g.coordinates ? g.coordinates[0] : '') : c === 'lng' ? (g.coordinates ? g.coordinates[1] : '') : g[c] ?? ''));
+  download('titles.csv', csv([CSV_COLUMNS, ...rows]), 'text/csv');
+});
+function parseCsv(text) {
+  const rows = []; let row = []; let cell = ''; let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quoted) { if (ch === '"' && text[i + 1] === '"') { cell += '"'; i += 1; } else if (ch === '"') quoted = false; else cell += ch; }
+    else if (ch === '"') quoted = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i += 1; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c !== ''));
+}
+$('#titles-import').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const rows = parseCsv(await file.text());
+    const header = rows.shift().map((h) => h.trim());
+    let added = 0; let updated = 0;
+    for (const r of rows) {
+      const rec = {}; header.forEach((h, i) => { rec[h] = (r[i] || '').trim(); });
+      if (!rec.title) continue;
+      const id = slug(rec.id || rec.title);
+      const existing = state.catalog.guides.find((g) => g.id === id);
+      const g = existing || { id, highlights: [], variants: [], reviews: [], includes: [], samplePages: [], prices: {} };
+      for (const key of ['type', 'status', 'title', 'country', 'state', 'saleEnds', 'badge', 'format', 'updated', 'description', 'longDescription', 'cover', 'coverAlt', 'file', 'priceId', 'paymentLink', 'releaseDate', 'publishAt']) if (rec[key] !== undefined && rec[key] !== '') g[key] = rec[key];
+      if (rec.price) g.price = Number(rec.price);
+      if (rec.salePrice) g.salePrice = Number(rec.salePrice);
+      if (rec.pages) g.pages = Number(rec.pages);
+      if (rec.highlights) g.highlights = rec.highlights.split('|').map((h) => h.trim()).filter(Boolean);
+      if (rec.featured) g.featured = /^(true|yes|1)$/i.test(rec.featured);
+      if (rec.preorder) g.preorder = /^(true|yes|1)$/i.test(rec.preorder);
+      if (rec.lat && rec.lng) g.coordinates = [Number(rec.lat), Number(rec.lng)];
+      if (!g.type) g.type = 'Guide';
+      if (!g.status) g.status = 'published';
+      if (existing) updated += 1; else { state.catalog.guides.push(g); added += 1; }
+    }
+    markDirty(); renderTitles(); toast(`Imported: ${added} added, ${updated} updated. Publish to make it live.`);
+  } catch (error) { toast(`Import failed: ${error.message}`, true); }
+  event.target.value = '';
+});
+$('#titles-search').addEventListener('input', () => { state.titlesPage = 1; renderTitles(); });
+$('#titles-type').addEventListener('change', () => { state.titlesPage = 1; renderTitles(); });
+$('#titles-status').addEventListener('change', () => { state.titlesPage = 1; renderTitles(); });
 
 /* ---------- Drawer editor infrastructure ---------- */
 function openDrawer(kicker, title, buildForm, onSave, onDelete) {
@@ -402,6 +630,7 @@ function openDrawer(kicker, title, buildForm, onSave, onDelete) {
   $('#drawer-title').textContent = title;
   const form = $('#drawer-form');
   form.replaceChildren();
+  $('#drawer-preview').hidden = true;
   buildForm(form);
   const del = $('#drawer-delete');
   del.hidden = !onDelete;
@@ -429,7 +658,13 @@ function closeDrawer() {
 $('#drawer-close').addEventListener('click', closeDrawer);
 $('#drawer-cancel').addEventListener('click', closeDrawer);
 $('#drawer-overlay').addEventListener('click', closeDrawer);
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('#drawer').hidden) closeDrawer(); });
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !$('#drawer').hidden) closeDrawer();
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault();
+    if (!$('#drawer').hidden) $('#drawer-save').click(); else if (!$('#app').hidden) publish();
+  }
+});
 
 // Field builders
 function field(label, input, hint) {
@@ -460,7 +695,7 @@ function check(name, checked, label) {
   wrap.append(box, document.createTextNode(label));
   return wrap;
 }
-function imagePicker(name, value, label) {
+function imagePicker(name, value, label, options = {}) {
   const wrap = el('div', 'field');
   wrap.append(el('span', null, label));
   const picker = el('div', 'image-picker');
@@ -469,16 +704,27 @@ function imagePicker(name, value, label) {
   url.addEventListener('input', () => { img.hidden = !url.value; if (url.value) img.src = assetUrl(url.value); });
   const button = el('label', 'button-ghost upload-button', 'Upload');
   const file = document.createElement('input'); file.type = 'file'; file.accept = 'image/*'; file.hidden = true;
+  const crop = el('label', 'check');
+  const cropBox = document.createElement('input'); cropBox.type = 'checkbox'; cropBox.checked = Boolean(options.aspect);
+  crop.append(cropBox, document.createTextNode(options.aspect ? ` Crop to ${options.aspectLabel || '4:5'} and resize before upload` : ' Resize before upload'));
   file.addEventListener('change', async () => {
     if (!file.files[0]) return;
     button.textContent = 'Uploading…';
-    try { const result = await uploadFile(file.files[0], 'media'); url.value = result.url; img.src = result.url; img.hidden = false; toast('Image uploaded'); }
+    try {
+      const prepared = await processImage(file.files[0], { aspect: cropBox.checked ? (options.aspect || 0) : 0, maxWidth: options.maxWidth || 1400 });
+      const result = await uploadFile(prepared, 'media');
+      url.value = result.url; img.src = result.url; img.hidden = false;
+      url.dispatchEvent(new Event('input', { bubbles: true }));
+      toast(`Image uploaded (${formatBytes(prepared.size)})`);
+    }
     catch (error) { toast(error.message, true); }
     finally { button.textContent = 'Upload'; file.value = ''; }
   });
   button.append(file);
   picker.append(img, url, button);
-  wrap.append(picker);
+  const row = el('div', 'crop-row');
+  row.append(crop);
+  wrap.append(picker, row);
   return wrap;
 }
 function filePicker(name, value, label, hint) {
@@ -523,7 +769,7 @@ function pagesPicker(name, values, label) {
   const file = document.createElement('input'); file.type = 'file'; file.accept = 'image/*'; file.multiple = true; file.hidden = true;
   file.addEventListener('change', async () => {
     for (const f of file.files) {
-      try { const result = await uploadFile(f, 'media'); items.push(result.url); render(); }
+      try { const result = await uploadFile(await processImage(f, { maxWidth: 1600 }), 'media'); items.push(result.url); render(); }
       catch (error) { toast(error.message, true); break; }
     }
     file.value = '';
@@ -609,6 +855,21 @@ function openTitleEditor(guide) {
     basics.append(coords);
     form.append(basics);
 
+    // Visibility and pre-orders
+    const vis = el('div', 'fieldset');
+    vis.append(el('div', 'fieldset-title', 'Visibility and launch'));
+    const v1 = el('div', 'grid-3');
+    v1.append(field('Status', select('status', g.status || 'published', [['published', 'Published (visible)'], ['draft', 'Draft (hidden)'], ['scheduled', 'Scheduled (goes live at a date)']])), field('Goes live at (for scheduled)', input('publishAt', g.publishAt ? String(g.publishAt).slice(0, 16) : '', { type: 'datetime-local' })), field('Pre-order', check('preorder', g.preorder, 'Sell before the file is ready')));
+    vis.append(v1, field('Release date (shown to buyers; delivery is sent by you from Announce)', input('releaseDate', g.releaseDate ? String(g.releaseDate).slice(0, 10) : '', { type: 'date' })));
+    if (g.priceId && g.file && state.mode === 'online') {
+      const deliverRow = el('div', 'form-actions');
+      const deliver = el('button', 'button-ghost', 'Email download links to everyone who bought this'); deliver.type = 'button';
+      deliver.addEventListener('click', () => armDelete(deliver, async () => { const r = await api('/admin/deliver', { method: 'POST', json: { priceId: g.priceId } }); toast(`Sent to ${r.sent} buyer${r.sent === 1 ? '' : 's'}.`); }));
+      deliverRow.append(deliver, el('span', 'hint', 'Use when a pre-order ships or you replaced the file.'));
+      vis.append(deliverRow);
+    }
+    form.append(vis);
+
     // Pricing
     const pricing = el('div', 'fieldset');
     pricing.append(el('div', 'fieldset-title', `Pricing (${c.currency})`));
@@ -625,7 +886,7 @@ function openTitleEditor(guide) {
     // Images and files
     const media = el('div', 'fieldset');
     media.append(el('div', 'fieldset-title', 'Cover, samples, and the product file'));
-    media.append(imagePicker('cover', g.cover, 'Cover image (portrait 4:5 looks best)'), field('Cover alt text', input('coverAlt', g.coverAlt)));
+    media.append(imagePicker('cover', g.cover, 'Cover image (portrait 4:5 looks best)', { aspect: 0.8, aspectLabel: '4:5', maxWidth: 1200 }), field('Cover alt text', input('coverAlt', g.coverAlt)));
     media.append(pagesPicker('samplePages', g.samplePages || [], 'Sample pages (images, shown in "Read a sample")'));
     media.append(field('Or a sample PDF URL', input('sample', g.sample, { placeholder: 'https://… or assets/samples/name.pdf' })));
     media.append(filePicker('file', g.file, 'Product file buyers download', 'Uploaded privately. Delivered through signed, time-limited links after payment. Also attached to the Stripe product.'));
@@ -676,6 +937,13 @@ function openTitleEditor(guide) {
       r1.append(fieldIn(row, 'Name', 'name', r.name), fieldIn(row, 'Place', 'place', r.place), fieldIn(row, 'Rating 1–5', 'rating', r.rating, { type: 'number', min: '1', max: '5' }));
       row.append(r1);
     }, 'Add a review'));
+    // Live preview of the storefront card, updated as you type.
+    const preview = $('#drawer-preview');
+    preview.hidden = false;
+    const refresh = () => renderPreview(preview, form, c);
+    form.addEventListener('input', refresh);
+    form.addEventListener('change', refresh);
+    refresh();
   }, (form) => {
     const data = readTitleForm(form, g, c);
     if (!data) return false;
@@ -686,6 +954,28 @@ function openTitleEditor(guide) {
     renderTitles();
     toast(isNew ? 'Title added. Publish to make it live.' : 'Title updated. Publish to make it live.');
   }, guide ? () => { state.catalog.guides = state.catalog.guides.filter((x) => x.id !== guide.id); markDirty(); renderTitles(); toast('Title deleted'); } : null);
+}
+
+function renderPreview(box, form, c) {
+  const f = form.elements;
+  box.replaceChildren();
+  box.append(el('span', 'preview-label', 'Card preview'));
+  const cover = el('div', 'preview-cover');
+  if (f.cover.value.trim()) { const img = el('img'); img.src = assetUrl(f.cover.value.trim()); img.alt = ''; cover.append(img); }
+  else cover.append(el('div', 'thumb-art', f.state.value.trim() || f.title.value.trim() || 'Cover'));
+  const sale = num(f.salePrice.value);
+  const badge = sale !== undefined && sale < num(f.price.value) ? 'Sale' : f.preorder.checked ? 'Pre-order' : f.badge.value.trim();
+  if (badge) cover.append(el('span', 'preview-badge', badge));
+  const body = el('div', 'preview-body');
+  body.append(el('span', 'kicker', [f.type.value, [f.country.value.trim(), f.state.value.trim()].filter(Boolean).join(' / ')].filter(Boolean).join(' · ')));
+  body.append(el('h3', null, f.title.value.trim() || 'Untitled'));
+  const price = el('span', 'price');
+  if (sale !== undefined && sale < num(f.price.value)) { price.append(el('s', null, money(num(f.price.value) || 0)), document.createTextNode(' ' + money(sale))); }
+  else price.textContent = money(num(f.price.value) || 0);
+  body.append(price, el('p', null, f.description.value.trim() || 'Short description appears here.'));
+  const status = f.status.value;
+  if (status !== 'published') body.append(Object.assign(el('span', 'pill warn'), { textContent: status === 'draft' ? 'hidden from the site' : 'scheduled' }));
+  box.append(cover, body);
 }
 
 function readTitleForm(form, base, c) {
@@ -701,6 +991,8 @@ function readTitleForm(form, base, c) {
     price, salePrice: num(f.salePrice.value), saleEnds: f.saleEnds.value ? `${f.saleEnds.value}T23:59:59Z` : '',
     cover: f.cover.value.trim(), coverAlt: f.coverAlt.value.trim(), sample: f.sample.value.trim(), file: f.file.value.trim(),
     priceId: f.priceId.value.trim(), paymentLink: f.paymentLink.value.trim(), productId: f.productId.value.trim(), variantLabel: f.variantLabel.value.trim(),
+    status: f.status.value, publishAt: f.status.value === 'scheduled' && f.publishAt.value ? new Date(f.publishAt.value).toISOString() : '',
+    preorder: f.preorder.checked, releaseDate: f.releaseDate.value ? `${f.releaseDate.value}T00:00:00Z` : '',
     prices: {} };
   const lat = num(f.lat.value); const lng = num(f.lng.value);
   data.coordinates = lat !== undefined && lng !== undefined ? [lat, lng] : undefined;
@@ -712,6 +1004,7 @@ function readTitleForm(form, base, c) {
   data.includes = c.guides.filter((o) => f[`includes.${o.id}`] && f[`includes.${o.id}`].checked).map((o) => o.id);
   if (data.salePrice === undefined) delete data.salePrice;
   if (!data.coordinates) delete data.coordinates;
+  if (!data.preorder) delete data.preorder;
   for (const k of Object.keys(data)) if (data[k] === '' || data[k] === undefined) delete data[k];
   return data;
 }
@@ -750,8 +1043,10 @@ function renderZones() {
   const list = $('#zones-list');
   list.replaceChildren();
   const zones = state.catalog.zones;
+  const q = $('#zones-search').value.trim().toLowerCase();
   if (!zones.length) { list.append(el('div', 'empty', 'No zones yet. Add the cities people are heading to.')); return; }
   zones.forEach((z, index) => {
+    if (q && !`${z.city} ${z.country} ${z.state} ${z.tagline}`.toLowerCase().includes(q)) return;
     const card = el('div', 'card');
     card.draggable = true;
     card.dataset.index = index;
@@ -794,8 +1089,10 @@ function renderReviews() {
   const list = $('#reviews-list');
   list.replaceChildren();
   const reviews = state.catalog.reviews;
+  const q = $('#reviews-search').value.trim().toLowerCase();
   if (!reviews.length) { list.append(el('div', 'empty', 'No reviews yet. Add a reader quote to show the section.')); return; }
   reviews.forEach((r, index) => {
+    if (q && !`${r.quote} ${r.name} ${r.place}`.toLowerCase().includes(q)) return;
     const card = el('div', 'card');
     card.append(el('p', null, `“${r.quote}”`));
     const foot = el('div', 'card-foot');
@@ -824,6 +1121,42 @@ function openReviewEditor(review, index) {
     markDirty(); renderReviews(); toast('Review saved. Publish to make it live.');
   }, review ? () => { state.catalog.reviews.splice(index, 1); markDirty(); renderReviews(); toast('Review deleted'); } : null);
 }
+
+$('#zones-search').addEventListener('input', renderZones);
+$('#reviews-search').addEventListener('input', renderReviews);
+
+/* ---------- Coupons ---------- */
+function renderCoupons() {
+  const list = $('#coupons-list');
+  list.replaceChildren();
+  if (state.mode !== 'online' || !state.status.stripe) { list.append(el('div', 'empty', 'Coupons live in Stripe. Connect the Worker with a Stripe key.')); return; }
+  list.append(el('div', 'empty', 'Loading…'));
+  api('/admin/coupons').then((data) => {
+    state.coupons = data.coupons;
+    list.replaceChildren();
+    if (!data.coupons.length) list.append(el('div', 'empty', 'No coupons yet.'));
+    for (const c of data.coupons) {
+      const row = el('div', 'file-row');
+      const name = el('div');
+      name.append(el('strong', null, c.name || c.id), el('span', 'row-sub', `${c.percentOff ? `${c.percentOff}% off` : `${money(c.amountOff, c.currency)} off`} · ${c.timesRedeemed} used${c.codes.length ? ` · code${c.codes.length > 1 ? 's' : ''} ${c.codes.map((x) => x.code).join(', ')}` : ' · no code (automatic use only)'}`));
+      const meta = el('div', 'meta', c.id);
+      const del = el('button', 'link-button danger-link', 'Delete'); del.type = 'button';
+      del.addEventListener('click', () => armDelete(del, async () => { await api(`/admin/coupons/${encodeURIComponent(c.id)}`, { method: 'DELETE' }); renderCoupons(); toast('Coupon deleted'); }));
+      row.append(name, meta, del);
+      list.append(row);
+    }
+  }).catch((error) => list.replaceChildren(el('div', 'empty', error.message)));
+}
+$('#coupons-refresh').addEventListener('click', renderCoupons);
+$('#coupon-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const r = await api('/admin/coupons', { method: 'POST', json: { name: $('#coupon-name').value, code: $('#coupon-code').value, percent: $('#coupon-percent').value, amount: $('#coupon-amount').value, currency: state.catalog.currency, maxRedemptions: $('#coupon-max').value, expiresAt: $('#coupon-expires').value } });
+    toast(r.promotionCode ? `Coupon created. Buyers can enter ${r.promotionCode.code}.` : `Coupon ${r.coupon.id} created.`);
+    $('#coupon-form').reset();
+    renderCoupons();
+  } catch (error) { toast(error.message, true); }
+});
 
 /* ---------- Media ---------- */
 async function loadMedia() {
@@ -917,7 +1250,7 @@ function renderOrdersTable(wrap, orders, compact) {
   if (!orders.length) { wrap.append(el('div', 'empty', state.orders ? 'No paid orders in this period.' : (state.ordersError ? `Orders unavailable: ${state.ordersError}` : 'Loading orders…'))); return; }
   const table = el('table');
   const head = el('tr');
-  for (const h of compact ? ['Date', 'Buyer', 'Items', 'Total'] : ['Date', 'Buyer', 'Country', 'Items', 'Gift', 'Total']) head.append(el('th', h === 'Total' ? 'num' : '', h));
+  for (const h of compact ? ['Date', 'Buyer', 'Items', 'Total'] : ['Date', 'Buyer', 'Country', 'Items', 'Gift', 'Total', '']) head.append(el('th', h === 'Total' ? 'num' : '', h));
   table.append(head);
   for (const o of orders) {
     const tr = el('tr');
@@ -925,7 +1258,14 @@ function renderOrdersTable(wrap, orders, compact) {
     if (!compact) tr.append(el('td', null, o.country || '—'));
     tr.append(el('td', null, o.items.map((i) => i.name).join(', ')));
     if (!compact) tr.append(el('td', null, o.gift || '—'));
-    tr.append(el('td', 'num', money(o.total, o.currency)));
+    const total = el('td', 'num', money(o.total, o.currency));
+    if (o.refunded) total.append(' ', Object.assign(el('span', 'pill warn'), { textContent: 'refunded' }));
+    tr.append(total);
+    if (!compact) {
+      const actions = el('td', 'row-actions');
+      if (!o.refunded) { const refund = el('button', 'link-button danger-link', 'Refund'); refund.type = 'button'; refund.addEventListener('click', () => armDelete(refund, async () => { const r = await api('/admin/refund', { method: 'POST', json: { sessionId: o.id } }); toast(`Refunded ${money(r.refund.amount, r.refund.currency)}.`); loadOrders().catch(() => {}); })); actions.append(refund); }
+      tr.append(actions);
+    }
     table.append(tr);
   }
   wrap.append(table);
@@ -962,6 +1302,7 @@ async function loadRequests() {
 }
 function renderRequests() {
   const wrap = $('#requests-table');
+  fillTitleSelect($('#notify-title'));
   wrap.replaceChildren();
   if (state.mode !== 'online') { wrap.append(el('div', 'empty', 'Requests are stored by the Worker.')); return; }
   if (!state.requests.length) { wrap.append(el('div', 'empty', 'No requests yet.')); return; }
@@ -979,6 +1320,18 @@ function renderRequests() {
   wrap.append(table);
 }
 $('#requests-export').addEventListener('click', () => download('requests.csv', csv([['Place', 'Email', 'Asked'], ...state.requests.map((r) => [r.place, r.email, r.at])]), 'text/csv'));
+function fillTitleSelect(select) {
+  select.replaceChildren(...state.catalog.guides.map((g) => { const o = el('option', null, `${g.title} · ${[g.country, g.state].filter(Boolean).join(' / ')}`); o.value = g.id; return o; }));
+}
+$('#notify-count').addEventListener('click', async () => {
+  try { const r = await api('/admin/requests/notify', { method: 'POST', json: { guideId: $('#notify-title').value, dryRun: true } }); $('#notify-note').textContent = r.matched ? `${r.matched} request${r.matched === 1 ? '' : 's'} match: ${r.places.join(', ')}.` : 'No requests match this title yet.'; }
+  catch (error) { toast(error.message, true); }
+});
+$('#notify-send').addEventListener('click', () => armDelete($('#notify-send'), async () => {
+  const r = await api('/admin/requests/notify', { method: 'POST', json: { guideId: $('#notify-title').value, subject: $('#notify-subject').value, message: $('#notify-message').value } });
+  toast(`Emailed ${r.sent} reader${r.sent === 1 ? '' : 's'}.`);
+  loadRequests().catch(() => {});
+}));
 
 /* ---------- Announce ---------- */
 function renderAnnounce() {
@@ -1002,7 +1355,11 @@ $('#announce-form').addEventListener('submit', async (event) => {
   const button = $('#announce-send');
   if (!button.dataset.armed) { button.dataset.armed = '1'; button.textContent = 'Click again to send'; setTimeout(() => { delete button.dataset.armed; button.textContent = 'Send'; }, 5000); return; }
   button.disabled = true;
-  try { const r = await api('/admin/announce', { method: 'POST', json: { priceId: $('#announce-title').value, subject: $('#announce-subject').value, message: $('#announce-message').value } }); toast(`Sent to ${r.sent} buyer${r.sent === 1 ? '' : 's'}.`); $('#announce-form').reset(); renderAnnounce(); }
+  try {
+    const payload = { priceId: $('#announce-title').value, subject: $('#announce-subject').value, message: $('#announce-message').value };
+    const r = await api($('#announce-links').checked ? '/admin/deliver' : '/admin/announce', { method: 'POST', json: payload });
+    toast(`Sent to ${r.sent} buyer${r.sent === 1 ? '' : 's'}.`); $('#announce-form').reset(); renderAnnounce();
+  }
   catch (e) { toast(e.message, true); }
   finally { button.disabled = false; delete button.dataset.armed; button.textContent = 'Send'; }
 });
@@ -1018,7 +1375,13 @@ function renderSettings() {
   f.contactEmail.value = c.contactEmail || '';
   f.plausibleDomain.value = (c.analytics && c.analytics.plausibleDomain) || '';
   f.refundPolicy.value = c.refundPolicy || '';
+  f['cartDiscount.percent'].value = c.cartDiscount.percent || '';
+  f['cartDiscount.minItems'].value = c.cartDiscount.minItems || '';
+  f['cartDiscount.couponId'].value = c.cartDiscount.couponId || '';
+  f.countryPages.checked = c.countryPages === true;
   for (const k of ['instagram', 'tiktok', 'youtube', 'pinterest', 'x', 'facebook']) f[`social.${k}`].value = (c.social && c.social[k]) || '';
+  renderSecurity();
+  renderTemplates();
   for (const k of ['name', 'role', 'photo', 'bio', 'note']) f[`author.${k}`].value = (c.author && c.author[k]) || '';
   const picker = $('.image-picker[data-target="author.photo"]');
   const img = picker.querySelector('img');
@@ -1057,6 +1420,7 @@ $('#region-add').addEventListener('click', () => {
   name.focus();
 });
 $('#settings-form').addEventListener('change', (event) => {
+  if (!event.target.name || /^tpl\./.test(event.target.name) || /^(pw-|twostep)/.test(event.target.id || '')) return;
   const c = state.catalog;
   const f = $('#settings-form').elements;
   c.storeName = f.storeName.value.trim();
@@ -1066,6 +1430,9 @@ $('#settings-form').addEventListener('change', (event) => {
   c.contactEmail = f.contactEmail.value.trim();
   c.analytics = { plausibleDomain: f.plausibleDomain.value.trim() };
   c.refundPolicy = f.refundPolicy.value.trim();
+  const pct = Number(f['cartDiscount.percent'].value); const min = Number(f['cartDiscount.minItems'].value);
+  c.cartDiscount = pct > 0 ? { percent: pct, minItems: Math.max(2, min || 2), couponId: f['cartDiscount.couponId'].value.trim() } : {};
+  c.countryPages = f.countryPages.checked;
   c.social = {}; for (const k of ['instagram', 'tiktok', 'youtube', 'pinterest', 'x', 'facebook']) c.social[k] = f[`social.${k}`].value.trim();
   c.author = {}; for (const k of ['name', 'role', 'photo', 'bio', 'note']) c.author[k] = f[`author.${k}`].value.trim();
   if (event.target.name === 'author.photo') { const img = $('.image-picker[data-target="author.photo"] img'); img.hidden = !c.author.photo; if (c.author.photo) img.src = assetUrl(c.author.photo); }
@@ -1079,8 +1446,73 @@ $('.image-picker[data-target="author.photo"] input[type="file"]').addEventListen
   event.target.value = '';
 });
 
+$('#discount-create').addEventListener('click', async () => {
+  const f = $('#settings-form').elements;
+  const percent = Number(f['cartDiscount.percent'].value); const minItems = Number(f['cartDiscount.minItems'].value) || 2;
+  if (!(percent > 0 && percent < 100)) { toast('Enter the percent off first.', true); return; }
+  try {
+    if (state.dirty) await api('/admin/catalog', { method: 'PUT', json: state.catalog });
+    const r = await api('/admin/stripe/coupon', { method: 'POST', json: { percent, minItems, name: `${percent}% off ${minItems}+ titles` } });
+    state.catalog.cartDiscount = r.cartDiscount; f['cartDiscount.couponId'].value = r.couponId; markClean();
+    toast(`Coupon ${r.couponId} created and published.`);
+  } catch (error) { toast(error.message, true); }
+});
+
+async function renderSecurity() {
+  const panel = $('#security-panel');
+  panel.hidden = state.mode !== 'online';
+  if (panel.hidden) return;
+  try {
+    const info = await api('/admin/security');
+    $('#twostep-toggle').checked = info.twoStep;
+    $('#twostep-toggle').disabled = !info.emailConfigured;
+    $('#twostep-hint').textContent = info.emailConfigured ? `Codes go to ${info.ownerEmail}.` : 'Set RESEND_API_KEY, FROM_EMAIL, and CONTACT_EMAIL on the Worker to enable two-step sign-in and password recovery.';
+  } catch (error) { $('#twostep-hint').textContent = error.message; }
+}
+$('#twostep-toggle').addEventListener('change', async (event) => {
+  try { await api('/admin/security', { method: 'PUT', json: { twoStep: event.target.checked } }); toast(event.target.checked ? 'Two-step sign-in is on.' : 'Two-step sign-in is off.'); }
+  catch (error) { event.target.checked = !event.target.checked; toast(error.message, true); }
+});
+$('#pw-change').addEventListener('click', async () => {
+  try {
+    const r = await api('/admin/password', { method: 'POST', json: { current: $('#pw-current').value, next: $('#pw-next').value } });
+    state.token = r.token;
+    try { (localStorage.getItem(KEYS.remember) === '0' ? sessionStorage : localStorage).setItem(KEYS.token, r.token); } catch { /* ignore */ }
+    $('#pw-current').value = ''; $('#pw-next').value = '';
+    toast('Password changed. Other devices will need to sign in again.');
+  } catch (error) { toast(error.message, true); }
+});
+
+async function renderTemplates() {
+  const panel = $('#templates-panel');
+  panel.hidden = state.mode !== 'online';
+  if (panel.hidden) return;
+  const grid = $('#templates-grid');
+  grid.replaceChildren();
+  try {
+    state.templates = await api('/admin/templates');
+    const labels = { downloads: 'Download links (resend)', gift: 'Gift delivery', release: 'Pre-order release', request: 'Requested place is ready' };
+    for (const [key, label] of Object.entries(labels)) {
+      const box = el('div', 'templates-item');
+      box.append(el('strong', null, label));
+      const subject = input(`tpl.${key}.subject`, state.templates[key].subject, { placeholder: 'Subject' });
+      const intro = input(`tpl.${key}.intro`, state.templates[key].intro, { type: 'textarea', rows: '2', placeholder: 'Opening line' });
+      box.append(field('Subject', subject), field('Opening line', intro));
+      grid.append(box);
+    }
+  } catch (error) { grid.append(el('div', 'empty', error.message)); }
+}
+$('#templates-save').addEventListener('click', async () => {
+  const f = $('#settings-form').elements;
+  const body = {};
+  for (const key of ['downloads', 'gift', 'release', 'request']) body[key] = { subject: f[`tpl.${key}.subject`].value, intro: f[`tpl.${key}.intro`].value };
+  try { await api('/admin/templates', { method: 'PUT', json: body }); toast('Templates saved.'); }
+  catch (error) { toast(error.message, true); }
+});
+
 /* ---------- Tools ---------- */
 function renderTools() {
+  renderActivity();
   const list = $('#backups-list');
   list.replaceChildren();
   if (state.mode !== 'online') { list.append(el('div', 'empty', 'Backups are kept by the Worker every time you publish.')); return; }
@@ -1105,6 +1537,20 @@ $('#import-json').addEventListener('change', async (event) => {
   event.target.value = '';
 });
 $('#backups-refresh').addEventListener('click', renderTools);
+function renderActivity() {
+  const box = $('#activity-list');
+  box.replaceChildren();
+  if (state.mode !== 'online') { box.append(el('div', 'empty', 'The activity log is kept by the Worker.')); return; }
+  api('/admin/activity').then((data) => {
+    box.replaceChildren();
+    if (!data.events.length) { box.append(el('div', 'empty', 'Nothing logged yet.')); return; }
+    const table = el('table');
+    const head = el('tr'); for (const h of ['When', 'Action', 'Detail', 'From']) head.append(el('th', null, h)); table.append(head);
+    for (const e of data.events) { const tr = el('tr'); tr.append(el('td', null, formatDate(e.at)), el('td', null, e.action), el('td', null, e.detail || ''), el('td', null, e.ip || '')); table.append(tr); }
+    box.append(table);
+  }).catch((error) => box.replaceChildren(el('div', 'empty', error.message)));
+}
+$('#activity-refresh').addEventListener('click', renderActivity);
 $('#discard-draft').addEventListener('click', async () => {
   try { localStorage.removeItem(KEYS.draft); } catch { /* ignore */ }
   if (state.mode === 'online') await loadCatalogOnline(); else await loadCatalogOffline();

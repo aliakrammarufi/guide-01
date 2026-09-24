@@ -136,7 +136,7 @@
             </div>
             <p class="catalog-count" id="guide-count" aria-live="polite"></p>
           </div>
-          <div class="active-filter" id="active-filter" hidden><span id="active-filter-text"></span><button type="button" class="link-button" id="clear-filters">Clear filters</button></div>
+          <div class="active-filter" id="active-filter" hidden><span id="active-filter-text"></span><span class="active-filter-links"><a id="country-page-link" class="link-button" href="#" hidden>Open the country page →</a><button type="button" class="link-button" id="clear-filters">Clear filters</button></span></div>
           <div id="featured" class="featured" hidden></div>
           <div id="guide-list" class="guide-grid"></div>
           <div id="catalog-message" class="catalog-message">
@@ -448,6 +448,7 @@
       </div>
       <div class="cart-foot" id="cart-foot" hidden>
         <div class="cart-summary"><span id="cart-summary-label">0 titles</span><strong id="cart-total"></strong></div>
+        <p class="cart-discount" id="cart-discount" hidden></p>
         <details class="gift" id="gift">
           <summary>Send as a gift</summary>
           <div class="gift-fields">
@@ -493,7 +494,11 @@
           <button type="button" class="text-link" id="quick-compare">Add to compare</button>
         </div>
         <div class="quick-reviews" id="quick-reviews" hidden></div>
-        <p class="quick-note">Secure checkout with Stripe. Instant download after payment.</p>
+        <div class="related" id="quick-related" hidden>
+          <span class="message-overline">You might also like</span>
+          <div class="related-list" id="quick-related-list"></div>
+        </div>
+        <p class="quick-note" id="quick-note">Secure checkout with Stripe. Instant download after payment.</p>
       </div>
     </div>
 

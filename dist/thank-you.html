@@ -78,18 +78,27 @@
               const strong = document.createElement('strong');
               strong.textContent = item.name;
               const small = document.createElement('small');
-              small.textContent = 'Link valid until ' + new Date(item.expires).toLocaleString();
               label.append(strong, small);
-              const a = document.createElement('a');
-              a.className = 'button button-sm';
-              a.href = item.url;
-              a.textContent = 'Download';
-              li.append(label, a);
+              if (item.preorder) {
+                small.textContent = item.releaseDate ? 'Pre-order · ships ' + new Date(item.releaseDate).toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) : 'Pre-order · we email the download on release';
+                const note = document.createElement('span');
+                note.className = 'eyebrow';
+                note.textContent = 'Reserved';
+                li.append(label, note);
+              } else {
+                small.textContent = 'Link valid until ' + new Date(item.expires).toLocaleString();
+                const a = document.createElement('a');
+                a.className = 'button button-sm';
+                a.href = item.url;
+                a.textContent = 'Download';
+                li.append(label, a);
+              }
               list.append(li);
             }
+            const pending = order.items.filter((i) => i.preorder).length;
             status.textContent = order.gift && order.gift.email
               ? 'Your gift has been sent to ' + order.gift.email + '. Your own copies are below.'
-              : 'Your downloads are ready below.' + (order.email ? ' A copy of these links has also gone to ' + order.email + '.' : '');
+              : (pending === order.items.length ? 'Your pre-order is reserved. We will email your download the day it ships.' : 'Your downloads are ready below.' + (pending ? ' Pre-ordered titles will be emailed on release.' : '') + (order.email ? ' A copy of these links has also gone to ' + order.email + '.' : ''));
           } else {
             status.textContent = 'Payment received. Your download links will arrive by email shortly.';
           }

@@ -22,12 +22,26 @@
         <label class="field"><span>Worker URL</span><input type="url" id="login-endpoint" placeholder="https://marufi-checkout.your-account.workers.dev" autocomplete="url" /></label>
         <label class="field"><span>Password</span><input type="password" id="login-password" autocomplete="current-password" /></label>
         <label class="check"><input type="checkbox" id="login-remember" checked /> Keep me signed in on this device</label>
+        <div id="login-step-code" hidden>
+          <label class="field"><span>Sign-in code (sent to <span id="login-sent-to"></span>)</span><input type="text" id="login-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" /></label>
+        </div>
         <button type="submit" class="button" id="login-submit">Sign in <span aria-hidden="true">→</span></button>
         <p class="login-note" id="login-note"></p>
         <div class="login-alt">
           <span>No Worker yet?</span>
           <button type="button" class="link-button" id="login-offline">Work offline with guides.json</button>
+          <button type="button" class="link-button" id="login-forgot">Forgot password?</button>
         </div>
+      </form>
+      <form class="login-card" id="reset-form" hidden novalidate>
+        <p class="eyebrow">Marufi Digital · Admin</p>
+        <h1>Reset your <em>password.</em></h1>
+        <p class="hint" id="reset-hint">A six-digit code has been sent to the store's contact e-mail.</p>
+        <label class="field"><span>Code from the e-mail</span><input type="text" id="reset-code" inputmode="numeric" maxlength="6" /></label>
+        <label class="field"><span>New password (12+ characters)</span><input type="password" id="reset-password" autocomplete="new-password" /></label>
+        <button type="submit" class="button">Set new password</button>
+        <p class="login-note" id="reset-note"></p>
+        <div class="login-alt"><button type="button" class="link-button" id="reset-back">Back to sign in</button></div>
       </form>
     </div>
 
@@ -42,6 +56,7 @@
           <button type="button" class="nav-item" data-view="reviews">Reviews <span class="count" id="nav-reviews"></span></button>
           <button type="button" class="nav-item" data-view="media">Media &amp; files</button>
           <button type="button" class="nav-item" data-view="orders">Orders</button>
+          <button type="button" class="nav-item" data-view="coupons">Coupons</button>
           <button type="button" class="nav-item" data-view="requests">Requests <span class="count" id="nav-requests"></span></button>
           <button type="button" class="nav-item" data-view="announce">Announce</button>
           <button type="button" class="nav-item" data-view="settings">Store settings</button>
@@ -86,6 +101,10 @@
             </div>
           </div>
           <div class="panel">
+            <div class="panel-head"><h2>Store health</h2><button type="button" class="link-button" id="health-run">Run check</button></div>
+            <div id="health-list" class="health"></div>
+          </div>
+          <div class="panel">
             <div class="panel-head"><h2>Recent orders</h2><button type="button" class="link-button" data-view-link="orders">All orders</button></div>
             <div id="overview-orders" class="table-wrap"></div>
           </div>
@@ -96,20 +115,39 @@
           <div class="toolbar">
             <input type="search" id="titles-search" placeholder="Search titles, countries, states" />
             <select id="titles-type"><option value="">All types</option><option>Guide</option><option>Book</option><option>Bundle</option></select>
+            <select id="titles-status"><option value="">All statuses</option><option value="published">Published</option><option value="scheduled">Scheduled</option><option value="draft">Draft</option><option value="preorder">Pre-order</option></select>
+            <button type="button" class="button-ghost" id="titles-export">Export CSV</button>
+            <label class="button-ghost upload-button">Import CSV<input type="file" id="titles-import" accept=".csv,text/csv" hidden /></label>
             <button type="button" class="button" data-action="new-title">Add a title</button>
           </div>
+          <div class="bulk-bar" id="bulk-bar" hidden>
+            <span id="bulk-count"></span>
+            <select id="bulk-action">
+              <option value="">Choose an action…</option>
+              <option value="publish">Set status: published</option>
+              <option value="draft">Set status: draft</option>
+              <option value="price-pct">Change base price by %</option>
+              <option value="price-cur">Set a display price for a currency</option>
+              <option value="badge">Set badge</option>
+              <option value="delete">Delete</option>
+            </select>
+            <input type="text" id="bulk-value" placeholder="Value" hidden />
+            <button type="button" class="button button-sm" id="bulk-apply">Apply</button>
+            <button type="button" class="link-button" id="bulk-clear">Clear selection</button>
+          </div>
           <div class="table-wrap" id="titles-table"></div>
+          <div class="pager" id="titles-pager"></div>
         </section>
 
         <!-- Zones -->
         <section class="view" data-view="zones" hidden>
-          <div class="toolbar"><p class="hint">Zones show the cities people are heading to, what is special there, and which title covers it. Drag the handle to reorder.</p><button type="button" class="button" data-action="new-zone">Add a zone</button></div>
+          <div class="toolbar"><input type="search" id="zones-search" placeholder="Search zones" /><p class="hint">Cities people are heading to. Drag a card to reorder.</p><button type="button" class="button" data-action="new-zone">Add a zone</button></div>
           <div class="cards" id="zones-list"></div>
         </section>
 
         <!-- Reviews -->
         <section class="view" data-view="reviews" hidden>
-          <div class="toolbar"><p class="hint">Store-wide reviews appear in the "What readers say" section. Per-title reviews are edited inside each title.</p><button type="button" class="button" data-action="new-review">Add a review</button></div>
+          <div class="toolbar"><input type="search" id="reviews-search" placeholder="Search reviews" /><p class="hint">Home-page reviews. Per-title reviews are edited inside each title.</p><button type="button" class="button" data-action="new-review">Add a review</button></div>
           <div class="cards" id="reviews-list"></div>
         </section>
 
@@ -143,9 +181,44 @@
           </div>
         </section>
 
+        <!-- Coupons -->
+        <section class="view" data-view="coupons" hidden>
+          <div class="two-col">
+            <div class="panel">
+              <div class="panel-head"><h2>Create a coupon</h2></div>
+              <form id="coupon-form" class="form" novalidate>
+                <div class="grid-2">
+                  <label class="field"><span>Name (shown on receipts)</span><input type="text" id="coupon-name" maxlength="40" placeholder="Launch week" /></label>
+                  <label class="field"><span>Promotion code (what buyers type)</span><input type="text" id="coupon-code" maxlength="30" placeholder="LAUNCH15" /></label>
+                  <label class="field"><span>Percent off</span><input type="number" id="coupon-percent" min="1" max="100" placeholder="15" /></label>
+                  <label class="field"><span>Or amount off (base currency)</span><input type="number" id="coupon-amount" min="0" step="0.01" placeholder="5" /></label>
+                  <label class="field"><span>Max redemptions (optional)</span><input type="number" id="coupon-max" min="1" /></label>
+                  <label class="field"><span>Expires (optional)</span><input type="date" id="coupon-expires" /></label>
+                </div>
+                <div class="form-actions"><button type="submit" class="button">Create in Stripe</button></div>
+                <p class="hint">Buyers enter the code at Stripe checkout. Coupons without a code can still be applied automatically as the multi-title discount in Store settings.</p>
+              </form>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Active coupons</h2><button type="button" class="link-button" id="coupons-refresh">Refresh</button></div>
+              <div id="coupons-list" class="file-list"></div>
+            </div>
+          </div>
+        </section>
+
         <!-- Requests -->
         <section class="view" data-view="requests" hidden>
-          <div class="toolbar"><p class="hint">Readers who asked to be told when a place is covered. Tell them with Announce once the title is live, then clear the request.</p><button type="button" class="button-ghost" id="requests-export">Export CSV</button></div>
+          <div class="toolbar"><p class="hint">Readers who asked to be told when a place is covered.</p><button type="button" class="button-ghost" id="requests-export">Export CSV</button></div>
+          <div class="panel">
+            <div class="panel-head"><h2>Tell them a title is ready</h2></div>
+            <div class="grid-2">
+              <label class="field"><span>Title</span><select id="notify-title"></select></label>
+              <label class="field"><span>Subject</span><input type="text" id="notify-subject" placeholder="Leave empty for “<title> is ready”" /></label>
+            </div>
+            <label class="field"><span>Message (optional)</span><textarea id="notify-message" rows="2" placeholder="Defaults to the “request” e-mail template."></textarea></label>
+            <div class="form-actions"><button type="button" class="button-ghost" id="notify-count">Count matches</button><button type="button" class="button" id="notify-send">Email matching requesters</button></div>
+            <p class="hint" id="notify-note">Matches requests whose place mentions the title's state or country. Sent requests are cleared automatically.</p>
+          </div>
           <div class="table-wrap" id="requests-table"></div>
         </section>
 
@@ -158,6 +231,7 @@
               <label class="field"><span>Title</span><select id="announce-title"></select></label>
               <label class="field"><span>Subject</span><input type="text" id="announce-subject" maxlength="150" placeholder="Vancouver guide updated for 2027" /></label>
               <label class="field"><span>Message</span><textarea id="announce-message" rows="8" maxlength="4000" placeholder="What changed and how to get the new file."></textarea></label>
+              <label class="check"><input type="checkbox" id="announce-links" /> Include fresh download links (use this when a pre-order ships or a file was replaced)</label>
               <div class="form-actions">
                 <button type="button" class="button-ghost" id="announce-count">Count recipients</button>
                 <button type="submit" class="button" id="announce-send">Send</button>
@@ -183,6 +257,16 @@
               <label class="field"><span>Refund policy (shown in the FAQ; leave empty to hide)</span><textarea name="refundPolicy" rows="3"></textarea></label>
             </div>
             <div class="panel">
+              <div class="panel-head"><h2>Selling</h2></div>
+              <div class="grid-3">
+                <label class="field"><span>Multi-title discount: percent off</span><input type="number" name="cartDiscount.percent" min="1" max="99" placeholder="15" /></label>
+                <label class="field"><span>Minimum titles in the cart</span><input type="number" name="cartDiscount.minItems" min="2" placeholder="2" /></label>
+                <label class="field"><span>Stripe coupon id</span><input type="text" name="cartDiscount.couponId" placeholder="Created by the button" /></label>
+              </div>
+              <div class="form-actions"><button type="button" class="button-ghost" id="discount-create">Create the coupon in Stripe</button><span class="hint" id="discount-note">The discount is applied automatically at checkout when the cart has enough titles. Requires the Worker and Stripe.</span></div>
+              <label class="check"><input type="checkbox" name="countryPages" /> Link to country landing pages (run <code>node scripts/build-pages.mjs</code> after publishing to generate them)</label>
+            </div>
+            <div class="panel">
               <div class="panel-head"><h2>Social links</h2></div>
               <div class="grid-2">
                 <label class="field"><span>Instagram</span><input type="url" name="social.instagram" /></label>
@@ -202,6 +286,28 @@
               <div class="field"><span>Photo</span><div class="image-picker" data-target="author.photo"><img alt="" hidden /><input type="url" name="author.photo" placeholder="Paste an image URL or upload" /><label class="button-ghost upload-button">Upload<input type="file" accept="image/*" hidden /></label></div></div>
               <label class="field"><span>Bio (blank line = new paragraph)</span><textarea name="author.bio" rows="5"></textarea></label>
               <label class="field"><span>Closing line</span><input type="text" name="author.note" /></label>
+            </div>
+            <div class="panel" id="security-panel">
+              <div class="panel-head"><h2>Security</h2></div>
+              <div class="grid-2">
+                <div class="fieldset">
+                  <div class="fieldset-title">Change password</div>
+                  <label class="field"><span>Current password</span><input type="password" id="pw-current" autocomplete="current-password" /></label>
+                  <label class="field"><span>New password (12+ characters)</span><input type="password" id="pw-next" autocomplete="new-password" /></label>
+                  <div class="form-actions"><button type="button" class="button-ghost" id="pw-change">Change password</button></div>
+                </div>
+                <div class="fieldset">
+                  <div class="fieldset-title">Two-step sign-in</div>
+                  <p class="hint" id="twostep-hint"></p>
+                  <label class="check"><input type="checkbox" id="twostep-toggle" /> Email me a six-digit code at every sign-in</label>
+                  <p class="hint">Codes and password-reset links go to the store's contact e-mail set on the Worker.</p>
+                </div>
+              </div>
+            </div>
+            <div class="panel" id="templates-panel">
+              <div class="panel-head"><h2>E-mail templates</h2><button type="button" class="button-ghost" id="templates-save">Save templates</button></div>
+              <p class="hint">Subject and opening line of the e-mails the Worker sends. Download links and receipts are added automatically.</p>
+              <div class="grid-2" id="templates-grid"></div>
             </div>
             <div class="panel">
               <div class="panel-head"><h2>Regions by country</h2><button type="button" class="button-ghost" id="region-add">Add a country</button></div>
@@ -228,6 +334,10 @@
               <div id="backups-list" class="file-list"></div>
             </div>
           </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Activity</h2><button type="button" class="link-button" id="activity-refresh">Refresh</button></div>
+            <div class="table-wrap" id="activity-list"></div>
+          </div>
           <div class="panel danger">
             <div class="panel-head"><h2>Local draft</h2></div>
             <p class="hint">Unpublished edits are kept in this browser. Discard them to return to the last published catalog.</p>
@@ -244,7 +354,10 @@
         <div><span class="eyebrow" id="drawer-kicker"></span><h2 id="drawer-title"></h2></div>
         <button type="button" class="icon-button" id="drawer-close" aria-label="Close">×</button>
       </div>
-      <form id="drawer-form" class="drawer-body form" novalidate></form>
+      <div class="drawer-body">
+        <div class="preview" id="drawer-preview" hidden></div>
+        <form id="drawer-form" class="form" novalidate></form>
+      </div>
       <div class="drawer-foot">
         <button type="button" class="link-button danger-link" id="drawer-delete" hidden>Delete</button>
         <div class="form-actions">
@@ -254,6 +367,7 @@
       </div>
     </aside>
 
+    <div class="progress" id="progress"></div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

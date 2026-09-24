@@ -526,6 +526,25 @@ main { counter-reset: section; }
 .resend p { color: var(--ink-2); font-size: .95rem; line-height: 1.6; }
 .resend form { display: grid; grid-template-columns: 1fr auto; gap: .5rem; }
 
+/* ---------- Related titles, pre-orders, cart discount ---------- */
+.related { display: grid; gap: .6rem; padding-top: .9rem; border-top: 1px solid var(--rule); }
+.related-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.related-item { display: grid; gap: .4rem; padding: 0; background: none; border: 0; text-align: left; cursor: pointer; }
+.related-item .related-cover { aspect-ratio: 4 / 5; overflow: hidden; border: 1px solid var(--rule-2); background: var(--paper-2); }
+.related-item img, .related-item .cover-art { width: 100%; height: 100%; object-fit: cover; }
+.related-item .cover-art { padding: .6rem; }
+.related-item .cover-art span { display: none; }
+.related-item .cover-art strong { font-size: .9rem; }
+.related-item strong.related-title { font-family: var(--serif); font-weight: 400; font-size: .95rem; line-height: 1.15; }
+.related-item .related-price { color: var(--ink-3); font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; }
+.related-item:hover strong.related-title { color: var(--clay); }
+.card-badge.is-preorder { background: var(--pine); color: var(--sand); }
+.preorder-note { padding: .75rem .9rem; background: var(--clay-soft); border-left: 3px solid var(--clay); font-size: .88rem; line-height: 1.5; }
+.cart-discount { margin: .6rem 0 0; padding: .6rem .8rem; background: var(--clay-soft); border-left: 3px solid var(--clay); color: var(--ink); font-size: .82rem; line-height: 1.5; }
+.cart-discount.is-applied { background: rgba(30, 55, 48, .1); border-color: var(--pine-2); }
+.active-filter-links { display: flex; gap: 1.25rem; align-items: center; }
+.active-filter-links a { text-decoration: none; }
+
 /* ---------- Payment methods ---------- */
 .footer-payments { display: grid; grid-template-columns: minmax(0, 1.2fr) auto auto; gap: 1.5rem 3rem; align-items: center; padding: 1.5rem 0; border-top: 1px solid rgba(245, 240, 230, .35); }
 .footer-payments-copy { display: grid; gap: .35rem; max-width: 26rem; }
@@ -731,6 +750,7 @@ main { counter-reset: section; }
   .featured-body .card-actions { grid-template-columns: 1fr; }
   .quick-actions { grid-template-columns: 1fr; }
   .quick-body { gap: .75rem; padding: 1.25rem 1.25rem 1.75rem; }
+  .related-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
 
   .features { grid-template-columns: 1fr; }
   .features li { padding: 1.5rem 1.25rem; }

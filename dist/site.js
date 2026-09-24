@@ -13,7 +13,7 @@ const CART_KEY = 'marufi-cart';
 const SAVED_KEY = 'marufi-saved';
 const CURRENCY_KEY = 'marufi-currency';
 const TONES = ['clay', 'pine', 'ink', 'gold'];
-const store = { name: 'Marufi Digital', currency: 'CAD', currencies: [], endpoint: '', regions: {}, siteUrl: '' };
+const store = { name: 'Marufi Digital', currency: 'CAD', currencies: [], endpoint: '', regions: {}, siteUrl: '', discount: null, countryPages: false };
 let catalog = [];
 let activeType = '';
 let activeRegion = '';
@@ -109,6 +109,19 @@ function saleLabel(guide) {
   if (!guide.saleEnds) return 'Sale';
   const days = Math.max(0, Math.ceil((guide.saleEnds - Date.now()) / 86400000));
   return days <= 1 ? 'Sale · ends today' : `Sale · ${days} days left`;
+}
+
+function slugify(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function isPreorder(guide) {
+  return Boolean(guide.preorder) || (guide.releaseDate && guide.releaseDate > Date.now());
+}
+
+function releaseLabel(guide) {
+  if (!guide.releaseDate) return 'Pre-order';
+  return `Pre-order · ships ${new Date(guide.releaseDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 }
 
 function placeOf(guide) {
@@ -281,6 +294,10 @@ function cartEntries() {
   return cart.map(resolveKey).filter(Boolean);
 }
 
+function singleCheckoutPossible(entries) {
+  return Boolean(store.endpoint) && entries.length > 0 && entries.every(({ guide, variant }) => (variant || guide).priceId);
+}
+
 function inCart(guide, variant) {
   return cart.includes(cartKey(guide, variant));
 }
@@ -346,7 +363,18 @@ function renderCart() {
   cartSummaryLabel.textContent = `${entries.length} ${entries.length === 1 ? 'title' : 'titles'}`;
   const totals = entries.map(({ guide, variant }) => priceInfo(guide, variant));
   const sameCurrency = totals.every((info) => info.currency === (totals[0] && totals[0].currency));
-  cartTotal.textContent = totals.length && sameCurrency ? formatMoney(totals.reduce((sum, info) => sum + info.amount, 0), totals[0].currency) : '';
+  const subtotal = totals.reduce((sum, info) => sum + info.amount, 0);
+  const discount = store.discount;
+  const discountApplies = Boolean(discount && singleCheckoutPossible(entries) && entries.length >= discount.minItems);
+  const total = discountApplies ? subtotal * (1 - discount.percent / 100) : subtotal;
+  cartTotal.textContent = totals.length && sameCurrency ? formatMoney(Math.round(total * 100) / 100, totals[0].currency) : '';
+  const note = $('#cart-discount');
+  if (discount && entries.length) {
+    note.hidden = false;
+    note.classList.toggle('is-applied', discountApplies);
+    if (discountApplies) note.textContent = `${discount.percent}% off applied at checkout for ${discount.minItems}+ titles. You save ${sameCurrency ? formatMoney(Math.round((subtotal - total) * 100) / 100, totals[0].currency) : `${discount.percent}%`}.`;
+    else { const more = discount.minItems - entries.length; note.textContent = `Add ${more} more ${more === 1 ? 'title' : 'titles'} for ${discount.percent}% off the whole cart.`; }
+  } else note.hidden = true;
   cartCheckout.hidden = !singleCheckout;
   $('#gift').hidden = !singleCheckout;
   cartNote.textContent = singleCheckout
@@ -571,8 +599,8 @@ function openQuick(guide) {
   quickVariant = null;
   const cover = $('#quick-cover');
   cover.replaceChildren(coverFor(guide));
-  const badge = saleLabel(guide) || guide.badge;
-  if (badge) cover.append(el('span', 'card-badge', badge));
+  const badge = saleLabel(guide) || (isPreorder(guide) ? releaseLabel(guide) : guide.badge);
+  if (badge) cover.append(el('span', `card-badge${isPreorder(guide) ? ' is-preorder' : ''}`, badge));
   $('#quick-kicker').textContent = kickerOf(guide);
   $('#quick-title').textContent = guide.title;
   $('#quick-desc').textContent = guide.longDescription || guide.description;
@@ -625,10 +653,44 @@ function openQuick(guide) {
     block.append(el('p', null, `“${review.quote}”`), el('cite', null, [review.name, review.place].filter(Boolean).join(' · ')));
     reviews.append(block);
   }
+  $('#quick-buy').firstChild.textContent = isPreorder(guide) ? 'Pre-order ' : 'Buy now ';
+  $('#quick-note').textContent = isPreorder(guide)
+    ? `Pre-order: pay now and we email your download the day it ships${guide.releaseDate ? ` (${new Date(guide.releaseDate).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })})` : ''}.`
+    : 'Secure checkout with Stripe. Instant download after payment.';
+  renderRelated(guide);
   renderQuickPrice();
   renderSaved();
   renderCompareBar();
   openDialog(quick, quickOverlay, $('#quick-close'));
+}
+
+function relatedTo(guide) {
+  const seen = new Set([guide.id]);
+  const picks = [];
+  const add = (g) => { if (g && !seen.has(g.id) && picks.length < 3) { seen.add(g.id); picks.push(g); } };
+  // Bundles that include this title, then other titles in the same country, then the same type elsewhere.
+  for (const g of catalog) if (g.type === 'Bundle' && g.includes.includes(guide.id)) add(g);
+  for (const id of guide.includes) add(byId(id));
+  for (const g of catalog) if (g.country && g.country === guide.country && g.type !== 'Bundle') add(g);
+  for (const g of catalog) if (g.type === guide.type) add(g);
+  return picks;
+}
+
+function renderRelated(guide) {
+  const box = $('#quick-related');
+  const list = $('#quick-related-list');
+  list.replaceChildren();
+  const picks = relatedTo(guide);
+  box.hidden = picks.length === 0;
+  for (const g of picks) {
+    const item = el('button', 'related-item');
+    item.type = 'button';
+    const cover = el('div', 'related-cover');
+    cover.append(coverFor(g));
+    item.append(cover, el('strong', 'related-title', g.title), el('span', 'related-price', `${g.type} · ${formatMoney(priceInfo(g).amount, priceInfo(g).currency)}`));
+    item.addEventListener('click', () => openQuick(g));
+    list.append(item);
+  }
 }
 function closeQuick() {
   closeDialog(quick, quickOverlay);
@@ -644,7 +706,7 @@ $('#quick-compare').addEventListener('click', () => { if (quickGuide) toggleComp
 /* ---------- Cards ---------- */
 function buildActions(guide) {
   const actions = el('div', 'card-actions');
-  const buy = el('button', 'button button-sm', 'Buy now');
+  const buy = el('button', 'button button-sm', isPreorder(guide) ? 'Pre-order' : 'Buy now');
   buy.type = 'button';
   buy.append(' ');
   const arrow = el('span', null, '→');
@@ -677,8 +739,8 @@ function buildCard(guide) {
   cover.type = 'button';
   cover.setAttribute('aria-label', `Quick view: ${guide.title}`);
   cover.append(coverFor(guide));
-  const badge = saleLabel(guide) || guide.badge;
-  if (badge) cover.append(el('span', `card-badge${saleActive(guide) ? ' is-sale' : ''}`, badge));
+  const badge = saleLabel(guide) || (isPreorder(guide) ? releaseLabel(guide) : guide.badge);
+  if (badge) cover.append(el('span', `card-badge${saleActive(guide) ? ' is-sale' : isPreorder(guide) ? ' is-preorder' : ''}`, badge));
   cover.append(el('span', 'card-peek', 'Quick view'));
   cover.addEventListener('click', () => openQuick(guide));
 
@@ -803,6 +865,9 @@ function update() {
   if (query) parts.push(`“${search.value.trim()}”`);
   bar.hidden = parts.length === 0;
   $('#active-filter-text').textContent = parts.length ? `Showing: ${parts.join(' · ')}` : '';
+  const link = $('#country-page-link');
+  link.hidden = !(store.countryPages && countryFilter.value);
+  if (!link.hidden) { link.href = `${slugify(countryFilter.value)}/`; link.textContent = `Open the ${countryFilter.value} page →`; }
 }
 
 search.addEventListener('input', update);
@@ -960,6 +1025,13 @@ function showRegions(country, highlight) {
   $('#atlas-empty').hidden = true;
   panel.hidden = false;
   $('#atlas-country-title').textContent = country;
+  const head = $('.atlas-regions-head');
+  let pageLink = head.querySelector('.country-page');
+  if (store.countryPages) {
+    if (!pageLink) { pageLink = el('a', 'link-button country-page'); head.insertBefore(pageLink, head.querySelector('#atlas-back')); }
+    pageLink.href = `${slugify(country)}/`;
+    pageLink.textContent = `${country} page →`;
+  } else if (pageLink) pageLink.remove();
   const regionList = $('#region-list');
   regionList.replaceChildren();
   const inCountry = catalog.filter((guide) => guide.country === country);
@@ -1090,6 +1162,9 @@ function applyStore(data) {
   if (isHttps(data.checkoutEndpoint)) store.endpoint = data.checkoutEndpoint.replace(/\/session\/?$/, '').replace(/\/+$/, '');
   store.regions = data.regions && typeof data.regions === 'object' ? data.regions : {};
   if (isHttps(data.siteUrl)) store.siteUrl = data.siteUrl.replace(/\/+$/, '');
+  const d = data.cartDiscount && typeof data.cartDiscount === 'object' ? data.cartDiscount : null;
+  store.discount = d && Number(d.percent) > 0 && Number(d.percent) < 100 && Number(d.minItems) >= 2 ? { percent: Number(d.percent), minItems: Number(d.minItems) } : null;
+  store.countryPages = data.countryPages === true;
 
   // Currency switcher
   try { displayCurrency = localStorage.getItem(CURRENCY_KEY) || ''; } catch { displayCurrency = ''; }
@@ -1343,7 +1418,9 @@ function normalise(guide, index) {
     cover: isSafeAsset(guide.cover) ? guide.cover : '',
     coverAlt: typeof guide.coverAlt === 'string' ? guide.coverAlt : '',
     badge: typeof guide.badge === 'string' ? guide.badge.trim().slice(0, 24) : '',
-    featured: guide.featured === true
+    featured: guide.featured === true,
+    preorder: guide.preorder === true,
+    releaseDate: typeof guide.releaseDate === 'string' && !Number.isNaN(Date.parse(guide.releaseDate)) ? Date.parse(guide.releaseDate) : 0
   };
 }
 
@@ -1370,7 +1447,10 @@ fetch('guides.json', { cache: 'no-cache' })
   .then((data) => {
     catalog = Array.isArray(data.guides)
       ? data.guides.filter((guide, index) => {
-          const valid = guide && guide.title && guide.description && Number.isFinite(Number(guide.price)) && Number(guide.price) >= 0 &&
+          if (!guide) return false;
+          if (guide.status === 'draft') return false;
+          if (guide.status === 'scheduled' && guide.publishAt && !Number.isNaN(Date.parse(guide.publishAt)) && Date.parse(guide.publishAt) > Date.now()) return false;
+          const valid = guide.title && guide.description && Number.isFinite(Number(guide.price)) && Number(guide.price) >= 0 &&
             (isHttps(guide.paymentLink) || (typeof guide.priceId === 'string' && /^price_[A-Za-z0-9]+$/.test(guide.priceId)));
           if (!valid) console.warn(`Skipping incomplete guide at index ${index}: needs title, description, price, and a paymentLink or priceId`);
           return valid;
@@ -1390,7 +1470,15 @@ fetch('guides.json', { cache: 'no-cache' })
     controls.hidden = catalog.length === 0;
     // Sample listings are a placeholder for the real catalog only.
     for (const element of $$('[data-sample-only]')) element.hidden = catalog.length > 0;
+    // Deep links: ?country=Canada&state=Alberta&type=Book, or ?q=tokyo
+    const params = new URLSearchParams(location.search);
+    if (params.get('country') && countries.includes(params.get('country'))) countryFilter.value = params.get('country');
+    if (params.get('state')) activeRegion = params.get('state');
+    if (params.get('type') && ['Guide', 'Book', 'Bundle'].includes(params.get('type'))) activeType = params.get('type');
+    if (params.get('q')) search.value = params.get('q');
+    if (activeType) for (const chip of typeFilter.querySelectorAll('.chip')) chip.classList.toggle('is-active', chip.dataset.type === activeType);
     update();
+    if ([...params.keys()].some((k) => ['country', 'state', 'type', 'q'].includes(k))) setTimeout(() => $('#guides').scrollIntoView(), 50);
     renderAtlas();
     injectStructuredData();
     // Refresh sale countdowns once a minute.

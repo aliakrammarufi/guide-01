@@ -54,27 +54,36 @@ Per title (required: `title`, `description`, numeric `price`, and `paymentLink` 
 
 ## The admin dashboard: `/admin/`
 
-Open `https://your-domain.com/admin/` (locally, `http://localhost:8765/admin/`). It has two modes:
+Open `https://your-domain.com/admin/` (locally, `http://localhost:8765/admin/`). Two modes:
 
-- **Connected.** Sign in with your Worker URL and the admin password. Everything is stored by the Worker: the live catalog (KV), images and product files (R2), orders (Stripe), reader requests, and backups. Publishing makes changes live within a minute; the storefront reads `<worker>/catalog` and falls back to `guides.json` when the Worker is unreachable.
-- **Offline.** Click "Work offline with guides.json". The dashboard edits the catalog in your browser and downloads a new `guides.json` to commit. Uploads are not available offline; put files in `dist/assets/` and paste the path.
-
-What it does:
+- **Connected.** Sign in with your Worker URL and the admin password (plus a six-digit e-mail code when two-step sign-in is on). Everything is stored by the Worker: the live catalog (KV), images and product files (R2), orders and coupons (Stripe), reader requests, backups, the activity log. Publishing makes changes live within a minute; the storefront reads `<worker>/catalog` and falls back to `guides.json` when the Worker is unreachable.
+- **Offline.** "Work offline with guides.json" edits the catalog in your browser and downloads a new `guides.json` to commit. Uploads and Stripe actions are not available offline.
 
 | Section | What you can do |
 |---|---|
-| Overview | Stats, setup checklist, recent orders, quick actions. |
-| Titles | Add, edit, duplicate, delete guides, books, and bundles. Every field the storefront uses, plus cover upload, sample pages, the private product file, editions, bundle contents, and per-title reviews. **Create product, price, and payment link in Stripe** fills the Stripe ids in one click. |
-| Zones | Cities people are heading to. Drag to reorder. |
-| Reviews | Home-page reader quotes with ratings. |
-| Media & files | Upload images (public) and product files (private), copy URLs and keys, delete. |
-| Orders | Paid checkouts for 7 to 365 days, revenue by currency, best sellers, CSV export. |
-| Requests | "Notify me" requests by place, CSV export. |
-| Announce | Email every buyer of a title (dry-run count first). |
-| Store settings | Name, site URL, currencies, contact, social links, refund policy, analytics, author, and the state lists per country. |
-| Backups & tools | Import or export `guides.json`, restore any earlier published version, discard the local draft. |
+| Overview | Stats, setup checklist, store health check (prices out of sync with Stripe, missing files or covers), recent orders. |
+| Titles | Add, edit, duplicate, delete. Sort, filter by type and status, paged at 25. Select rows for bulk actions (publish, draft, change price by %, set a currency price, badge, delete). CSV export and import. The editor has a live card preview, every storefront field, status (published, draft, scheduled with a go-live time), pre-order with release date, cover upload with 4:5 crop and resize, sample pages, the private product file, editions, bundle contents, per-title reviews, one-click Stripe product creation, and "email download links to buyers" for shipping pre-orders. `Cmd/Ctrl+S` saves. |
+| Zones, Reviews | Searchable lists; drag zones to reorder. |
+| Media & files | Upload with a progress bar; images are resized to WebP in the browser first. Copy URLs and keys, delete. |
+| Orders | 7 to 365 days, revenue by currency, best sellers, refund with one click, refunded orders flagged, CSV export. |
+| Coupons | Create Stripe coupons with a promotion code, percent or amount off, max redemptions, expiry. List and delete. |
+| Requests | "Notify me" requests. Pick a title and e-mail everyone who asked for that state or country; sent requests clear themselves. |
+| Announce | E-mail every buyer of a title, optionally with fresh download links. |
+| Store settings | Name, site URL, currencies, contact, refund policy, analytics, multi-title cart discount (creates the Stripe coupon), country pages, social links, author, security (change password, two-step sign-in), e-mail templates, state lists per country. |
+| Backups & tools | Import/export `guides.json`, restore any published version, activity log, discard the local draft. |
 
-Unpublished edits are kept in the browser until you publish, so you can stop and continue later. A backup is stored every time you publish.
+**Password recovery.** "Forgot password?" on the sign-in screen e-mails a reset code to the Worker's `CONTACT_EMAIL` when e-mail is configured. Without e-mail, reset by running `wrangler secret put ADMIN_PASSWORD` and deleting the KV key `auth:password`.
+
+## Country landing pages
+
+`node scripts/build-pages.mjs` writes one static page per country (`dist/canada/index.html` and so on) with the state list, the titles, and Product structured data, plus `sitemap.xml` and `robots.txt` using the `siteUrl` from the catalog. It reads the live catalog from the Worker when `checkoutEndpoint` is set. Run it after publishing new countries and push the result. Turn on "Link to country landing pages" in Store settings so the storefront links to them. Drafts and unreleased scheduled titles are excluded.
+
+## Selling features
+
+- **Related titles** appear in every quick view: bundles that include the title, then other titles from the same country, then the same format.
+- **Multi-title discount.** Set a percent and minimum in Store settings and click "Create the coupon in Stripe". The cart shows "add one more for 15% off" and the Worker applies the coupon automatically at checkout. Stripe does not allow promotion codes on the same session when an automatic discount applies.
+- **Pre-orders.** Tick "Pre-order" and set a release date. The card and quick view say Pre-order, the thank-you page shows "Reserved" instead of a download, and no file is served until you attach one and click "Email download links to everyone who bought this" in the editor (or Announce with links).
+- **Deep links.** `/?country=Canada&state=Alberta`, `/?type=Book`, and `/?q=tokyo` open the collection pre-filtered.
 
 ## Deploy the Worker
 
