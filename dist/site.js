@@ -1270,6 +1270,9 @@ function applyStore(data) {
   // Zones
   renderZones(Array.isArray(data.zones) ? data.zones : []);
 
+  // Hero video (for a UGC or explainer clip). Falls back to the photo when not set.
+  setupHeroVideo(data.heroVideo && typeof data.heroVideo === 'object' ? data.heroVideo : null);
+
   // Analytics (Plausible, cookie-free)
   const analytics = data.analytics && typeof data.analytics === 'object' ? data.analytics : {};
   if (typeof analytics.plausibleDomain === 'string' && /^[a-z0-9.-]+$/i.test(analytics.plausibleDomain)) {
@@ -1278,6 +1281,60 @@ function applyStore(data) {
     script.dataset.domain = analytics.plausibleDomain;
     script.src = 'https://plausible.io/js/script.js';
     document.head.append(script);
+  }
+}
+
+function setupHeroVideo(config) {
+  if (!config || !isSafeAsset(config.src)) return;
+  const box = $('#plate-img');
+  const video = $('#plate-video');
+  const play = $('#plate-play');
+  const controls = $('#plate-controls');
+  const toggle = $('#plate-toggle');
+  const mute = $('#plate-mute');
+  const time = $('#plate-time');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  video.src = config.src;
+  if (isSafeAsset(config.poster)) video.poster = config.poster;
+  video.loop = config.loop !== false;
+  video.muted = true;
+  video.setAttribute('aria-label', config.title || 'Introduction video');
+  if (typeof config.aspect === 'string' && /^\d+\s*\/\s*\d+$/.test(config.aspect)) box.style.setProperty('--plate-aspect', config.aspect);
+  $('#plate-picture').hidden = true;
+  video.hidden = false;
+  box.classList.add('has-video');
+  $('#plate-tag').textContent = config.tag || 'Watch';
+  $('#plate-caption-a').textContent = config.captionLeft || 'Film 01';
+  $('#plate-caption-b').textContent = config.captionRight || config.title || 'A short introduction';
+  $('#plate-play-label').textContent = config.playLabel || 'Play with sound';
+  play.hidden = false;
+  mute.classList.add('is-muted');
+
+  const setPlaying = (on) => {
+    box.classList.toggle('is-playing', on);
+    controls.hidden = !on;
+    toggle.setAttribute('aria-label', on ? 'Pause' : 'Play');
+    toggle.innerHTML = on
+      ? '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>'
+      : '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+  };
+  const format = (n) => `${Math.floor(n / 60)}:${String(Math.floor(n % 60)).padStart(2, '0')}`;
+  video.addEventListener('timeupdate', () => { if (Number.isFinite(video.duration)) time.textContent = `${format(video.currentTime)} / ${format(video.duration)}`; });
+  video.addEventListener('play', () => setPlaying(true));
+  video.addEventListener('pause', () => setPlaying(false));
+  video.addEventListener('ended', () => { if (!video.loop) { setPlaying(false); play.hidden = false; } });
+
+  // Tapping the big button plays with sound; the ambient loop stays muted until then.
+  const setSound = (on) => { video.muted = !on; box.classList.toggle('is-sound', on); mute.classList.toggle('is-muted', !on); mute.setAttribute('aria-label', on ? 'Mute' : 'Unmute'); };
+  play.addEventListener('click', () => { setSound(true); video.currentTime = 0; video.play().catch(() => {}); });
+  toggle.addEventListener('click', () => { if (video.paused) video.play().catch(() => {}); else video.pause(); });
+  mute.addEventListener('click', () => setSound(video.muted));
+  video.addEventListener('click', () => { if (video.paused) video.play().catch(() => {}); else video.pause(); });
+
+  // Autoplay silently as a living poster unless the visitor prefers reduced motion or turned it off.
+  if (!reduced && config.autoplay !== false) {
+    video.autoplay = true;
+    video.play().then(() => { play.hidden = false; controls.hidden = false; }).catch(() => { play.hidden = false; });
   }
 }
 

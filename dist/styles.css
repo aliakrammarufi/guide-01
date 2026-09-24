@@ -136,6 +136,22 @@ em { font-style: italic; }
 .plate figcaption { display: flex; justify-content: space-between; gap: 1rem; padding: .9rem .35rem .3rem; font-size: .62rem; letter-spacing: .12em; color: var(--ink-3); }
 .hero-side { position: absolute; right: 1.25rem; top: 50%; z-index: 1; transform: translateY(-50%) rotate(180deg); writing-mode: vertical-rl; font-family: var(--mono); font-size: .6rem; letter-spacing: .22em; text-transform: uppercase; color: var(--ink-3); }
 
+/* ---------- Hero video plate ---------- */
+.plate-img video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #14201c; }
+.plate-img.has-video { aspect-ratio: var(--plate-aspect, 4 / 5); }
+.plate-img.has-video::after { background: linear-gradient(to top, rgba(23, 27, 26, .45), transparent 45%); }
+.plate-play { position: absolute; left: 50%; top: 50%; z-index: 2; display: inline-flex; align-items: center; gap: .7rem; padding: .8rem 1.3rem .8rem 1rem; background: var(--paper); color: var(--ink); border: 1px solid var(--ink); font-family: var(--mono); font-size: .66rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; box-shadow: var(--shadow-lift); transform: translate(-50%, -50%); transition: transform .3s var(--ease-out), background .2s, color .2s; }
+.plate-play svg { width: 1.4rem; height: 1.4rem; fill: currentColor; }
+.plate-play:hover { background: var(--clay); color: var(--paper); border-color: var(--clay); transform: translate(-50%, -50%) scale(1.04); }
+.plate-controls { position: absolute; left: .9rem; right: .9rem; bottom: .9rem; z-index: 2; display: flex; align-items: center; gap: .45rem; }
+.plate-control { display: grid; place-items: center; width: 2.4rem; height: 2.4rem; background: rgba(245, 240, 230, .92); border: 0; border-radius: 50%; color: var(--ink); transition: background .2s, transform .2s var(--ease-out); }
+.plate-control:hover { background: var(--paper); transform: translateY(-1px); }
+.plate-control svg { width: 1.1rem; height: 1.1rem; fill: currentColor; }
+.plate-control svg .wave { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.plate-control.is-muted svg .wave { display: none; }
+.plate-time { margin-left: auto; padding: .35rem .55rem; background: rgba(23, 27, 26, .55); color: var(--paper); font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; }
+.plate-img.is-playing.is-sound .plate-play { display: none; }
+
 /* ---------- Marquee ---------- */
 .marquee { overflow: hidden; padding: .85rem 0; background: var(--ink); color: var(--paper); font-size: .64rem; letter-spacing: .18em; }
 .marquee-track { display: flex; width: max-content; gap: 0; animation: marquee 38s linear infinite; }
@@ -701,6 +717,7 @@ main { counter-reset: section; }
   .hero-facts strong { font-size: 1.05rem; }
   .plate { max-width: none; padding: .5rem; box-shadow: .6rem .6rem 0 var(--paper-3), var(--shadow-lift); }
   .plate-img { aspect-ratio: 5 / 4; }
+  .plate-img.has-video { aspect-ratio: var(--plate-aspect, 4 / 5); }
   .plate figcaption { padding: .7rem .25rem .2rem; font-size: .58rem; }
   .marquee { padding: .7rem 0; font-size: .58rem; }
   .section { padding: 3.25rem var(--gutter); }

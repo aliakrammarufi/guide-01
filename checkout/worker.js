@@ -470,7 +470,7 @@ async function getBackup(key, env) {
 }
 
 /* ---------- Uploads (R2) ---------- */
-const MEDIA_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', avif: 'image/avif', gif: 'image/gif', svg: 'image/svg+xml' };
+const MEDIA_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', avif: 'image/avif', gif: 'image/gif', svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' };
 const FILE_TYPES = { pdf: 'application/pdf', epub: 'application/epub+zip', zip: 'application/zip', mobi: 'application/x-mobipocket-ebook', mp3: 'audio/mpeg', mp4: 'video/mp4', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
 
 function safeName(name) {
@@ -486,7 +486,7 @@ async function upload(request, url, env) {
   const types = kind === 'file' ? FILE_TYPES : MEDIA_TYPES;
   if (!types[ext]) throw fail(`Unsupported ${kind} type .${ext}`);
   const length = Number(request.headers.get('Content-Length')) || 0;
-  const limit = kind === 'file' ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
+  const limit = kind === 'file' || /^(mp4|webm|mov)$/.test(ext) ? 95 * 1024 * 1024 : 12 * 1024 * 1024;
   if (length > limit) throw fail(`File too large (limit ${Math.round(limit / 1048576)} MB)`);
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const key = `${kind === 'file' ? 'files' : 'media'}/${stamp}-${crypto.randomUUID().slice(0, 8)}-${name}`;

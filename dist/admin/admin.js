@@ -1379,6 +1379,18 @@ function renderSettings() {
   f['cartDiscount.minItems'].value = c.cartDiscount.minItems || '';
   f['cartDiscount.couponId'].value = c.cartDiscount.couponId || '';
   f.countryPages.checked = c.countryPages === true;
+  const hv = c.heroVideo && typeof c.heroVideo === 'object' ? c.heroVideo : {};
+  f['heroVideo.src'].value = hv.src || '';
+  f['heroVideo.poster'].value = hv.poster || '';
+  f['heroVideo.aspect'].value = hv.aspect || '4 / 5';
+  f['heroVideo.tag'].value = hv.tag || '';
+  f['heroVideo.playLabel'].value = hv.playLabel || '';
+  f['heroVideo.captionLeft'].value = hv.captionLeft || '';
+  f['heroVideo.captionRight'].value = hv.captionRight || '';
+  f['heroVideo.autoplay'].checked = hv.autoplay !== false;
+  f['heroVideo.loop'].checked = hv.loop !== false;
+  const posterImg = $('.image-picker[data-target="heroVideo.poster"] img');
+  posterImg.hidden = !hv.poster; if (hv.poster) posterImg.src = assetUrl(hv.poster);
   for (const k of ['instagram', 'tiktok', 'youtube', 'pinterest', 'x', 'facebook']) f[`social.${k}`].value = (c.social && c.social[k]) || '';
   renderSecurity();
   renderTemplates();
@@ -1433,11 +1445,31 @@ $('#settings-form').addEventListener('change', (event) => {
   const pct = Number(f['cartDiscount.percent'].value); const min = Number(f['cartDiscount.minItems'].value);
   c.cartDiscount = pct > 0 ? { percent: pct, minItems: Math.max(2, min || 2), couponId: f['cartDiscount.couponId'].value.trim() } : {};
   c.countryPages = f.countryPages.checked;
+  const src = f['heroVideo.src'].value.trim();
+  c.heroVideo = src ? { src, poster: f['heroVideo.poster'].value.trim(), aspect: f['heroVideo.aspect'].value, tag: f['heroVideo.tag'].value.trim(), playLabel: f['heroVideo.playLabel'].value.trim(), captionLeft: f['heroVideo.captionLeft'].value.trim(), captionRight: f['heroVideo.captionRight'].value.trim(), autoplay: f['heroVideo.autoplay'].checked, loop: f['heroVideo.loop'].checked } : null;
+  if (event.target.name === 'heroVideo.poster') { const img = $('.image-picker[data-target="heroVideo.poster"] img'); img.hidden = !c.heroVideo || !c.heroVideo.poster; if (c.heroVideo && c.heroVideo.poster) img.src = assetUrl(c.heroVideo.poster); }
   c.social = {}; for (const k of ['instagram', 'tiktok', 'youtube', 'pinterest', 'x', 'facebook']) c.social[k] = f[`social.${k}`].value.trim();
   c.author = {}; for (const k of ['name', 'role', 'photo', 'bio', 'note']) c.author[k] = f[`author.${k}`].value.trim();
   if (event.target.name === 'author.photo') { const img = $('.image-picker[data-target="author.photo"] img'); img.hidden = !c.author.photo; if (c.author.photo) img.src = assetUrl(c.author.photo); }
   markDirty();
 });
+$('#hero-video-upload').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const label = event.target.parentElement;
+  label.firstChild.textContent = 'Uploading…';
+  try { const r = await uploadFile(file, 'media'); const f = $('#settings-form').elements; f['heroVideo.src'].value = r.url; f['heroVideo.src'].dispatchEvent(new Event('change', { bubbles: true })); toast(`Video uploaded (${formatBytes(file.size)}).`); }
+  catch (e) { toast(e.message, true); }
+  finally { label.firstChild.textContent = 'Upload video'; event.target.value = ''; }
+});
+$('.image-picker[data-target="heroVideo.poster"] input[type="file"]').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try { const aspect = $('#settings-form').elements['heroVideo.aspect'].value.split('/').map(Number); const r = await uploadFile(await processImage(file, { aspect: aspect[0] / aspect[1], maxWidth: 1200 }), 'media'); const f = $('#settings-form').elements; f['heroVideo.poster'].value = r.url; f['heroVideo.poster'].dispatchEvent(new Event('change', { bubbles: true })); toast('Poster uploaded'); }
+  catch (e) { toast(e.message, true); }
+  event.target.value = '';
+});
+$('#hero-video-clear').addEventListener('click', () => { const f = $('#settings-form').elements; f['heroVideo.src'].value = ''; f['heroVideo.poster'].value = ''; f['heroVideo.src'].dispatchEvent(new Event('change', { bubbles: true })); toast('Video removed. The photo shows again after you publish.'); });
 $('.image-picker[data-target="author.photo"] input[type="file"]').addEventListener('change', async (event) => {
   const file = event.target.files[0];
   if (!file) return;

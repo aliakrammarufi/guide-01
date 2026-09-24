@@ -78,6 +78,26 @@ Open `https://your-domain.com/admin/` (locally, `http://localhost:8765/admin/`).
 
 `node scripts/build-pages.mjs` writes one static page per country (`dist/canada/index.html` and so on) with the state list, the titles, and Product structured data, plus `sitemap.xml` and `robots.txt` using the `siteUrl` from the catalog. It reads the live catalog from the Worker when `checkoutEndpoint` is set. Run it after publishing new countries and push the result. Turn on "Link to country landing pages" in Store settings so the storefront links to them. Drafts and unreleased scheduled titles are excluded.
 
+## Home page video (UGC presenter)
+
+Set `heroVideo` in the catalog (Store settings → Home page video in the admin, or by hand in `guides.json`) and the hero photo becomes a framed video player:
+
+```json
+"heroVideo": {
+  "src": "assets/hero.mp4",
+  "poster": "assets/hero-poster.webp",
+  "aspect": "9 / 16",
+  "tag": "Watch",
+  "playLabel": "Play with sound",
+  "captionLeft": "Film 01",
+  "captionRight": "Meet the guides, 45 seconds",
+  "autoplay": true,
+  "loop": true
+}
+```
+
+The clip plays silently as a living poster (never when the visitor prefers reduced motion), and the big button restarts it with sound. Controls cover pause, mute, and elapsed time. Export from zeely.app as MP4 (H.264, AAC), portrait, ideally under 30 MB; put it in `dist/assets/` or upload it from the admin, which stores it in R2 and serves it from the Worker. Remove `heroVideo` (or clear it in the admin) to show the photo again.
+
 ## Selling features
 
 - **Related titles** appear in every quick view: bundles that include the title, then other titles from the same country, then the same format.

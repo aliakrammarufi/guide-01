@@ -80,15 +80,25 @@
               <li><strong>Secure checkout</strong><span>Powered by Stripe</span></li>
             </ul>
           </div>
-          <figure class="plate reveal">
-            <div class="plate-img">
-              <span class="plate-tag" aria-hidden="true">Field notes</span>
-              <picture>
+          <figure class="plate reveal" id="hero-plate">
+            <div class="plate-img" id="plate-img">
+              <span class="plate-tag" id="plate-tag" aria-hidden="true">Field notes</span>
+              <picture id="plate-picture">
                 <source media="(max-width: 700px)" srcset="assets/travel-planning-800.webp" type="image/webp" />
                 <img src="assets/travel-planning.webp" alt="A map and notebook on a wooden table by a window overlooking mountains and water" width="1536" height="1024" fetchpriority="high" />
               </picture>
+              <video id="plate-video" playsinline preload="metadata" hidden></video>
+              <button type="button" class="plate-play" id="plate-play" hidden aria-label="Play the video">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <span id="plate-play-label">Watch</span>
+              </button>
+              <div class="plate-controls" id="plate-controls" hidden>
+                <button type="button" class="plate-control" id="plate-toggle" aria-label="Pause"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>
+                <button type="button" class="plate-control" id="plate-mute" aria-label="Unmute"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg></button>
+                <span class="plate-time" id="plate-time"></span>
+              </div>
             </div>
-            <figcaption><span>Plate 01</span><span>Planning table, morning light</span></figcaption>
+            <figcaption><span id="plate-caption-a">Plate 01</span><span id="plate-caption-b">Planning table, morning light</span></figcaption>
           </figure>
         </div>
         <span class="hero-side" aria-hidden="true">Marufi Digital · Guides by place</span>

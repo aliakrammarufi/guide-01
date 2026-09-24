@@ -257,6 +257,21 @@
               <label class="field"><span>Refund policy (shown in the FAQ; leave empty to hide)</span><textarea name="refundPolicy" rows="3"></textarea></label>
             </div>
             <div class="panel">
+              <div class="panel-head"><h2>Home page video</h2></div>
+              <p class="hint">Replaces the photo in the hero with a video, for example a UGC presenter clip. Portrait 4:5 or 9:16 works best. MP4 (H.264) plays everywhere; keep it under 30 MB for a fast first load.</p>
+              <div class="field"><span>Video file</span><div class="file-picker"><input type="url" name="heroVideo.src" placeholder="Upload, or paste a URL / assets/hero.mp4" /><label class="button-ghost upload-button">Upload video<input type="file" id="hero-video-upload" accept="video/mp4,video/webm,video/quicktime" hidden /></label></div></div>
+              <div class="field"><span>Poster image (shown before play)</span><div class="image-picker" data-target="heroVideo.poster"><img alt="" hidden /><input type="url" name="heroVideo.poster" placeholder="Upload or paste an image URL" /><label class="button-ghost upload-button">Upload<input type="file" accept="image/*" hidden /></label></div></div>
+              <div class="grid-3">
+                <label class="field"><span>Aspect ratio</span><select name="heroVideo.aspect"><option value="4 / 5">4:5 portrait</option><option value="9 / 16">9:16 vertical</option><option value="1 / 1">1:1 square</option><option value="16 / 9">16:9 landscape</option></select></label>
+                <label class="field"><span>Corner tag</span><input type="text" name="heroVideo.tag" placeholder="Watch" maxlength="20" /></label>
+                <label class="field"><span>Play button label</span><input type="text" name="heroVideo.playLabel" placeholder="Play with sound" maxlength="30" /></label>
+                <label class="field"><span>Caption left</span><input type="text" name="heroVideo.captionLeft" placeholder="Film 01" maxlength="30" /></label>
+                <label class="field"><span>Caption right</span><input type="text" name="heroVideo.captionRight" placeholder="Meet the guides, 45 seconds" maxlength="60" /></label>
+                <label class="field"><span>Behaviour</span><span class="check-stack"><label class="check"><input type="checkbox" name="heroVideo.autoplay" checked /> Autoplay silently</label><label class="check"><input type="checkbox" name="heroVideo.loop" checked /> Loop</label></span></label>
+              </div>
+              <div class="form-actions"><button type="button" class="link-button danger-link" id="hero-video-clear">Remove the video and show the photo again</button></div>
+            </div>
+            <div class="panel">
               <div class="panel-head"><h2>Selling</h2></div>
               <div class="grid-3">
                 <label class="field"><span>Multi-title discount: percent off</span><input type="number" name="cartDiscount.percent" min="1" max="99" placeholder="15" /></label>
