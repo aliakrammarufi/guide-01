@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /thank-you.html
 Disallow: /admin/
-Sitemap: https://YOUR-DOMAIN/sitemap.xml
+Sitemap: https://aliakrammarufi.github.io/guide-01/sitemap.xml

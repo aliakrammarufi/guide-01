@@ -257,3 +257,4 @@ body.drawer-open { overflow: hidden; }
 .category-row .check { white-space: nowrap; }
 .category-add { display: flex; gap: .5rem; align-items: center; }
 @media (max-width: 800px) { .category-row { grid-template-columns: 1fr 1fr; } .category-row input[name="blurb"] { grid-column: 1 / -1; } }
+.wrap-text { max-width: 28rem; white-space: pre-wrap; font-size: .82rem; }

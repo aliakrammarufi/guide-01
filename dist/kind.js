@@ -30,7 +30,7 @@
     if (text !== undefined) node.textContent = text;
     return node;
   }
-  const isHttps = (v) => typeof v === 'string' && /^https:\/\//i.test(v);
+  const isHttps = (v) => { try { const u = new URL(v); return u.protocol === 'https:' || (u.protocol === 'http:' && u.hostname === 'localhost'); } catch { return false; } };
   const isSafeAsset = (v) => typeof v === 'string' && v.trim() && ((/^(assets|covers|samples)\//.test(v) && !v.includes('..')) || isHttps(v));
   const slugify = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   const assetUrl = (v) => (isHttps(v) ? v : `../${v}`);

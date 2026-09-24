@@ -54,11 +54,13 @@
           <button type="button" class="nav-item" data-view="titles">Titles <span class="count" id="nav-titles"></span></button>
           <button type="button" class="nav-item" data-view="zones">Zones <span class="count" id="nav-zones"></span></button>
           <button type="button" class="nav-item" data-view="resources">Free help <span class="count" id="nav-resources"></span></button>
+          <button type="button" class="nav-item" data-view="articles">Journal <span class="count" id="nav-articles"></span></button>
           <button type="button" class="nav-item" data-view="reviews">Reviews <span class="count" id="nav-reviews"></span></button>
           <button type="button" class="nav-item" data-view="media">Media &amp; files</button>
           <button type="button" class="nav-item" data-view="orders">Orders</button>
           <button type="button" class="nav-item" data-view="coupons">Coupons</button>
           <button type="button" class="nav-item" data-view="requests">Requests <span class="count" id="nav-requests"></span></button>
+          <button type="button" class="nav-item" data-view="subscribers">Newsletter <span class="count" id="nav-subscribers"></span></button>
           <button type="button" class="nav-item" data-view="announce">Announce</button>
           <button type="button" class="nav-item" data-view="settings">Store settings</button>
           <button type="button" class="nav-item" data-view="tools">Backups &amp; tools</button>
@@ -152,6 +154,12 @@
           <div class="cards" id="resources-list"></div>
         </section>
 
+        <!-- Journal -->
+        <section class="view" data-view="articles" hidden>
+          <div class="toolbar"><input type="search" id="articles-search" placeholder="Search articles" /><p class="hint">Free articles shown at /articles/ and, the latest three, on the home page. Drafts and future dates stay hidden.</p><button type="button" class="button" data-action="new-article">Write an article</button></div>
+          <div class="cards" id="articles-list"></div>
+        </section>
+
         <!-- Reviews -->
         <section class="view" data-view="reviews" hidden>
           <div class="toolbar"><input type="search" id="reviews-search" placeholder="Search reviews" /><p class="hint">Home-page reviews. Per-title reviews are edited inside each title.</p><button type="button" class="button" data-action="new-review">Add a review</button></div>
@@ -227,6 +235,25 @@
             <p class="hint" id="notify-note">Matches requests whose place mentions the title's state or country. Sent requests are cleared automatically.</p>
           </div>
           <div class="table-wrap" id="requests-table"></div>
+          <div class="panel">
+            <div class="panel-head"><h2>Messages from the contact page</h2><button type="button" class="button-ghost" id="messages-export">Export CSV</button></div>
+            <p class="hint">Sent through /contact/. A copy also goes to CONTACT_EMAIL when e-mail is configured.</p>
+            <div class="table-wrap" id="messages-table"></div>
+          </div>
+        </section>
+
+        <!-- Newsletter -->
+        <section class="view" data-view="subscribers" hidden>
+          <div class="toolbar"><p class="hint" id="subscribers-summary">People who subscribed from the footer. Confirmed addresses receive the newsletter.</p><button type="button" class="button-ghost" id="subscribers-export">Export CSV</button></div>
+          <div class="panel narrow">
+            <div class="panel-head"><h2>Send a newsletter</h2></div>
+            <form id="newsletter-form" class="form" novalidate>
+              <label class="field"><span>Subject</span><input type="text" id="newsletter-subject" required maxlength="150" /></label>
+              <label class="field"><span>Message (plain text, blank line = new paragraph)</span><textarea id="newsletter-message" rows="8" required></textarea></label>
+              <div class="form-actions"><button type="button" class="button-ghost" id="newsletter-count">Count recipients</button><button type="submit" class="button" id="newsletter-send">Send</button><span class="hint" id="newsletter-note">Every e-mail carries an unsubscribe link.</span></div>
+            </form>
+          </div>
+          <div class="table-wrap" id="subscribers-table"></div>
         </section>
 
         <!-- Announce -->
@@ -260,6 +287,8 @@
                 <label class="field"><span>Display currencies (comma separated)</span><input type="text" name="currencies" placeholder="CAD, USD, EUR, GBP" /></label>
                 <label class="field"><span>Contact email</span><input type="email" name="contactEmail" /></label>
                 <label class="field"><span>Plausible analytics domain</span><input type="text" name="plausibleDomain" placeholder="your-domain.com" /></label>
+                <label class="field"><span>Google Analytics 4 measurement id</span><input type="text" name="ga4" placeholder="G-XXXXXXXXXX" /></label>
+                <label class="field"><span>Cloudflare Web Analytics token</span><input type="text" name="cloudflareToken" placeholder="32-character token" /></label>
               </div>
               <label class="field"><span>Refund policy (shown in the FAQ; leave empty to hide)</span><textarea name="refundPolicy" rows="3"></textarea></label>
             </div>
@@ -286,6 +315,10 @@
                 <label class="field"><span>Stripe coupon id</span><input type="text" name="cartDiscount.couponId" placeholder="Created by the button" /></label>
               </div>
               <div class="form-actions"><button type="button" class="button-ghost" id="discount-create">Create the coupon in Stripe</button><span class="hint" id="discount-note">The discount is applied automatically at checkout when the cart has enough titles. Requires the Worker and Stripe.</span></div>
+              <div class="grid-2">
+                <label class="check"><input type="checkbox" name="giftCards.enabled" /> Sell gift cards at /gift/ (single-use Stripe promotion codes, created on payment)</label>
+                <label class="field"><span>Gift card amounts, comma separated</span><input type="text" name="giftCards.amounts" placeholder="25, 50, 100" /></label>
+              </div>
               <label class="check"><input type="checkbox" name="countryPages" /> Link to country landing pages (run <code>node scripts/build-pages.mjs</code> after publishing to generate them)</label>
             </div>
             <div class="panel">

@@ -9,6 +9,12 @@
  *   GET  /catalog                                                          → the live catalog saved from the admin dashboard
  *   POST /notify    { email, place }                                       → { ok }
  *   POST /resend    { email }                                              → { ok }
+ *   POST /contact   { name, email, message }                               → { ok }   stored, and e-mailed to CONTACT_EMAIL
+ *   POST /subscribe { email }                                              → { ok, doubleOptIn }   newsletter; confirmation e-mail when e-mail is configured
+ *   GET  /confirm?t=<token>, GET /unsubscribe?t=<token>                    → HTML pages
+ *   POST /account/code   { email }                                         → { ok, challenge }   e-mails a six-digit code
+ *   POST /account/orders { challenge, code }                               → { email, orders: [{ created, total, currency, items: [{ name, url, expires }] }] }
+ *   POST /gift-card/session { amount, to, from, message }                  → { url }   Stripe Checkout for a gift card; the code is created on payment
  *
  * Admin routes (Bearer session token from /admin/login, or Bearer ADMIN_TOKEN):
  *   POST /admin/login            { password }                → { token, exp }
@@ -36,6 +42,9 @@
  *   GET  /admin/activity, GET/PUT /admin/templates, GET /admin/health
  *   POST /admin/requests/notify  { guideId, subject?, message?, dryRun? } → e-mails readers who asked for that place
  *   POST /admin/deliver          { priceId, subject?, message?, dryRun? } → { sent }  email download links to buyers (pre-orders)
+ *   GET  /admin/messages, DELETE /admin/messages/<key>                     contact-form messages
+ *   GET  /admin/subscribers, DELETE /admin/subscribers/<key>               newsletter list
+ *   POST /admin/newsletter       { subject, message, dryRun? }             → { sent, recipients }
  *
  * Environment (wrangler.toml [vars] + `wrangler secret put`):
  *   STRIPE_SECRET_KEY   secret
@@ -78,6 +87,13 @@ export default {
       if (path === '/notify' && request.method === 'POST') return json(await notifyRequest(await readJson(request), env));
       if (path === '/resend' && request.method === 'POST') return json(await resendLinks(await readJson(request), env, url));
       if (path === '/announce' && request.method === 'POST') { await requireAdmin(request, env); return json(await announce(await readJson(request), env)); }
+      if (path === '/contact' && request.method === 'POST') return json(await contact(request, await readJson(request), env));
+      if (path === '/subscribe' && request.method === 'POST') return json(await subscribe(request, await readJson(request), env, url));
+      if (path === '/confirm' && request.method === 'GET') return confirmSubscription(url.searchParams.get('t'), env);
+      if (path === '/unsubscribe' && request.method === 'GET') return unsubscribe(url.searchParams.get('t'), env);
+      if (path === '/account/code' && request.method === 'POST') return json(await accountCode(request, await readJson(request), env));
+      if (path === '/account/orders' && request.method === 'POST') return json(await accountOrders(request, await readJson(request), env, url));
+      if (path === '/gift-card/session' && request.method === 'POST') return json(await giftCardSession(request, await readJson(request), env));
 
       // Admin
       if (path === '/admin/login' && request.method === 'POST') return json(await login(request, await readJson(request), env));
@@ -114,6 +130,11 @@ export default {
         if (sub === '/requests' && request.method === 'GET') return json(await listRequests(env));
         if (sub.startsWith('/requests/') && request.method === 'DELETE') return json(await deleteRequest(decodeURIComponent(sub.slice('/requests/'.length)), env));
         if (sub === '/announce' && request.method === 'POST') return json(await announce(await readJson(request), env));
+        if (sub === '/messages' && request.method === 'GET') return json(await listKeyed('message:', env));
+        if (sub.startsWith('/messages/') && request.method === 'DELETE') return json(await deleteKeyed('message:', decodeURIComponent(sub.slice('/messages/'.length)), env));
+        if (sub === '/subscribers' && request.method === 'GET') return json(await listSubscribers(env));
+        if (sub.startsWith('/subscribers/') && request.method === 'DELETE') return json(await deleteKeyed('subscriber:', decodeURIComponent(sub.slice('/subscribers/'.length)), env));
+        if (sub === '/newsletter' && request.method === 'POST') return json(await newsletter(request, await readJson(request), env, url));
       }
       return json({ error: 'Not found' }, 404);
     } catch (error) {
@@ -772,6 +793,22 @@ async function health(env) {
     }
   }
   if (!catalog.siteUrl) push('info', null, 'Site URL is not set (used in structured data and e-mails)');
+  // E-mail deliverability: the sending domain needs SPF, DKIM, and DMARC records or receipts land in spam.
+  const from = String(env.FROM_EMAIL || '');
+  const domain = (from.match(/@([a-z0-9.-]+)/i) || [])[1];
+  if (!env.RESEND_API_KEY || !from) push('warn', null, 'E-mail is not configured (RESEND_API_KEY and FROM_EMAIL): receipts, download links, codes, and the newsletter cannot be sent');
+  else if (domain) {
+    const txt = async (name) => { try { const r = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=TXT`, { headers: { Accept: 'application/dns-json' } }); const d = await r.json(); return (d.Answer || []).map((a) => String(a.data || '').replace(/"/g, '')); } catch { return null; } };
+    const spfRoot = await txt(domain); const spfSend = await txt(`send.${domain}`); const dkim = await txt(`resend._domainkey.${domain}`); const dmarc = await txt(`_dmarc.${domain}`);
+    if (spfRoot === null) push('info', null, `Could not check DNS for ${domain} right now`);
+    else {
+      const hasSpf = [...(spfRoot || []), ...(spfSend || [])].some((v) => /^v=spf1/i.test(v) && /amazonses|resend/i.test(v));
+      if (!hasSpf) push('warn', null, `No SPF record for ${domain} that allows Resend (add the TXT record from the Resend dashboard, usually on send.${domain})`);
+      if (!(dkim || []).some((v) => /^p=|v=DKIM1/i.test(v))) push('warn', null, `No DKIM record at resend._domainkey.${domain} (copy it from the Resend dashboard)`);
+      if (!(dmarc || []).some((v) => /^v=DMARC1/i.test(v))) push('info', null, `No DMARC record at _dmarc.${domain} (add TXT "v=DMARC1; p=none; rua=mailto:${env.CONTACT_EMAIL || `postmaster@${domain}`}")`);
+      if (hasSpf && (dkim || []).length && (dmarc || []).length) push('ok', null, `E-mail domain ${domain} has SPF, DKIM, and DMARC`);
+    }
+  }
   if (!catalog.contactEmail) push('info', null, 'Contact e-mail is not set');
   return { issues, checkedAt: new Date().toISOString(), titles: (catalog.guides || []).length };
 }
@@ -930,7 +967,8 @@ async function orderDetails(sessionId, env, url) {
     }
     giftSent = true;
   }
-  return { email, items, gift: giftEmail ? { email: giftEmail, sent: giftSent } : null };
+  const giftCard = session.metadata && session.metadata.gift_card ? await issueGiftCard(session, env) : null;
+  return { email, items, gift: giftEmail ? { email: giftEmail, sent: giftSent } : null, giftCard };
 }
 
 async function serveFile(token, env) {
@@ -1028,6 +1066,200 @@ async function announce(body, env) {
     sent += 1;
   }
   return { sent, recipients: recipients.size };
+}
+
+/* ---------- Rate limiting (approximate, per KV counter) ---------- */
+async function throttle(env, bucket, request, max, ttl = 3600) {
+  if (!env.STORE) return;
+  const key = `rl:${bucket}:${clientIp(request)}`;
+  const count = Number(await env.STORE.get(key)) || 0;
+  if (count >= max) throw fail('Too many requests. Please try again later.', 429);
+  await env.STORE.put(key, String(count + 1), { expirationTtl: ttl });
+}
+async function listKeyed(prefix, env) {
+  if (!env.STORE) throw fail('The STORE KV namespace is not bound', 500);
+  const list = await env.STORE.list({ prefix, limit: 1000 });
+  const items = [];
+  for (const k of list.keys) { const raw = await env.STORE.get(k.name); if (raw) items.push({ key: k.name, ...JSON.parse(raw) }); }
+  return { items: items.sort((a, b) => (a.at < b.at ? 1 : -1)) };
+}
+async function deleteKeyed(prefix, key, env) {
+  if (!env.STORE) throw fail('The STORE KV namespace is not bound', 500);
+  if (!key.startsWith(prefix) || !/^[a-z]+:[A-Za-z0-9_:-]+$/i.test(key)) throw fail('Invalid key');
+  await env.STORE.delete(key);
+  return { ok: true };
+}
+function htmlPage(title, body, env) {
+  const home = env.SITE_URL || '/';
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f0e6;color:#171b1a;font:16px/1.6 -apple-system,Segoe UI,sans-serif}main{max-width:32rem;padding:2rem;text-align:center}h1{font:500 2rem/1.1 Georgia,serif;margin:0 0 1rem}a{color:#9a3a20}</style></head><body><main><h1>${escapeHtml(title)}</h1><p>${body}</p><p><a href="${escapeHtml(home)}">Back to the store</a></p></main></body></html>`, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+}
+
+/* ---------- Contact form ---------- */
+async function contact(request, body, env) {
+  const name = String(body.name || '').trim().slice(0, 120);
+  const message = String(body.message || '').trim().slice(0, 4000);
+  const topic = String(body.topic || '').trim().slice(0, 60);
+  if (!isEmail(body.email)) throw fail('Please enter a valid e-mail address');
+  if (!message) throw fail('Please write a message');
+  if (!env.STORE && !(env.CONTACT_EMAIL && env.RESEND_API_KEY)) throw fail('The contact form is not configured yet', 500);
+  await throttle(env, 'contact', request, 5);
+  const record = { name, email: body.email.trim(), topic, message, at: new Date().toISOString() };
+  if (env.STORE) await env.STORE.put(`message:${Date.now()}:${crypto.randomUUID().slice(0, 8)}`, JSON.stringify(record));
+  if (env.CONTACT_EMAIL && env.RESEND_API_KEY && env.FROM_EMAIL) {
+    try { await sendEmail(env, env.CONTACT_EMAIL, `Message from ${name || record.email}${topic ? ` · ${topic}` : ''}`, `<div style="font-family:sans-serif;line-height:1.6"><p><strong>${escapeHtml(name || 'No name')}</strong> &lt;${escapeHtml(record.email)}&gt;${topic ? ` · ${escapeHtml(topic)}` : ''}</p><p style="white-space:pre-wrap">${escapeHtml(message)}</p></div>`); }
+    catch { /* stored anyway; the admin shows it */ }
+  }
+  return { ok: true };
+}
+
+/* ---------- Newsletter ---------- */
+async function subscriberKey(email) { return `subscriber:${b64url(await sha256(String(email).trim().toLowerCase()))}`; }
+async function subscribe(request, body, env, url) {
+  if (!isEmail(body.email)) throw fail('Please enter a valid e-mail address');
+  if (!env.STORE) throw fail('The newsletter is not configured yet', 500);
+  await throttle(env, 'subscribe', request, 10);
+  const key = await subscriberKey(body.email);
+  const existing = await env.STORE.get(key);
+  if (existing && JSON.parse(existing).confirmed) return { ok: true, doubleOptIn: false };
+  const canMail = Boolean(env.RESEND_API_KEY && env.FROM_EMAIL);
+  const record = { email: body.email.trim(), source: String(body.source || '').slice(0, 60), at: new Date().toISOString(), confirmed: !canMail };
+  await env.STORE.put(key, JSON.stringify(record));
+  if (canMail) {
+    const token = await signToken(env, { email: record.email, c: 1, exp: Date.now() + 7 * 86400000 });
+    const link = `${url.origin}/confirm?t=${token}`;
+    await sendEmail(env, record.email, 'Please confirm your subscription', `<div style="font-family:sans-serif;line-height:1.6"><p>One click and you are on the list for new titles and free help.</p><p><a href="${link}">Confirm my subscription</a></p><p style="color:#666">If you did not ask for this, ignore this e-mail and nothing happens.</p></div>`);
+  }
+  return { ok: true, doubleOptIn: canMail };
+}
+async function confirmSubscription(token, env) {
+  const payload = await verifyToken(env, token);
+  if (!payload || !payload.c || !isEmail(payload.email)) return htmlPage('This link has expired', 'Subscribe again from the store and we will send a fresh one.', env);
+  const key = await subscriberKey(payload.email);
+  const raw = await env.STORE.get(key);
+  const record = raw ? JSON.parse(raw) : { email: payload.email, at: new Date().toISOString() };
+  record.confirmed = true;
+  record.confirmedAt = new Date().toISOString();
+  await env.STORE.put(key, JSON.stringify(record));
+  return htmlPage('You are on the list', 'Thank you. We write only when there is something new worth your time, and every e-mail has an unsubscribe link.', env);
+}
+async function unsubscribe(token, env) {
+  const payload = await verifyToken(env, token);
+  if (!payload || !payload.u || !isEmail(payload.email)) return htmlPage('This link has expired', 'Reply to any of our e-mails and we will remove you by hand.', env);
+  await env.STORE.delete(await subscriberKey(payload.email));
+  return htmlPage('Unsubscribed', 'You will not hear from us again unless you subscribe once more.', env);
+}
+async function listSubscribers(env) {
+  const { items } = await listKeyed('subscriber:', env);
+  return { subscribers: items, confirmed: items.filter((s) => s.confirmed).length, pending: items.filter((s) => !s.confirmed).length };
+}
+async function newsletter(request, body, env, url) {
+  const subject = String(body.subject || '').trim().slice(0, 150);
+  const message = String(body.message || '').trim().slice(0, 8000);
+  if (!body.dryRun && (!subject || !message)) throw fail('subject and message are required');
+  const { subscribers } = await listSubscribers(env);
+  const recipients = subscribers.filter((s) => s.confirmed && isEmail(s.email));
+  if (body.dryRun) return { sent: 0, recipients: recipients.length };
+  let sent = 0;
+  for (const s of recipients) {
+    const token = await signToken(env, { email: s.email, u: 1, exp: Date.now() + 365 * 86400000 });
+    const html = `<div style="font-family:sans-serif;line-height:1.6">${escapeHtml(message).replace(/\n/g, '<br>')}<p style="margin-top:2em;color:#666;font-size:.9em"><a href="${url.origin}/unsubscribe?t=${token}" style="color:#666">Unsubscribe</a></p></div>`;
+    try { await sendEmail(env, s.email, subject, html); sent += 1; } catch { /* keep going */ }
+  }
+  await logEvent(env, request, 'newsletter', `${subject} → ${sent}`);
+  return { sent, recipients: recipients.length };
+}
+
+/* ---------- Purchase history (e-mail + one-time code) ---------- */
+async function accountCode(request, body, env) {
+  if (!isEmail(body.email)) throw fail('Please enter a valid e-mail address');
+  if (!env.STORE) throw fail('Purchase history is not configured yet', 500);
+  if (!env.RESEND_API_KEY || !env.FROM_EMAIL) throw fail('E-mail is not configured on the server', 500);
+  await throttle(env, 'account', request, 6, 900);
+  const code = sixDigits();
+  const id = crypto.randomUUID();
+  await env.STORE.put(`account:${id}`, JSON.stringify({ hash: b64url(await sha256(code)), attempts: 0, email: body.email.trim() }), { expirationTtl: 600 });
+  await sendEmail(env, body.email.trim(), 'Your sign-in code', `<div style="font-family:sans-serif;line-height:1.6"><p>Your code to see your purchases:</p><p style="font-size:2em;letter-spacing:.2em"><strong>${code}</strong></p><p style="color:#666">It works for ten minutes. If you did not ask for it, ignore this e-mail.</p></div>`);
+  return { ok: true, challenge: id };
+}
+async function accountOrders(request, body, env, url) {
+  const raw = env.STORE ? await env.STORE.get(`account:${String(body.challenge || '')}`) : null;
+  const email = raw ? JSON.parse(raw).email : '';
+  await checkCode(env, 'account', body.challenge, body.code);
+  if (!isEmail(email)) throw fail('Invalid or expired code', 401);
+  const params = new URLSearchParams();
+  params.set('customer_details[email]', email);
+  params.set('status', 'complete');
+  params.set('limit', '50');
+  params.append('expand[]', 'data.line_items.data.price.product');
+  const result = await stripe(env, 'GET', '/checkout/sessions', params);
+  const orders = [];
+  for (const session of result.data || []) {
+    if (session.payment_status !== 'paid') continue;
+    orders.push({ id: session.id, created: new Date(session.created * 1000).toISOString(), total: (session.amount_total || 0) / 100, currency: String(session.currency || '').toUpperCase(), items: await downloadLinks(env, session, url.origin), lines: ((session.line_items && session.line_items.data) || []).map((l) => l.description) });
+  }
+  return { email, orders: orders.sort((a, b) => (a.created < b.created ? 1 : -1)) };
+}
+
+/* ---------- Gift cards ---------- */
+async function giftCardSession(request, body, env) {
+  if (!env.SUCCESS_URL || !env.CANCEL_URL) throw fail('Checkout is not configured', 500);
+  const catalog = (await readCatalog(env)) || {};
+  const settings = catalog.giftCards && typeof catalog.giftCards === 'object' ? catalog.giftCards : {};
+  if (settings.enabled === false) throw fail('Gift cards are not available right now');
+  const amounts = (Array.isArray(settings.amounts) && settings.amounts.length ? settings.amounts : [25, 50, 100]).map(Number).filter((n) => n > 0);
+  const amount = Number(body.amount);
+  if (!amounts.includes(amount)) throw fail('Choose one of the offered amounts');
+  const to = isEmail(body.to) ? body.to.trim() : '';
+  const from = String(body.from || '').trim().slice(0, 80);
+  const message = String(body.message || '').trim().slice(0, 400);
+  await throttle(env, 'gift', request, 10);
+  const currency = String(catalog.currency || 'CAD').toLowerCase();
+  const params = new URLSearchParams();
+  params.set('mode', 'payment');
+  params.set('success_url', env.SUCCESS_URL);
+  params.set('cancel_url', env.CANCEL_URL);
+  params.set('line_items[0][quantity]', '1');
+  params.set('line_items[0][price_data][currency]', currency);
+  params.set('line_items[0][price_data][unit_amount]', String(Math.round(amount * 100)));
+  params.set('line_items[0][price_data][product_data][name]', `${catalog.storeName || 'Marufi Digital'} gift card`);
+  params.set('line_items[0][price_data][product_data][description]', `A ${amount} ${currency.toUpperCase()} code, redeemable at checkout${to ? `, sent to ${to}` : ''}`);
+  params.set('metadata[gift_card]', String(amount));
+  if (to) params.set('metadata[gift_to]', to);
+  if (from) params.set('metadata[gift_from]', from);
+  if (message) params.set('metadata[gift_message]', message);
+  const session = await stripe(env, 'POST', '/checkout/sessions', params);
+  if (!session.url) throw fail('Stripe could not create the session', 502);
+  return { url: session.url };
+}
+function giftCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  const chars = [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
+  return `GIFT-${chars.slice(0, 4)}-${chars.slice(4)}`;
+}
+async function issueGiftCard(session, env) {
+  const amount = Number(session.metadata.gift_card);
+  if (!(amount > 0)) return null;
+  const flag = `giftcard:${session.id}`;
+  const existing = env.STORE ? await env.STORE.get(flag) : null;
+  if (existing) return JSON.parse(existing);
+  const currency = String(session.currency || 'cad').toLowerCase();
+  const coupon = await stripe(env, 'POST', '/coupons', new URLSearchParams({ amount_off: String(Math.round(amount * 100)), currency, duration: 'once', max_redemptions: '1', name: `Gift card ${amount} ${currency.toUpperCase()}` }));
+  const code = giftCode();
+  await stripe(env, 'POST', '/promotion_codes', new URLSearchParams({ coupon: coupon.id, code, max_redemptions: '1' }));
+  const to = session.metadata.gift_to || '';
+  const buyer = session.customer_details && session.customer_details.email;
+  const record = { code, amount, currency: currency.toUpperCase(), to, sentTo: [], at: new Date().toISOString() };
+  if (env.RESEND_API_KEY && env.FROM_EMAIL) {
+    const note = session.metadata.gift_message ? `<blockquote style="border-left:3px solid #9a3a20;margin:1em 0;padding:.25em 1em;color:#333">${escapeHtml(session.metadata.gift_message)}</blockquote>` : '';
+    const body = (intro) => `<div style="font-family:sans-serif;line-height:1.6"><p>${intro}</p>${note}<p style="font-size:1.6em;letter-spacing:.15em"><strong>${code}</strong></p><p>Worth ${amount} ${currency.toUpperCase()}. Enter it in the promotion code box at checkout${env.SITE_URL ? ` on <a href="${env.SITE_URL}">${env.SITE_URL}</a>` : ''}. It can be used once, so choose a cart worth at least the full amount.</p></div>`;
+    for (const [addr, intro] of [[to, `${escapeHtml(session.metadata.gift_from || buyer || 'Someone')} sent you a gift card.`], [buyer, to ? `Your gift card has been sent to ${escapeHtml(to)}. Here is the code for your records.` : 'Here is your gift card code.']]) {
+      if (!isEmail(addr)) continue;
+      try { await sendEmail(env, addr, to && addr === to ? 'You have received a gift card' : 'Your gift card', body(intro)); record.sentTo.push(addr); } catch { /* shown on the thank-you page anyway */ }
+    }
+  }
+  if (env.STORE) await env.STORE.put(flag, JSON.stringify(record));
+  return record;
 }
 
 /* ---------- E-mail templates ---------- */

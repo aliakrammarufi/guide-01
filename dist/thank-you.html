@@ -27,6 +27,9 @@
       .thanks-steps li::before { counter-increment: s; content: "0" counter(s); font-family: var(--mono); font-size: .66rem; letter-spacing: .14em; color: var(--clay); }
       .thanks-steps a { color: var(--clay); font-weight: 600; }
       .thanks-actions { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; align-items: center; }
+      .gift-code { display: grid; gap: .3rem; }
+      .gift-code .code { font-family: var(--mono); font-size: 1.5rem; letter-spacing: .18em; }
+      .gift-code .note { color: var(--ink-3); font-size: .85rem; }
       .thanks-status { padding: .9rem 1rem; background: var(--clay-soft); border-left: 3px solid var(--clay); font-size: .95rem; }
       .thanks-mark { position: absolute; left: 50%; bottom: -.22em; transform: translateX(-50%); font-family: var(--serif); font-size: clamp(8rem, 24vw, 22rem); font-weight: 300; line-height: 1; letter-spacing: -.04em; color: transparent; -webkit-text-stroke: 1px rgba(245, 240, 230, .12); white-space: nowrap; pointer-events: none; }
     </style>
@@ -94,6 +97,13 @@
                 li.append(label, a);
               }
               list.append(li);
+            }
+            if (order.giftCard && order.giftCard.code) {
+              const card = document.createElement('li');
+              card.className = 'gift-code';
+              card.innerHTML = '<strong>Gift card code</strong><span class="code">' + order.giftCard.code + '</span><span class="note">Worth ' + order.giftCard.amount + ' ' + order.giftCard.currency + '. ' + (order.giftCard.to ? 'Also e-mailed to ' + order.giftCard.to + '. ' : '') + 'Enter it in the promotion-code box at checkout. Single use.</span>';
+              list.append(card);
+              list.hidden = false;
             }
             const pending = order.items.filter((i) => i.preorder).length;
             status.textContent = order.gift && order.gift.email

@@ -36,6 +36,9 @@ Store-wide fields:
 | `reviews` | `[{ "quote", "name", "place", "rating" }]`. Section hides when empty. |
 | `zones` | `[{ "city", "country", "state", "tagline", "why", "bestTime", "knownFor": [], "image", "guideId" }]`. Section hides when empty. |
 | `categories` | Optional overrides for the kinds of help: `[{ "key", "name", "single", "format", "blurb", "icon", "hidden" }]`. Built-in keys: `Guide`, `Book`, `Immigration`, `Food`, `Checklist`, `Bundle`. Add a new key to create a kind; icons: compass, book, passport, fork, check, layers. |
+| `articles` | Journal entries: `[{ "title", "slug", "date", "status": "draft" \| "published", "category", "place", "summary", "cover", "body" }]`. Body supports `## `, `- `, `> `, `**bold**`, `*italic*`, and links. |
+| `giftCards` | `{ "enabled": true, "amounts": [25, 50, 100] }`. |
+| `analytics` | `plausibleDomain`, `ga4`, or `cloudflareToken`. |
 | `resources` | Free help shown without checkout: `[{ "title", "summary", "category", "place", "kind": "Read" \| "Download" \| "Link", "url" }]`. Section shows "coming soon" when empty. |
 | `regions` | `{ "Canada": ["Alberta", ...] }`. Full state lists so the atlas can show "Coming soon" entries. Canada, US, Australia, Germany, Italy, Spain, France, UK, and Japan are pre-filled; add others as you publish. |
 | `analytics.plausibleDomain` | Your domain in Plausible to enable analytics. |
@@ -82,6 +85,39 @@ Open `https://your-domain.com/admin/` (locally, `http://localhost:8765/admin/`).
 ## Kind pages
 
 Every kind of help has its own page: `/travel-guides/`, `/books/`, `/immigration/`, `/food/`, `/checklists/` (and `/bundles/` once a bundle exists; custom kinds get a slug from their name). The "Browse by need" tiles link to them. Each page is a small static shell written by `node scripts/build-pages.mjs` and filled in the browser by `dist/kind.js` from the same catalog as the home page, so publishing from the admin updates them instantly with no rebuild. They have a search box, a country filter, Buy and Add to cart (the cart is shared with the home page), free help filed under that kind, and links to the other kinds. Rebuild only when you rename a kind or add one in Store settings.
+
+## Secondary pages
+
+`node scripts/build-pages.mjs` also writes these, all filled in the browser by `dist/page.js` from the same catalog:
+
+| Page | What it does |
+|---|---|
+| `/privacy/`, `/terms/` | Privacy policy and terms of sale written for how this store works (Stripe, downloads, newsletter, gift cards, Canada and EU rights). Review them with a lawyer before launch; the refund paragraph comes from `refundPolicy` when set. |
+| `/contact/` | Contact form. With the Worker it stores the message (Requests → Messages in the admin) and e-mails CONTACT_EMAIL; without it, it opens the visitor's mail app with `contactEmail`. |
+| `/account/` | Purchase history. The visitor enters the e-mail used at checkout, receives a six-digit code, and sees every order with fresh download links. Needs the Worker and e-mail. |
+| `/gift/` | Gift cards. Stripe Checkout for a chosen amount; on payment the Worker creates a single-use promotion code, e-mails it to the recipient (and the buyer), and shows it on the thank-you page. Amounts and on/off live in Store settings. |
+| `/articles/` | The journal. Articles are written in the admin (Journal view) with a small Markdown subset; the latest three appear on the home page. `/articles/?a=<slug>` works immediately; rerun the build for clean `/articles/<slug>/` URLs. |
+| `404.html` | On-brand not-found page (served automatically by GitHub Pages and Cloudflare Pages). |
+
+Every page's footer has the newsletter form (double opt-in when e-mail is configured; Newsletter view in the admin lists subscribers, exports CSV, and sends a plain-text newsletter with unsubscribe links).
+
+## Analytics
+
+Store settings → Analytics takes any of: a Plausible domain (cookieless), a Google Analytics 4 measurement id (loaded with IP anonymisation), or a Cloudflare Web Analytics token (cookieless). Leave all empty for no analytics. The privacy policy describes both options.
+
+## E-mail deliverability
+
+The Worker sends through Resend from `FROM_EMAIL`. For receipts and download links to reach inboxes, the sending domain needs three DNS records, all shown in the Resend dashboard after you add the domain there:
+
+1. **SPF**: a TXT record on `send.<your-domain>` with `v=spf1 include:amazonses.com ~all`, plus the MX record Resend lists next to it.
+2. **DKIM**: a TXT record at `resend._domainkey.<your-domain>` with the key Resend gives you.
+3. **DMARC**: a TXT record at `_dmarc.<your-domain>` with `v=DMARC1; p=none; rua=mailto:<your contact address>`.
+
+Overview → Health in the admin checks these records live and tells you which are missing. Use a subdomain such as `orders@mail.your-domain.com` if you prefer to keep your main domain's records untouched.
+
+## Social share image
+
+`dist/assets/share.jpg` (1200×630) is referenced from every page's Open Graph and Twitter tags. Replace it with your own artwork at the same size; keep the file name or update `og:image` in `index.html` and `scripts/build-pages.mjs`.
 
 ## Country landing pages
 

@@ -1346,6 +1346,79 @@ function applyStore(data) {
     script.src = 'https://plausible.io/js/script.js';
     document.head.append(script);
   }
+  // Google Analytics 4, when a measurement id is set. IP anonymisation is on by default in GA4.
+  if (typeof analytics.ga4 === 'string' && /^G-[A-Z0-9]{4,14}$/.test(analytics.ga4)) {
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${analytics.ga4}`;
+    document.head.append(script);
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function gtag() { window.dataLayer.push(arguments); };
+    window.gtag('js', new Date());
+    window.gtag('config', analytics.ga4, { anonymize_ip: true });
+  }
+  // Cloudflare Web Analytics, when a beacon token is set (cookieless).
+  if (typeof analytics.cloudflareToken === 'string' && /^[a-f0-9]{32}$/i.test(analytics.cloudflareToken)) {
+    const script = document.createElement('script');
+    script.defer = true;
+    script.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+    script.dataset.cfBeacon = JSON.stringify({ token: analytics.cloudflareToken });
+    document.head.append(script);
+  }
+  setupSubscribe();
+  renderJournal(Array.isArray(data.articles) ? data.articles : []);
+}
+
+/* ---------- Newsletter (footer) ---------- */
+function setupSubscribe() {
+  const form = $('#subscribe-form');
+  if (!form) return;
+  form.hidden = !store.endpoint;
+  if (!store.endpoint) return;
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = $('#subscribe-email');
+    const button = $('#subscribe-submit');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.value.trim())) { showToast('Please enter a valid e-mail address'); input.focus(); return; }
+    button.disabled = true;
+    try {
+      const response = await fetch(`${store.endpoint}/subscribe`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.value.trim(), source: 'home' }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Could not subscribe right now');
+      form.reset();
+      $('#subscribe-note').textContent = result.doubleOptIn ? 'Almost there: check your inbox and confirm.' : 'You are on the list.';
+      showToast(result.doubleOptIn ? 'Check your inbox to confirm' : 'You are on the list');
+    } catch (error) { showToast(error.message); }
+    button.disabled = false;
+  });
+}
+
+/* ---------- Journal (latest three articles on the home page) ---------- */
+function renderJournal(articles) {
+  const section = $('#journal');
+  const list = $('#journal-list');
+  if (!section || !list) return;
+  const published = articles
+    .filter((a) => a && typeof a.title === 'string' && a.title.trim() && a.status !== 'draft' && !(a.date && Date.parse(a.date) > Date.now()))
+    .map((a) => ({ ...a, slug: a.slug || slugify(a.title) }))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+    .slice(0, 3);
+  section.hidden = published.length === 0;
+  if (!published.length) return;
+  list.replaceChildren(...published.map((a) => {
+    const card = el('a', 'article-card');
+    card.href = `articles/?a=${encodeURIComponent(a.slug)}`;
+    if (isSafeAsset(a.cover)) { const img = document.createElement('img'); img.src = a.cover; img.alt = a.coverAlt || ''; img.loading = 'lazy'; card.append(img); }
+    const body = el('div', 'article-card-body');
+    let when = '';
+    try { when = a.date ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(a.date) ? `${a.date}T12:00:00` : a.date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : ''; } catch { when = ''; }
+    body.append(el('span', 'card-kicker', [a.category, a.place, when].filter(Boolean).join(' · ')), el('h3', null, a.title), el('p', null, a.summary || ''), el('span', 'text-link', 'Read →'));
+    card.append(body);
+    return card;
+  }));
+  revealHeading(section.querySelector('.section-head'));
+  revealBatch($$('.article-card', list), { y: 50, step: 0.08 });
+  renumberGhosts();
 }
 
 function setupHeroVideo(config) {

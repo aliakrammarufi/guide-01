@@ -1,6 +1,6 @@
 {
   "storeName": "Marufi Digital",
-  "siteUrl": "",
+  "siteUrl": "https://aliakrammarufi.github.io/guide-01",
   "currency": "CAD",
   "currencies": [
     "CAD",
@@ -209,5 +209,16 @@
     "captionRight": "Sample clip · replace with your presenter video",
     "autoplay": true,
     "loop": true
+  },
+  "articles": [],
+  "resources": [],
+  "categories": [],
+  "giftCards": {
+    "enabled": true,
+    "amounts": [
+      25,
+      50,
+      100
+    ]
   }
 }

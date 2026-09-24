@@ -2,7 +2,7 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const KEYS = { endpoint: 'marufi-admin-endpoint', token: 'marufi-admin-token', draft: 'marufi-admin-draft', remember: 'marufi-admin-remember' };
-const state = { mode: 'offline', endpoint: '', token: '', catalog: null, dirty: false, status: {}, orders: null, ordersError: '', requests: [], media: [], files: [], view: 'overview', editing: null, backups: [], titlesSort: { key: 'title', dir: 'asc' }, titlesPage: 1, selected: new Set(), health: null, templates: null, coupons: null, loginChallenge: '', resetChallenge: '' };
+const state = { mode: 'offline', endpoint: '', token: '', catalog: null, dirty: false, status: {}, orders: null, ordersError: '', requests: [], messages: [], subscribers: null, media: [], files: [], view: 'overview', editing: null, backups: [], titlesSort: { key: 'title', dir: 'asc' }, titlesPage: 1, selected: new Set(), health: null, templates: null, coupons: null, loginChallenge: '', resetChallenge: '' };
 
 /* ---------- Utilities ---------- */
 function el(tag, className, text) {
@@ -118,7 +118,7 @@ function uploadFile(file, kind, onProgress) {
 }
 
 /* ---------- Catalog state ---------- */
-const EMPTY = { storeName: 'Marufi Digital', siteUrl: '', currency: 'CAD', currencies: ['CAD'], checkoutEndpoint: '', contactEmail: '', social: {}, analytics: {}, refundPolicy: '', author: {}, reviews: [], zones: [], resources: [], categories: [], regions: {}, guides: [] };
+const EMPTY = { storeName: 'Marufi Digital', siteUrl: '', currency: 'CAD', currencies: ['CAD'], checkoutEndpoint: '', contactEmail: '', social: {}, analytics: {}, refundPolicy: '', author: {}, reviews: [], zones: [], resources: [], categories: [], articles: [], giftCards: { enabled: true, amounts: [25, 50, 100] }, regions: {}, guides: [] };
 // Mirrors DEFAULT_CATEGORIES in site.js. The storefront merges overrides from the catalog's `categories` array.
 const DEFAULT_CATEGORIES = [
   { key: 'Guide', name: 'Travel guides', single: 'Travel guide', format: 'Digital guide', blurb: 'One place, read in one sitting: where to stay, what to skip, and how to move around.' },
@@ -141,6 +141,8 @@ function normaliseCatalog(raw) {
   c.guides = Array.isArray(c.guides) ? c.guides : [];
   c.zones = Array.isArray(c.zones) ? c.zones : [];
   c.resources = Array.isArray(c.resources) ? c.resources : [];
+  c.articles = Array.isArray(c.articles) ? c.articles : [];
+  c.giftCards = c.giftCards && typeof c.giftCards === 'object' ? c.giftCards : { enabled: true, amounts: [25, 50, 100] };
   c.categories = Array.isArray(c.categories) ? c.categories.filter((k) => k && typeof k.key === 'string' && /^[A-Za-z][\w-]{0,30}$/.test(k.key) && typeof k.name === 'string') : [];
   c.reviews = Array.isArray(c.reviews) ? c.reviews : [];
   c.regions = c.regions && typeof c.regions === 'object' ? c.regions : {};
@@ -279,7 +281,7 @@ async function enterApp() {
   renderStatus();
   renderCounts();
   showView(state.view);
-  if (state.mode === 'online') { loadRequests().catch(() => {}); loadOrders().catch(() => {}); }
+  if (state.mode === 'online') { loadRequests().catch(() => {}); loadOrders().catch(() => {}); loadMessages().catch(() => {}); loadSubscribers().catch(() => {}); }
 }
 
 async function boot() {
@@ -369,6 +371,8 @@ const VIEW_TITLES = {
   titles: ['Titles', 'Everything you sell: guides, books, help, lists, and bundles.'],
   zones: ['Zones', 'Cities people are heading to.'],
   resources: ['Free help', 'Checklists, explainers, and links given away on the home page.'],
+  articles: ['Journal', 'Free articles for readers and for search.'],
+  subscribers: ['Newsletter', 'Subscribers and the newsletter composer.'],
   reviews: ['Reviews', 'Reader quotes shown on the home page.'],
   media: ['Media & files', 'Images for the site and the products buyers download.'],
   orders: ['Orders', 'Paid Stripe checkouts.'],
@@ -385,7 +389,7 @@ function showView(view) {
   const [title, sub] = VIEW_TITLES[view] || [view, ''];
   $('#view-title').textContent = title;
   $('#view-sub').textContent = sub;
-  const renderers = { overview: renderOverview, titles: renderTitles, zones: renderZones, resources: renderResources, reviews: renderReviews, media: renderMedia, orders: renderOrders, coupons: renderCoupons, requests: renderRequests, announce: renderAnnounce, settings: renderSettings, tools: renderTools };
+  const renderers = { overview: renderOverview, titles: renderTitles, zones: renderZones, resources: renderResources, articles: renderArticles, subscribers: renderSubscribers, reviews: renderReviews, media: renderMedia, orders: renderOrders, coupons: renderCoupons, requests: renderRequests, announce: renderAnnounce, settings: renderSettings, tools: renderTools };
   if (renderers[view]) renderers[view]();
   window.scrollTo({ top: 0 });
 }
@@ -398,6 +402,7 @@ document.addEventListener('click', (event) => {
   if (action.dataset.action === 'new-title') openTitleEditor(null);
   if (action.dataset.action === 'new-zone') openZoneEditor(null);
   if (action.dataset.action === 'new-resource') openResourceEditor(null);
+  if (action.dataset.action === 'new-article') openArticleEditor(null);
   if (action.dataset.action === 'new-review') openReviewEditor(null);
   if (action.dataset.action === 'go-media') showView('media');
 });
@@ -407,6 +412,8 @@ function renderCounts() {
   $('#nav-titles').textContent = c.guides.length || '';
   $('#nav-zones').textContent = c.zones.length || '';
   $('#nav-resources').textContent = c.resources.length || '';
+  $('#nav-articles').textContent = c.articles.length || '';
+  $('#nav-subscribers').textContent = state.subscribers ? (state.subscribers.confirmed || '') : '';
   $('#nav-reviews').textContent = c.reviews.length || '';
   $('#nav-requests').textContent = state.requests.length || '';
 }
@@ -441,6 +448,8 @@ function renderOverview() {
     ['Titles', c.guides.length, `${withStripe} sellable on Stripe`],
     ['Zones', c.zones.length, 'cities featured'],
     ['Free help', c.resources.length, 'resources given away'],
+    ['Journal', c.articles.length, 'articles'],
+    ['Newsletter', state.subscribers ? state.subscribers.confirmed : '—', state.subscribers ? `${state.subscribers.pending} awaiting confirmation` : 'needs the Worker'],
     ['Reviews', c.reviews.length, 'on the home page'],
     ['Countries', new Set(c.guides.map((g) => g.country).filter(Boolean)).size, 'covered'],
     ['Requests', state.requests.length, 'places asked for'],
@@ -460,6 +469,7 @@ function renderOverview() {
     ['Attach a product file to every title', c.guides.length > 0 && c.guides.every((g) => g.file || g.paymentLink)],
     ['Fill in the author section', Boolean(c.author && c.author.name && c.author.bio)],
     ['Add a contact email', Boolean(c.contactEmail)],
+    ['Write the first journal article', c.articles.length > 0],
     ['Set the site URL', Boolean(c.siteUrl)],
     ['Connect the Worker', state.mode === 'online']
   ];
@@ -1159,6 +1169,129 @@ function openResourceEditor(resource, index) {
 }
 $('#resources-search').addEventListener('input', renderResources);
 
+/* ---------- Journal (articles) ---------- */
+function renderArticles() {
+  const list = $('#articles-list');
+  list.replaceChildren();
+  const items = state.catalog.articles;
+  const q = $('#articles-search').value.trim().toLowerCase();
+  if (!items.length) { list.append(el('div', 'empty', 'No articles yet. Short, useful, and specific beats long and general.')); return; }
+  [...items].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).forEach((a) => {
+    const index = items.indexOf(a);
+    if (q && !`${a.title} ${a.category} ${a.place} ${a.summary}`.toLowerCase().includes(q)) return;
+    const card = el('div', 'card');
+    if (a.cover) { const img = el('img', 'cover'); img.src = assetUrl(a.cover); img.alt = ''; card.append(img); }
+    const live = a.status !== 'draft' && !(a.date && Date.parse(a.date) > Date.now());
+    card.append(el('span', 'kicker', [a.status === 'draft' ? 'Draft' : (live ? 'Published' : 'Scheduled'), a.category, a.place, a.date ? new Date(`${a.date}T12:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''].filter(Boolean).join(' · ')), el('h3', null, a.title), el('p', null, a.summary || ''));
+    const foot = el('div', 'card-foot');
+    const edit = el('button', 'link-button', 'Edit'); edit.type = 'button'; edit.addEventListener('click', () => openArticleEditor(a, index));
+    const open = el('a', 'link-button', 'Open'); open.href = `../articles/?a=${encodeURIComponent(a.slug || slug(a.title))}`; open.target = '_blank'; open.rel = 'noopener';
+    foot.append(open, edit);
+    card.append(foot);
+    list.append(card);
+  });
+}
+function openArticleEditor(article, index) {
+  const a = article ? { ...article } : { status: 'draft', date: new Date().toISOString().slice(0, 10) };
+  openDrawer(article ? 'Edit article' : 'New article', a.title || 'New article', (form) => {
+    form.append(field('Title', input('title', a.title, { required: 'true' })));
+    const g3 = el('div', 'grid-3');
+    g3.append(field('Slug (URL)', input('slug', a.slug, { placeholder: 'from the title if empty' })), field('Date', input('date', a.date, { type: 'date' })), field('Status', select('status', a.status || 'draft', [['draft', 'Draft (hidden)'], ['published', 'Published']])));
+    form.append(g3);
+    const g2 = el('div', 'grid-2');
+    g2.append(field('Kind of help (optional)', select('category', a.category || '', [['', 'General'], ...categories().filter((c) => c.key !== 'Bundle').map((c) => [c.name, c.name])])), field('Place (optional)', input('place', a.place, { placeholder: 'Canada / Ontario' })));
+    form.append(g2);
+    form.append(field('Summary (one or two sentences, shown on cards and in search results)', input('summary', a.summary, { type: 'textarea', rows: '2', maxlength: '300' })));
+    form.append(imagePicker('cover', a.cover, 'Cover image (3:2 looks best)', { aspect: 3 / 2, maxWidth: 1600 }));
+    form.append(field('Body', input('body', a.body, { type: 'textarea', rows: '18' }), 'Blank line = new paragraph. "## " starts a heading, "- " a list item, "> " a quote, **bold**, *italic*, [link text](https://…).'));
+  }, (form) => {
+    const f = form.elements;
+    if (!f.title.value.trim()) { toast('The article needs a title.', true); return false; }
+    const data = { title: f.title.value.trim(), slug: slug(f.slug.value.trim() || f.title.value.trim()), date: f.date.value, status: f.status.value, category: f.category.value, place: f.place.value.trim(), summary: f.summary.value.trim(), cover: f.cover.value.trim(), body: f.body.value };
+    if (!data.slug) { toast('The slug cannot be empty.', true); return false; }
+    if (state.catalog.articles.some((x, i) => x.slug === data.slug && i !== index)) { toast('Another article already uses that slug.', true); return false; }
+    if (article) state.catalog.articles[index] = data; else state.catalog.articles.push(data);
+    markDirty(); renderArticles(); toast('Saved. Publish to make it live.');
+  }, article ? () => { state.catalog.articles.splice(index, 1); markDirty(); renderArticles(); toast('Article deleted'); } : null);
+}
+$('#articles-search').addEventListener('input', renderArticles);
+
+/* ---------- Contact messages ---------- */
+async function loadMessages() {
+  const data = await api('/admin/messages');
+  state.messages = data.items;
+  if (state.view === 'requests') renderMessages();
+}
+function renderMessages() {
+  const wrap = $('#messages-table');
+  if (!wrap) return;
+  wrap.replaceChildren();
+  if (state.mode !== 'online') { wrap.append(el('div', 'empty', 'Messages are stored by the Worker.')); return; }
+  if (!state.messages.length) { wrap.append(el('div', 'empty', 'No messages yet.')); return; }
+  const table = el('table');
+  const head = el('tr'); for (const h of ['From', 'Topic', 'Message', 'Received', '']) head.append(el('th', null, h)); table.append(head);
+  for (const m of state.messages) {
+    const tr = el('tr');
+    const from = el('td'); const a = el('a', null, m.name ? `${m.name} <${m.email}>` : m.email); a.href = `mailto:${m.email}?subject=${encodeURIComponent(`Re: ${m.topic || 'your message'}`)}`; from.append(a);
+    const msg = el('td', 'wrap-text', m.message);
+    const actions = el('td', 'row-actions');
+    const del = el('button', 'link-button danger-link', 'Delete'); del.type = 'button';
+    del.addEventListener('click', () => armDelete(del, async () => { await api(`/admin/messages/${encodeURIComponent(m.key)}`, { method: 'DELETE' }); state.messages = state.messages.filter((x) => x.key !== m.key); renderMessages(); }));
+    actions.append(del);
+    tr.append(from, el('td', null, m.topic || ''), msg, el('td', null, formatDate(m.at)), actions);
+    table.append(tr);
+  }
+  wrap.append(table);
+}
+$('#messages-export').addEventListener('click', () => download('messages.csv', csv([['Name', 'Email', 'Topic', 'Message', 'Received'], ...state.messages.map((m) => [m.name, m.email, m.topic, m.message, m.at])]), 'text/csv'));
+
+/* ---------- Newsletter ---------- */
+async function loadSubscribers() {
+  const data = await api('/admin/subscribers');
+  state.subscribers = data;
+  renderCounts();
+  if (state.view === 'subscribers') renderSubscribers();
+}
+function renderSubscribers() {
+  const wrap = $('#subscribers-table');
+  wrap.replaceChildren();
+  const summary = $('#subscribers-summary');
+  if (state.mode !== 'online') { wrap.append(el('div', 'empty', 'Subscribers are stored by the Worker. Sign in with your Worker URL.')); return; }
+  if (!state.subscribers) { wrap.append(el('div', 'empty', 'Loading…')); loadSubscribers().catch((e) => toast(e.message, true)); return; }
+  const { subscribers, confirmed, pending } = state.subscribers;
+  summary.textContent = `${confirmed} confirmed · ${pending} awaiting confirmation. Confirmed addresses receive the newsletter.`;
+  if (!subscribers.length) { wrap.append(el('div', 'empty', 'No subscribers yet. The form sits in the footer of every page.')); return; }
+  const table = el('table');
+  const head = el('tr'); for (const h of ['Email', 'Status', 'Source', 'Since', '']) head.append(el('th', null, h)); table.append(head);
+  for (const s of subscribers) {
+    const tr = el('tr');
+    const actions = el('td', 'row-actions');
+    const del = el('button', 'link-button danger-link', 'Remove'); del.type = 'button';
+    del.addEventListener('click', () => armDelete(del, async () => { await api(`/admin/subscribers/${encodeURIComponent(s.key)}`, { method: 'DELETE' }); await loadSubscribers(); }));
+    actions.append(del);
+    tr.append(el('td', null, s.email), el('td', null, s.confirmed ? 'Confirmed' : 'Pending'), el('td', null, s.source || ''), el('td', null, formatDate(s.at)), actions);
+    table.append(tr);
+  }
+  wrap.append(table);
+}
+$('#subscribers-export').addEventListener('click', () => download('subscribers.csv', csv([['Email', 'Confirmed', 'Source', 'Since'], ...((state.subscribers && state.subscribers.subscribers) || []).map((s) => [s.email, s.confirmed ? 'yes' : 'no', s.source || '', s.at])]), 'text/csv'));
+$('#newsletter-count').addEventListener('click', async () => {
+  try { const r = await api('/admin/newsletter', { method: 'POST', json: { dryRun: true } }); $('#newsletter-note').textContent = `${r.recipients} confirmed subscriber${r.recipients === 1 ? '' : 's'} would receive this.`; }
+  catch (e) { toast(e.message, true); }
+});
+$('#newsletter-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = $('#newsletter-send');
+  if (!$('#newsletter-subject').value.trim() || !$('#newsletter-message').value.trim()) { toast('Subject and message are required.', true); return; }
+  if (!button.dataset.armed) { button.dataset.armed = '1'; button.textContent = 'Click again to send to everyone'; setTimeout(() => { delete button.dataset.armed; button.textContent = 'Send'; }, 5000); return; }
+  button.disabled = true;
+  try {
+    const r = await api('/admin/newsletter', { method: 'POST', json: { subject: $('#newsletter-subject').value, message: $('#newsletter-message').value } });
+    toast(`Sent to ${r.sent} of ${r.recipients} subscribers.`); $('#newsletter-form').reset();
+  } catch (e) { toast(e.message, true); }
+  button.disabled = false; delete button.dataset.armed; button.textContent = 'Send';
+});
+
 /* ---------- Reviews ---------- */
 function renderReviews() {
   const list = $('#reviews-list');
@@ -1376,6 +1509,7 @@ async function loadRequests() {
   if (state.view === 'requests') renderRequests();
 }
 function renderRequests() {
+  renderMessages();
   const wrap = $('#requests-table');
   fillTitleSelect($('#notify-title'));
   wrap.replaceChildren();
@@ -1449,6 +1583,10 @@ function renderSettings() {
   f.currencies.value = (c.currencies || []).join(', ');
   f.contactEmail.value = c.contactEmail || '';
   f.plausibleDomain.value = (c.analytics && c.analytics.plausibleDomain) || '';
+  f.ga4.value = (c.analytics && c.analytics.ga4) || '';
+  f.cloudflareToken.value = (c.analytics && c.analytics.cloudflareToken) || '';
+  f['giftCards.enabled'].checked = c.giftCards.enabled !== false;
+  f['giftCards.amounts'].value = (c.giftCards.amounts || [25, 50, 100]).join(', ');
   f.refundPolicy.value = c.refundPolicy || '';
   f['cartDiscount.percent'].value = c.cartDiscount.percent || '';
   f['cartDiscount.minItems'].value = c.cartDiscount.minItems || '';
@@ -1555,7 +1693,9 @@ $('#settings-form').addEventListener('change', (event) => {
   c.currency = f.currency.value.trim().toUpperCase() || 'CAD';
   c.currencies = [...new Set([c.currency, ...f.currencies.value.split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z]{3}$/.test(s))])];
   c.contactEmail = f.contactEmail.value.trim();
-  c.analytics = { plausibleDomain: f.plausibleDomain.value.trim() };
+  c.analytics = { plausibleDomain: f.plausibleDomain.value.trim(), ga4: f.ga4.value.trim().toUpperCase(), cloudflareToken: f.cloudflareToken.value.trim() };
+  c.giftCards = { enabled: f['giftCards.enabled'].checked, amounts: [...new Set(f['giftCards.amounts'].value.split(',').map((v) => Number(v.trim())).filter((n) => n > 0))].sort((a, b) => a - b) };
+  if (!c.giftCards.amounts.length) c.giftCards.amounts = [25, 50, 100];
   c.refundPolicy = f.refundPolicy.value.trim();
   const pct = Number(f['cartDiscount.percent'].value); const min = Number(f['cartDiscount.minItems'].value);
   c.cartDiscount = pct > 0 ? { percent: pct, minItems: Math.max(2, min || 2), couponId: f['cartDiscount.couponId'].value.trim() } : {};
