@@ -118,12 +118,30 @@ function uploadFile(file, kind, onProgress) {
 }
 
 /* ---------- Catalog state ---------- */
-const EMPTY = { storeName: 'Marufi Digital', siteUrl: '', currency: 'CAD', currencies: ['CAD'], checkoutEndpoint: '', contactEmail: '', social: {}, analytics: {}, refundPolicy: '', author: {}, reviews: [], zones: [], regions: {}, guides: [] };
+const EMPTY = { storeName: 'Marufi Digital', siteUrl: '', currency: 'CAD', currencies: ['CAD'], checkoutEndpoint: '', contactEmail: '', social: {}, analytics: {}, refundPolicy: '', author: {}, reviews: [], zones: [], resources: [], categories: [], regions: {}, guides: [] };
+// Mirrors DEFAULT_CATEGORIES in site.js. The storefront merges overrides from the catalog's `categories` array.
+const DEFAULT_CATEGORIES = [
+  { key: 'Guide', name: 'Travel guides', single: 'Travel guide', format: 'Digital guide', blurb: 'One place, read in one sitting: where to stay, what to skip, and how to move around.' },
+  { key: 'Book', name: 'Books', single: 'Book', format: 'Digital book', blurb: 'Longer reads on a country or a region, for the flight over or the year after.' },
+  { key: 'Immigration', name: 'Immigration and settling in', single: 'Immigration help', format: 'Digital help guide', blurb: 'Permits, paperwork, housing, banking, and the first weeks, in the order you will meet them.' },
+  { key: 'Food', name: 'Restaurant and food lists', single: 'Restaurant list', format: 'Digital list', blurb: 'Short, curated lists of where to eat, what to order, and when to go.' },
+  { key: 'Checklist', name: 'Checklists and templates', single: 'Checklist', format: 'Digital checklist', blurb: 'Packing lists, moving timelines, budget sheets, and the templates that save a week.' },
+  { key: 'Bundle', name: 'Bundles', single: 'Bundle', format: '', blurb: 'Several titles for one place, priced together.' }
+];
+function categories() {
+  const custom = state.catalog ? state.catalog.categories : [];
+  const merged = DEFAULT_CATEGORIES.map((d) => ({ ...d, ...(custom.find((c) => c.key.toLowerCase() === d.key.toLowerCase()) || {}), key: d.key }));
+  for (const c of custom) if (!merged.some((m) => m.key.toLowerCase() === c.key.toLowerCase())) merged.push({ single: c.name, format: 'Digital download', blurb: '', ...c });
+  return merged;
+}
+function kindOf(type) { return (categories().find((c) => c.key.toLowerCase() === String(type || '').toLowerCase()) || DEFAULT_CATEGORIES[0]).single; }
 
 function normaliseCatalog(raw) {
   const c = { ...EMPTY, ...(raw || {}) };
   c.guides = Array.isArray(c.guides) ? c.guides : [];
   c.zones = Array.isArray(c.zones) ? c.zones : [];
+  c.resources = Array.isArray(c.resources) ? c.resources : [];
+  c.categories = Array.isArray(c.categories) ? c.categories.filter((k) => k && typeof k.key === 'string' && /^[A-Za-z][\w-]{0,30}$/.test(k.key) && typeof k.name === 'string') : [];
   c.reviews = Array.isArray(c.reviews) ? c.reviews : [];
   c.regions = c.regions && typeof c.regions === 'object' ? c.regions : {};
   c.social = c.social && typeof c.social === 'object' ? c.social : {};
@@ -348,15 +366,16 @@ window.addEventListener('beforeunload', (event) => { if (state.dirty && state.mo
 /* ---------- Views ---------- */
 const VIEW_TITLES = {
   overview: ['Overview', 'How the store is doing and what to do next.'],
-  titles: ['Titles', 'Guides, books, and bundles in the collection.'],
+  titles: ['Titles', 'Everything you sell: guides, books, help, lists, and bundles.'],
   zones: ['Zones', 'Cities people are heading to.'],
+  resources: ['Free help', 'Checklists, explainers, and links given away on the home page.'],
   reviews: ['Reviews', 'Reader quotes shown on the home page.'],
   media: ['Media & files', 'Images for the site and the products buyers download.'],
   orders: ['Orders', 'Paid Stripe checkouts.'],
   coupons: ['Coupons', 'Discount codes buyers enter at checkout.'],
   requests: ['Requests', 'Places readers asked for.'],
   announce: ['Announce', 'Email buyers about an updated title.'],
-  settings: ['Store settings', 'Name, currencies, contact, author, and regions.'],
+  settings: ['Store settings', 'Name, currencies, contact, author, kinds of help, and regions.'],
   tools: ['Backups & tools', 'Import, export, restore.']
 };
 function showView(view) {
@@ -366,7 +385,7 @@ function showView(view) {
   const [title, sub] = VIEW_TITLES[view] || [view, ''];
   $('#view-title').textContent = title;
   $('#view-sub').textContent = sub;
-  const renderers = { overview: renderOverview, titles: renderTitles, zones: renderZones, reviews: renderReviews, media: renderMedia, orders: renderOrders, coupons: renderCoupons, requests: renderRequests, announce: renderAnnounce, settings: renderSettings, tools: renderTools };
+  const renderers = { overview: renderOverview, titles: renderTitles, zones: renderZones, resources: renderResources, reviews: renderReviews, media: renderMedia, orders: renderOrders, coupons: renderCoupons, requests: renderRequests, announce: renderAnnounce, settings: renderSettings, tools: renderTools };
   if (renderers[view]) renderers[view]();
   window.scrollTo({ top: 0 });
 }
@@ -378,6 +397,7 @@ document.addEventListener('click', (event) => {
   if (!action) return;
   if (action.dataset.action === 'new-title') openTitleEditor(null);
   if (action.dataset.action === 'new-zone') openZoneEditor(null);
+  if (action.dataset.action === 'new-resource') openResourceEditor(null);
   if (action.dataset.action === 'new-review') openReviewEditor(null);
   if (action.dataset.action === 'go-media') showView('media');
 });
@@ -386,6 +406,7 @@ function renderCounts() {
   const c = state.catalog || EMPTY;
   $('#nav-titles').textContent = c.guides.length || '';
   $('#nav-zones').textContent = c.zones.length || '';
+  $('#nav-resources').textContent = c.resources.length || '';
   $('#nav-reviews').textContent = c.reviews.length || '';
   $('#nav-requests').textContent = state.requests.length || '';
 }
@@ -419,6 +440,7 @@ function renderOverview() {
   const tiles = [
     ['Titles', c.guides.length, `${withStripe} sellable on Stripe`],
     ['Zones', c.zones.length, 'cities featured'],
+    ['Free help', c.resources.length, 'resources given away'],
     ['Reviews', c.reviews.length, 'on the home page'],
     ['Countries', new Set(c.guides.map((g) => g.country).filter(Boolean)).size, 'covered'],
     ['Requests', state.requests.length, 'places asked for'],
@@ -840,7 +862,7 @@ function openTitleEditor(guide) {
     const basics = el('div', 'fieldset');
     basics.append(el('div', 'fieldset-title', 'Basics'));
     const g2 = el('div', 'grid-2');
-    g2.append(field('Title', input('title', g.title, { required: 'true' })), field('Type', select('type', g.type || 'Guide', [['Guide', 'Guide'], ['Book', 'Book'], ['Bundle', 'Bundle']])));
+    g2.append(field('Title', input('title', g.title, { required: 'true' })), field('Kind', select('type', g.type || 'Guide', categories().map((c) => [c.key, c.name])), 'Rename or add kinds under Store settings.'));
     g2.append(field('Country', input('country', g.country, { placeholder: 'Canada' })), field('State or province', input('state', g.state, { placeholder: 'British Columbia' })));
     g2.append(field('Id (used in links; keep stable)', input('id', g.id, { placeholder: 'auto from title' })), field('Badge', input('badge', g.badge, { placeholder: 'New, Bestseller…', maxlength: '24' })));
     basics.append(g2);
@@ -1074,7 +1096,7 @@ function openZoneEditor(zone, index) {
     form.append(field('Why now / what is special', input('why', z.why, { type: 'textarea', rows: '3' })));
     form.append(field('Known for, one per line', input('knownFor', Array.isArray(z.knownFor) ? z.knownFor.join('\n') : (z.knownFor || ''), { type: 'textarea', rows: '3' })));
     form.append(imagePicker('image', z.image, 'Photo (4:3 looks best)'));
-    form.append(field('Linked title', select('guideId', z.guideId || '', [['', 'None (link to the country instead)'], ...guides.map((g) => [g.id, `${g.title} · ${g.type}`])])));
+    form.append(field('Linked title', select('guideId', z.guideId || '', [['', 'None (link to the country instead)'], ...guides.map((g) => [g.id, `${g.title} · ${kindOf(g.type)}`])])));
   }, (form) => {
     const f = form.elements;
     if (!f.city.value.trim()) { toast('The zone needs a city.', true); return false; }
@@ -1083,6 +1105,59 @@ function openZoneEditor(zone, index) {
     markDirty(); renderZones(); toast('Zone saved. Publish to make it live.');
   }, zone ? () => { state.catalog.zones.splice(index, 1); markDirty(); renderZones(); toast('Zone deleted'); } : null);
 }
+
+/* ---------- Free help (resources) ---------- */
+function renderResources() {
+  const list = $('#resources-list');
+  list.replaceChildren();
+  const items = state.catalog.resources;
+  const q = $('#resources-search').value.trim().toLowerCase();
+  if (!items.length) { list.append(el('div', 'empty', 'No free help yet. Add a checklist, a short explainer, or a link worth sharing.')); return; }
+  items.forEach((r, index) => {
+    if (q && !`${r.title} ${r.category} ${r.place} ${r.summary}`.toLowerCase().includes(q)) return;
+    const card = el('div', 'card');
+    card.draggable = true;
+    card.append(el('span', 'kicker', [r.category, r.place].filter(Boolean).join(' · ') || 'Free'), el('h3', null, r.title), el('p', null, r.summary || ''));
+    const foot = el('div', 'card-foot');
+    const edit = el('button', 'link-button', 'Edit'); edit.type = 'button'; edit.addEventListener('click', () => openResourceEditor(r, index));
+    foot.append(el('span', 'handle', `⋮⋮ ${String(index + 1).padStart(2, '0')} · ${r.kind || 'Read'}`), edit);
+    card.append(foot);
+    card.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', String(index)));
+    card.addEventListener('dragover', (e) => e.preventDefault());
+    card.addEventListener('drop', (e) => { e.preventDefault(); const from = Number(e.dataTransfer.getData('text/plain')); if (from === index) return; const [moved] = items.splice(from, 1); items.splice(index, 0, moved); markDirty(); renderResources(); });
+    list.append(card);
+  });
+}
+function openResourceEditor(resource, index) {
+  const r = resource ? { ...resource } : { kind: 'Read' };
+  openDrawer(resource ? 'Edit free help' : 'New free help', r.title || 'New resource', (form) => {
+    form.append(field('Title', input('title', r.title, { required: 'true' })));
+    const g2 = el('div', 'grid-2');
+    g2.append(field('Kind of help', select('category', r.category || '', [['', 'General'], ...categories().filter((c) => c.key !== 'Bundle').map((c) => [c.name, c.name])])), field('Place (optional)', input('place', r.place, { placeholder: 'Canada / Ontario' })), field('Opens as', select('kind', r.kind || 'Read', [['Read', 'Read (a page or article)'], ['Download', 'Download (a PDF)'], ['Link', 'Link (another site)']])));
+    form.append(g2);
+    form.append(field('One-line summary', input('summary', r.summary, { placeholder: 'What the reader gets, in one sentence.' })));
+    const urlField = field('URL', input('url', r.url, { placeholder: 'https://… or assets/free/packing-list.pdf', required: 'true' }), 'Public. Upload a PDF under Media & files, or paste any link.');
+    form.append(urlField);
+    if (state.mode === 'online') {
+      const up = el('label', 'button button-sm upload-button', 'Upload a PDF or image');
+      const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = '.pdf,image/*'; fileInput.hidden = true;
+      up.append(fileInput);
+      fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0]; if (!file) return;
+        try { const res = await uploadFile(file, 'media'); form.elements.url.value = res.url; if (/\.pdf$/i.test(file.name)) form.elements.kind.value = 'Download'; toast(`Uploaded ${file.name}`); }
+        catch (error) { toast(error.message, true); }
+      });
+      urlField.append(up);
+    }
+  }, (form) => {
+    const f = form.elements;
+    if (!f.title.value.trim() || !f.url.value.trim()) { toast('A resource needs a title and a URL.', true); return false; }
+    const data = { title: f.title.value.trim(), category: f.category.value, place: f.place.value.trim(), kind: f.kind.value, summary: f.summary.value.trim(), url: f.url.value.trim() };
+    if (resource) state.catalog.resources[index] = data; else state.catalog.resources.push(data);
+    markDirty(); renderResources(); toast('Saved. Publish to make it live.');
+  }, resource ? () => { state.catalog.resources.splice(index, 1); markDirty(); renderResources(); toast('Resource deleted'); } : null);
+}
+$('#resources-search').addEventListener('input', renderResources);
 
 /* ---------- Reviews ---------- */
 function renderReviews() {
@@ -1399,7 +1474,47 @@ function renderSettings() {
   const img = picker.querySelector('img');
   img.hidden = !f['author.photo'].value; if (f['author.photo'].value) img.src = assetUrl(f['author.photo'].value);
   renderRegions();
+  renderCategories();
 }
+function renderCategories() {
+  const box = $('#categories-editor');
+  box.replaceChildren();
+  const custom = state.catalog.categories;
+  const upsert = (key, patch) => {
+    const found = custom.find((c) => c.key.toLowerCase() === key.toLowerCase());
+    const base = DEFAULT_CATEGORIES.find((d) => d.key.toLowerCase() === key.toLowerCase()) || {};
+    if (found) Object.assign(found, patch); else custom.push({ ...base, key, ...patch });
+    markDirty();
+  };
+  for (const c of categories()) {
+    const row = el('div', 'category-row');
+    const inUse = state.catalog.guides.filter((g) => String(g.type || 'Guide').toLowerCase() === c.key.toLowerCase()).length;
+    const name = input('name', c.name, { placeholder: 'Plural name' }); const single = input('single', c.single, { placeholder: 'Singular' }); const format = input('format', c.format, { placeholder: 'Format label' }); const blurb = input('blurb', c.blurb, { placeholder: 'One sentence for the Browse by need card' });
+    for (const node of [name, single, format, blurb]) node.addEventListener('change', () => upsert(c.key, { [node.name]: node.value.trim() }));
+    const hide = check('hidden', c.hidden, 'Hide');
+    hide.querySelector('input').addEventListener('change', (e) => upsert(c.key, { hidden: e.target.checked }));
+    const key = el('span', 'key', `${c.key}${inUse ? ` · ${inUse}` : ''}`);
+    row.append(name, single, format, blurb, hide, key);
+    box.append(row);
+  }
+}
+$('#category-add').addEventListener('click', () => {
+  const box = $('#categories-editor');
+  if (box.querySelector('.category-add')) return;
+  const row = el('div', 'category-add');
+  const name = input('newName', '', { placeholder: 'Name, e.g. Maps and itineraries' });
+  const add = el('button', 'button button-sm', 'Add'); add.type = 'button';
+  add.addEventListener('click', () => {
+    const n = name.value.trim(); if (!n) return;
+    const key = n.replace(/[^A-Za-z0-9]+/g, '').slice(0, 30);
+    if (!key || categories().some((c) => c.key.toLowerCase() === key.toLowerCase())) { toast('That kind already exists.', true); return; }
+    state.catalog.categories.push({ key, name: n, single: n.replace(/s$/, ''), format: 'Digital download', blurb: '' });
+    markDirty(); renderCategories();
+  });
+  row.append(name, add);
+  box.append(row);
+  name.focus();
+});
 function renderRegions() {
   const box = $('#regions-editor');
   box.replaceChildren();

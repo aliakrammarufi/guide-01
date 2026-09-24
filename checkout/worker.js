@@ -5,7 +5,7 @@
  *   POST /session   { items: ["price_..."], gift?: { email, message } }   → { url }   one Stripe Checkout for the cart
  *   GET  /order?session_id=cs_...                                          → { email, items: [{ name, url, expires }] }
  *   GET  /file?t=<signed token>                                            → streams a purchased file from R2
- *   GET  /media/<key>                                                      → serves an uploaded image (covers, samples, zones)
+ *   GET  /media/<key>                                                      → serves public media (covers, samples, zones, free PDFs)
  *   GET  /catalog                                                          → the live catalog saved from the admin dashboard
  *   POST /notify    { email, place }                                       → { ok }
  *   POST /resend    { email }                                              → { ok }
@@ -409,7 +409,7 @@ async function readCatalog(env) {
   return raw ? JSON.parse(raw) : null;
 }
 
-const EMPTY_CATALOG = { storeName: 'Marufi Digital', currency: 'CAD', currencies: ['CAD'], guides: [], zones: [], reviews: [], regions: {}, author: {}, social: {} };
+const EMPTY_CATALOG = { storeName: 'Marufi Digital', currency: 'CAD', currencies: ['CAD'], guides: [], zones: [], resources: [], categories: [], reviews: [], regions: {}, author: {}, social: {} };
 
 async function loadCatalog(env) {
   if (!env.STORE) throw fail('The STORE KV namespace is not bound', 500);
@@ -470,7 +470,8 @@ async function getBackup(key, env) {
 }
 
 /* ---------- Uploads (R2) ---------- */
-const MEDIA_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', avif: 'image/avif', gif: 'image/gif', svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' };
+// Public media: images, the presenter video, and free PDFs for the "Free help" section. Paid product files use FILE_TYPES and stay private.
+const MEDIA_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', avif: 'image/avif', gif: 'image/gif', svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', pdf: 'application/pdf' };
 const FILE_TYPES = { pdf: 'application/pdf', epub: 'application/epub+zip', zip: 'application/zip', mobi: 'application/x-mobipocket-ebook', mp3: 'audio/mpeg', mp4: 'video/mp4', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
 
 function safeName(name) {

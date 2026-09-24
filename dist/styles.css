@@ -556,6 +556,32 @@ html.lenis { scroll-behavior: auto; }
 .resend p { color: var(--ink-2); font-size: .95rem; line-height: 1.6; }
 .resend form { display: grid; grid-template-columns: 1fr auto; gap: .5rem; }
 
+/* ---------- Browse by need + free help ---------- */
+.needs-section { background: var(--card); }
+.needs-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.need { display: grid; grid-template-rows: auto 1fr auto; gap: .9rem; min-height: 15rem; padding: 1.6rem 1.5rem 1.4rem; background: var(--paper); border: 1px solid var(--rule-2); color: inherit; text-align: left; cursor: pointer; transition: transform .35s var(--ease-out), border-color .25s, box-shadow .35s var(--ease-out), background .3s; }
+.need:hover { transform: translateY(-5px); border-color: var(--ink); box-shadow: var(--shadow-lift); background: var(--card); }
+.need-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.need svg { width: 2.2rem; height: 2.2rem; fill: none; stroke: var(--clay); stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+.need-count { color: var(--ink-3); font-family: var(--mono); font-size: .58rem; letter-spacing: .14em; text-transform: uppercase; }
+.need h3 { font-size: 1.7rem; line-height: 1.05; }
+.need p { color: var(--ink-2); font-size: .92rem; line-height: 1.55; }
+.need-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: .9rem; border-top: 1px solid var(--rule); font-size: .84rem; font-weight: 600; }
+.need-foot > span:first-child { flex: 1; }
+.need-foot .pill-soft { white-space: nowrap; padding: .25rem .55rem; background: var(--clay-soft); color: var(--clay); font-family: var(--mono); font-size: .56rem; letter-spacing: .12em; text-transform: uppercase; }
+.need.is-empty { background: transparent; border-style: dashed; }
+.need.is-empty h3, .need.is-empty p { color: var(--ink-3); }
+.help-section { background: var(--paper-2); }
+.help-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.help-grid:empty { display: none; }
+.help-card { display: grid; gap: .6rem; align-content: start; padding: 1.5rem 1.4rem; background: var(--card); border: 1px solid var(--rule-2); color: inherit; text-decoration: none; transition: transform .35s var(--ease-out), border-color .25s, box-shadow .35s var(--ease-out); }
+.help-card:hover { transform: translateY(-4px); border-color: var(--ink); box-shadow: var(--shadow-soft); }
+.help-card .card-kicker { display: flex; justify-content: space-between; gap: 1rem; }
+.help-card .card-kicker span:last-child { color: var(--ink-3); }
+.help-card h3 { font-size: 1.5rem; line-height: 1.1; }
+.help-card p { color: var(--ink-2); font-size: .92rem; line-height: 1.55; }
+.help-card .text-link { justify-self: start; margin-top: .3rem; font-size: .86rem; }
+
 /* ---------- Related titles, pre-orders, cart discount ---------- */
 .related { display: grid; gap: .6rem; padding-top: .9rem; border-top: 1px solid var(--rule); }
 .related-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
@@ -700,7 +726,7 @@ html.lenis { scroll-behavior: auto; }
   .region-list { max-height: none; }
   .notify { grid-template-columns: 1fr; gap: 1rem; }
   .notify-note { grid-column: auto; }
-  .reviews-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reviews-grid, .needs-grid, .help-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .author-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 2rem; }
   .compare-bar { left: 1rem; right: 1rem; max-width: none; transform: none; flex-wrap: wrap; }
   .sample-viewer, .compare { width: calc(100% - 1.5rem); }
@@ -803,7 +829,8 @@ html.lenis { scroll-behavior: auto; }
   .notify .button { width: 100%; }
   .zones-track { grid-auto-columns: 82%; gap: .85rem; }
   .zone-body h3 { font-size: 1.6rem; }
-  .reviews-grid { grid-template-columns: 1fr; }
+  .reviews-grid, .needs-grid, .help-grid { grid-template-columns: 1fr; }
+  .need { min-height: 0; }
   .author-grid { grid-template-columns: 1fr; gap: 1.5rem; }
   .author-photo { max-width: 18rem; }
   .compare-bar { bottom: .75rem; padding: .5rem; }

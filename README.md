@@ -4,6 +4,8 @@ A static storefront for Marufi Digital's digital guides and books, organized by 
 
 ## What the site does
 
+Marufi Digital is a place-first library: travel guides, books, immigration and settling-in help, restaurant and food lists, checklists, and bundles, every one filed by country and state. The home page opens with **Browse by need** (one tile per kind of help, with counts, or "coming soon" and a link to the request form), then the library with filter chips per kind, the atlas, zones, and a **Free help** section for resources given away without checkout.
+
 - **Collection** with search, country filter, Guides / Books / Bundles / Saved chips, an Editor's pick spotlight, sale pricing with countdown, a quick-view dialog with editions (variants), sample pages, save-for-later hearts, and a compare tool (up to three titles side by side).
 - **Atlas**: a world map with a pin for every covered state, plus a country list. Pick a country to see its states with the titles under each; states without a title show "Coming soon" and a notify-me button.
 - **Zones**: a horizontal strip of the cities people are heading to, what makes each special, best time to go, and the guide that covers it.
@@ -33,6 +35,8 @@ Store-wide fields:
 | `author` | `name`, `role`, `photo`, `bio` (blank line = new paragraph), `note`. Section hides until `name` and `bio` are set. |
 | `reviews` | `[{ "quote", "name", "place", "rating" }]`. Section hides when empty. |
 | `zones` | `[{ "city", "country", "state", "tagline", "why", "bestTime", "knownFor": [], "image", "guideId" }]`. Section hides when empty. |
+| `categories` | Optional overrides for the kinds of help: `[{ "key", "name", "single", "format", "blurb", "icon", "hidden" }]`. Built-in keys: `Guide`, `Book`, `Immigration`, `Food`, `Checklist`, `Bundle`. Add a new key to create a kind; icons: compass, book, passport, fork, check, layers. |
+| `resources` | Free help shown without checkout: `[{ "title", "summary", "category", "place", "kind": "Read" \| "Download" \| "Link", "url" }]`. Section shows "coming soon" when empty. |
 | `regions` | `{ "Canada": ["Alberta", ...] }`. Full state lists so the atlas can show "Coming soon" entries. Canada, US, Australia, Germany, Italy, Spain, France, UK, and Japan are pre-filled; add others as you publish. |
 | `analytics.plausibleDomain` | Your domain in Plausible to enable analytics. |
 
@@ -41,7 +45,8 @@ Per title (required: `title`, `description`, numeric `price`, and `paymentLink` 
 | Field | Purpose |
 |---|---|
 | `id` | Stable id used by bundles, zones, saved items, and the cart. |
-| `type` | `Guide`, `Book`, or `Bundle`. |
+| `type` | The kind of help: `Guide`, `Book`, `Immigration`, `Food`, `Checklist`, `Bundle`, or a custom category key. Drives the kicker, the format label, the filter chips, and "Browse by need". |
+| `tags` | Optional search words, e.g. `["work permit", "PR"]`. |
 | `country`, `state` | Filing place. `coordinates: [lat, lng]` places the pin on the atlas. |
 | `cover`, `coverAlt`, `badge`, `featured` | Presentation. Portrait 4:5 covers look best. |
 | `longDescription`, `highlights`, `format`, `pages`, `updated` | Shown in quick view and compare. |
@@ -103,7 +108,9 @@ The clip plays silently as a living poster (never when the visitor prefers reduc
 - **Related titles** appear in every quick view: bundles that include the title, then other titles from the same country, then the same format.
 - **Multi-title discount.** Set a percent and minimum in Store settings and click "Create the coupon in Stripe". The cart shows "add one more for 15% off" and the Worker applies the coupon automatically at checkout. Stripe does not allow promotion codes on the same session when an automatic discount applies.
 - **Pre-orders.** Tick "Pre-order" and set a release date. The card and quick view say Pre-order, the thank-you page shows "Reserved" instead of a download, and no file is served until you attach one and click "Email download links to everyone who bought this" in the editor (or Announce with links).
-- **Deep links.** `/?country=Canada&state=Alberta`, `/?type=Book`, and `/?q=tokyo` open the collection pre-filtered.
+- **Deep links.** `/?country=Canada&state=Alberta`, `/?type=Immigration`, and `/?q=tokyo` open the library pre-filtered.
+- **Kinds of help.** Store settings → Kinds of help renames the categories, edits the card wording, hides one, or adds a new one. Titles pick their kind in the editor.
+- **Free help.** The Free help view manages resources: a title, a kind, an optional place, and a URL. PDFs upload as public media (up to 12 MB) so they open without a signed link.
 
 ## Deploy the Worker
 

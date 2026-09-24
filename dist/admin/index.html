@@ -53,6 +53,7 @@
           <button type="button" class="nav-item is-active" data-view="overview">Overview</button>
           <button type="button" class="nav-item" data-view="titles">Titles <span class="count" id="nav-titles"></span></button>
           <button type="button" class="nav-item" data-view="zones">Zones <span class="count" id="nav-zones"></span></button>
+          <button type="button" class="nav-item" data-view="resources">Free help <span class="count" id="nav-resources"></span></button>
           <button type="button" class="nav-item" data-view="reviews">Reviews <span class="count" id="nav-reviews"></span></button>
           <button type="button" class="nav-item" data-view="media">Media &amp; files</button>
           <button type="button" class="nav-item" data-view="orders">Orders</button>
@@ -145,6 +146,12 @@
           <div class="cards" id="zones-list"></div>
         </section>
 
+        <!-- Free help -->
+        <section class="view" data-view="resources" hidden>
+          <div class="toolbar"><input type="search" id="resources-search" placeholder="Search free help" /><p class="hint">Checklists, explainers, and links shown in the "Free help" section. No checkout. Drag a card to reorder.</p><button type="button" class="button" data-action="new-resource">Add a resource</button></div>
+          <div class="cards" id="resources-list"></div>
+        </section>
+
         <!-- Reviews -->
         <section class="view" data-view="reviews" hidden>
           <div class="toolbar"><input type="search" id="reviews-search" placeholder="Search reviews" /><p class="hint">Home-page reviews. Per-title reviews are edited inside each title.</p><button type="button" class="button" data-action="new-review">Add a review</button></div>
@@ -155,8 +162,8 @@
         <section class="view" data-view="media" hidden>
           <div class="two-col">
             <div class="panel">
-              <div class="panel-head"><h2>Images</h2><label class="button button-sm upload-button">Upload images<input type="file" id="media-upload" accept="image/*" multiple hidden /></label></div>
-              <p class="hint">Covers, sample pages, zone photos, and the author photo. Public. Up to 12 MB each.</p>
+              <div class="panel-head"><h2>Images and public PDFs</h2><label class="button button-sm upload-button">Upload<input type="file" id="media-upload" accept="image/*,.pdf" multiple hidden /></label></div>
+              <p class="hint">Covers, sample pages, zone photos, the author photo, and free PDFs for the "Free help" section. Public. Up to 12 MB each.</p>
               <div class="media-grid" id="media-grid"></div>
             </div>
             <div class="panel">
@@ -323,6 +330,11 @@
               <div class="panel-head"><h2>E-mail templates</h2><button type="button" class="button-ghost" id="templates-save">Save templates</button></div>
               <p class="hint">Subject and opening line of the e-mails the Worker sends. Download links and receipts are added automatically.</p>
               <div class="grid-2" id="templates-grid"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Kinds of help</h2><button type="button" class="button-ghost" id="category-add">Add a kind</button></div>
+              <p class="hint">The categories shown in "Browse by need" and as filter chips. Rename them, change the wording on cards, or hide one. Every title is filed under exactly one kind.</p>
+              <div id="categories-editor" class="categories"></div>
             </div>
             <div class="panel">
               <div class="panel-head"><h2>Regions by country</h2><button type="button" class="button-ghost" id="region-add">Add a country</button></div>

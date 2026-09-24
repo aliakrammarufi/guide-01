@@ -13,7 +13,45 @@ const CART_KEY = 'marufi-cart';
 const SAVED_KEY = 'marufi-saved';
 const CURRENCY_KEY = 'marufi-currency';
 const TONES = ['clay', 'pine', 'ink', 'gold'];
-const store = { name: 'Marufi Digital', currency: 'CAD', currencies: [], endpoint: '', regions: {}, siteUrl: '', discount: null, countryPages: false };
+const store = { name: 'Marufi Digital', currency: 'CAD', currencies: [], endpoint: '', regions: {}, siteUrl: '', discount: null, countryPages: false, categories: [] };
+
+/* ---------- Kinds of help ----------
+   Every title belongs to one category. The defaults below cover what the store sells today; guides.json may
+   add or rename categories through a `categories` array of { key, name, single, format, blurb, icon }. */
+const DEFAULT_CATEGORIES = [
+  { key: 'Guide', name: 'Travel guides', single: 'Travel guide', format: 'Digital guide', icon: 'compass', blurb: 'One place, read in one sitting: where to stay, what to skip, and how to move around.' },
+  { key: 'Book', name: 'Books', single: 'Book', format: 'Digital book', icon: 'book', blurb: 'Longer reads on a country or a region, for the flight over or the year after.' },
+  { key: 'Immigration', name: 'Immigration and settling in', single: 'Immigration help', format: 'Digital help guide', icon: 'passport', blurb: 'Permits, paperwork, housing, banking, and the first weeks, in the order you will meet them.' },
+  { key: 'Food', name: 'Restaurant and food lists', single: 'Restaurant list', format: 'Digital list', icon: 'fork', blurb: 'Short, curated lists of where to eat, what to order, and when to go.' },
+  { key: 'Checklist', name: 'Checklists and templates', single: 'Checklist', format: 'Digital checklist', icon: 'check', blurb: 'Packing lists, moving timelines, budget sheets, and the templates that save a week.' },
+  { key: 'Bundle', name: 'Bundles', single: 'Bundle', format: '', icon: 'layers', blurb: 'Several titles for one place, priced together.' }
+];
+const CATEGORY_ICONS = {
+  compass: '<circle cx="12" cy="12" r="9.5"/><path d="M15.5 8.5 13.6 13.6 8.5 15.5l1.9-5.1z"/>',
+  book: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11a2 2 0 0 1 2 2v13.5a1.5 1.5 0 0 0-1.5-1.5H4z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13a2 2 0 0 0-2 2v13.5a1.5 1.5 0 0 1 1.5-1.5H20z"/>',
+  passport: '<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M8.5 17h7"/>',
+  fork: '<path d="M7 3v7a2.5 2.5 0 0 0 5 0V3M9.5 3v18"/><path d="M17 3c-2 1.5-2.5 4-2.5 7.5H17V21"/>',
+  check: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="m8 12 2.5 2.5L16 9"/>',
+  layers: '<path d="m12 4 8 4.5-8 4.5-8-4.5z"/><path d="m4 13 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/>'
+};
+function setCategories(list) {
+  const custom = Array.isArray(list) ? list.filter((c) => c && typeof c.key === 'string' && /^[A-Za-z][\w-]{0,30}$/.test(c.key) && typeof c.name === 'string' && c.name.trim()) : [];
+  const merged = DEFAULT_CATEGORIES.map((d) => ({ ...d, ...(custom.find((c) => c.key.toLowerCase() === d.key.toLowerCase()) || {}), key: d.key }));
+  for (const c of custom) if (!merged.some((m) => m.key.toLowerCase() === c.key.toLowerCase())) merged.push({ single: c.name.replace(/s$/, ''), format: 'Digital download', icon: 'layers', blurb: '', ...c });
+  store.categories = merged.map((c) => ({ ...c, name: String(c.name).trim(), single: String(c.single || c.name).trim(), format: String(c.format || ''), blurb: String(c.blurb || ''), icon: CATEGORY_ICONS[c.icon] ? c.icon : 'layers', hidden: c.hidden === true }));
+}
+setCategories([]);
+function categoryOf(type) {
+  const key = String(type || '').toLowerCase();
+  return store.categories.find((c) => c.key.toLowerCase() === key || c.name.toLowerCase() === key || c.single.toLowerCase() === key) || store.categories[0];
+}
+function categoryIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = CATEGORY_ICONS[name] || CATEGORY_ICONS.layers;
+  return svg;
+}
 let catalog = [];
 let activeType = '';
 let activeRegion = '';
@@ -130,13 +168,14 @@ function placeOf(guide) {
 
 function kickerOf(guide) {
   const place = placeOf(guide);
-  return place ? `${guide.type} · ${place}` : guide.type;
+  const kind = categoryOf(guide.type).single;
+  return place ? `${kind} · ${place}` : kind;
 }
 
 function formatOf(guide) {
   if (guide.format) return guide.format;
   if (guide.type === 'Bundle') return `${guide.includes.length} titles`;
-  return guide.type === 'Book' ? 'Digital book' : 'Digital guide';
+  return categoryOf(guide.type).format || 'Digital download';
 }
 
 function coverFor(guide) {
@@ -687,7 +726,7 @@ function renderRelated(guide) {
     item.type = 'button';
     const cover = el('div', 'related-cover');
     cover.append(coverFor(g));
-    item.append(cover, el('strong', 'related-title', g.title), el('span', 'related-price', `${g.type} · ${formatMoney(priceInfo(g).amount, priceInfo(g).currency)}`));
+    item.append(cover, el('strong', 'related-title', g.title), el('span', 'related-price', `${categoryOf(g.type).single} · ${formatMoney(priceInfo(g).amount, priceInfo(g).currency)}`));
     item.addEventListener('click', () => openQuick(g));
     list.append(item);
   }
@@ -822,10 +861,10 @@ function renderGuides(guides, filtering) {
       detail.textContent = 'Tap the heart on any title to keep it here.';
     } else if (filtering) {
       title.textContent = 'Nothing matches your search.';
-      detail.textContent = 'Try a different country, state, title, or format.';
+      detail.textContent = 'Try a different place, topic, or kind of title.';
     } else {
       title.textContent = 'The library is taking shape.';
-      detail.textContent = 'Guides and books will appear here as they are added to the collection.';
+      detail.textContent = 'Guides, books, help, and lists will appear here as they are added.';
     }
     return;
   }
@@ -869,14 +908,14 @@ function update() {
     (!countryFilter.value || guide.country === countryFilter.value) &&
     (!activeRegion || guide.state === activeRegion) &&
     (!activeType || (activeType === 'saved' ? isSaved(guide) : guide.type === activeType)) &&
-    (!query || `${guide.country} ${guide.state} ${guide.title} ${guide.type}`.toLocaleLowerCase().includes(query))
+    (!query || `${guide.country} ${guide.state} ${guide.title} ${categoryOf(guide.type).name} ${categoryOf(guide.type).single} ${guide.tags.join(' ')}`.toLocaleLowerCase().includes(query))
   );
   renderGuides(shown, filtering);
   const bar = $('#active-filter');
   const parts = [];
   if (countryFilter.value) parts.push(countryFilter.value);
   if (activeRegion) parts.push(activeRegion);
-  if (activeType) parts.push(activeType === 'saved' ? 'Saved' : `${activeType}s`);
+  if (activeType) parts.push(activeType === 'saved' ? 'Saved' : categoryOf(activeType).name);
   if (query) parts.push(`“${search.value.trim()}”`);
   bar.hidden = parts.length === 0;
   $('#active-filter-text').textContent = parts.length ? `Showing: ${parts.join(' · ')}` : '';
@@ -1074,7 +1113,7 @@ function showRegions(country, highlight) {
         const button = el('button', 'link-button', guide.title);
         button.type = 'button';
         button.addEventListener('click', () => openQuick(guide));
-        item.append(button, el('span', 'region-type', ` ${guide.type}`), priceNode(guide, null, 'region-price'));
+        item.append(button, el('span', 'region-type', ` ${categoryOf(guide.type).single}`), priceNode(guide, null, 'region-price'));
         ul.append(item);
       }
       li.append(ul);
@@ -1363,6 +1402,54 @@ function setupHeroVideo(config) {
   }
 }
 
+function renderNeeds() {
+  const grid = $('#needs-grid');
+  grid.replaceChildren();
+  const visible = store.categories.filter((c) => !c.hidden && (c.key !== 'Bundle' || catalog.some((g) => g.type === 'Bundle')));
+  for (const c of visible) {
+    const count = catalog.filter((g) => g.type === c.key).length;
+    const places = new Set(catalog.filter((g) => g.type === c.key).map((g) => g.country).filter(Boolean));
+    const card = el('button', `need${count ? '' : ' is-empty'}`);
+    card.type = 'button';
+    card.dataset.category = c.key;
+    const top = el('div', 'need-top');
+    top.append(categoryIcon(c.icon), el('span', 'need-count', count ? `${count} ${count === 1 ? 'title' : 'titles'}${places.size ? ` · ${places.size} ${places.size === 1 ? 'country' : 'countries'}` : ''}` : 'Coming soon'));
+    const foot = el('div', 'need-foot');
+    foot.append(el('span', null, count ? `Browse ${c.name.toLowerCase()} →` : 'Ask for a place →'), el('span', 'pill-soft', c.format || 'Digital'));
+    card.append(top, el('h3', null, c.name), el('p', null, c.blurb), foot);
+    card.setAttribute('aria-label', count ? `Browse ${c.name}` : `${c.name}: coming soon. Ask for a place.`);
+    card.addEventListener('click', () => {
+      if (!count) { scrollToSection('#notify-form'); setTimeout(() => $('#notify-place')?.focus({ preventScroll: true }), 600); return; }
+      search.value = '';
+      countryFilter.value = '';
+      activeRegion = '';
+      setType(c.key);
+      scrollToSection('#guides');
+    });
+    grid.append(card);
+  }
+  revealBatch($$('.need', grid), { y: 60, rotate: 4, step: 0.08 });
+}
+
+function renderResources(resources) {
+  const grid = $('#help-grid');
+  const empty = $('#help-empty');
+  grid.replaceChildren();
+  const valid = resources.filter((r) => r && typeof r.title === 'string' && r.title.trim() && (isHttps(r.url) || /^[\w./-]+$/.test(String(r.url || ''))));
+  empty.hidden = valid.length > 0;
+  for (const r of valid) {
+    const card = el('a', 'help-card');
+    card.href = r.url;
+    if (isHttps(r.url) && !r.url.startsWith(location.origin)) { card.target = '_blank'; card.rel = 'noopener'; }
+    const kicker = el('span', 'card-kicker');
+    const kind = typeof r.kind === 'string' && r.kind.trim() ? r.kind.trim() : 'Read';
+    kicker.append(el('span', null, [r.category, r.place].filter((v) => typeof v === 'string' && v.trim()).join(' · ') || 'Free'), el('span', null, kind));
+    card.append(kicker, el('h3', null, r.title.trim()), el('p', null, typeof r.summary === 'string' ? r.summary : ''), el('span', 'text-link', `${kind === 'Download' ? 'Download' : kind === 'Link' ? 'Open' : 'Read'} →`));
+    grid.append(card);
+  }
+  revealBatch($$('.help-card', grid), { y: 50, rotate: 3, step: 0.08 });
+}
+
 function renderZones(zones) {
   const section = $('#zones');
   const valid = zones.filter((zone) => zone && typeof zone.city === 'string' && zone.city.trim() && typeof zone.country === 'string');
@@ -1396,7 +1483,7 @@ function renderZones(zones) {
     if (facts.childElementCount) body.append(facts);
     const guide = zone.guideId ? byId(zone.guideId) : null;
     if (guide) {
-      const link = el('button', 'text-link', `Read the ${guide.type.toLowerCase()} `);
+      const link = el('button', 'text-link', `Open the ${categoryOf(guide.type).single.toLowerCase()} `);
       link.type = 'button';
       const arrow = el('span', null, '→');
       arrow.setAttribute('aria-hidden', 'true');
@@ -1441,7 +1528,7 @@ function injectStructuredData() {
         description: guide.description,
         image: guide.cover ? (base && !isHttps(guide.cover) ? `${base}/${guide.cover}` : guide.cover) : undefined,
         brand: { '@type': 'Brand', name: store.name },
-        category: guide.type,
+        category: categoryOf(guide.type).single,
         offers: { '@type': 'Offer', price: saleActive(guide) ? guide.salePrice : guide.price, priceCurrency: store.currency, availability: 'https://schema.org/InStock', url: base ? `${base}/#guides` : undefined }
       }
     }))
@@ -1460,7 +1547,8 @@ function moneyMap(value) {
 }
 
 function normalise(guide, index) {
-  const type = /^book$/i.test(guide.type) ? 'Book' : /^bundle$/i.test(guide.type) ? 'Bundle' : 'Guide';
+  const type = categoryOf(guide.type).key;
+  const tags = Array.isArray(guide.tags) ? guide.tags.filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim()).slice(0, 12) : [];
   const variants = Array.isArray(guide.variants) ? guide.variants.filter((v) => v && typeof v.label === 'string' && Number.isFinite(Number(v.price)) && (isHttps(v.paymentLink) || /^price_[A-Za-z0-9]+$/.test(String(v.priceId || '')))).map((v) => ({
     label: v.label.trim(),
     format: typeof v.format === 'string' ? v.format.trim() : '',
@@ -1473,6 +1561,7 @@ function normalise(guide, index) {
   return {
     id: String(guide.id || guide.priceId || guide.paymentLink || `item-${index}`),
     type,
+    tags,
     country: typeof guide.country === 'string' ? guide.country.trim() : '',
     state: typeof guide.state === 'string' ? guide.state.trim() : '',
     title: String(guide.title).trim(),
@@ -1529,6 +1618,7 @@ fetch('guides.json', { cache: 'no-cache' })
     }
   })
   .then((data) => {
+    setCategories(data.categories);
     catalog = Array.isArray(data.guides)
       ? data.guides.filter((guide, index) => {
           if (!guide) return false;
@@ -1541,6 +1631,8 @@ fetch('guides.json', { cache: 'no-cache' })
         }).map(normalise)
       : [];
     applyStore(data);
+    renderNeeds();
+    renderResources(Array.isArray(data.resources) ? data.resources : []);
     const countries = [...new Set(catalog.map((guide) => guide.country).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     for (const country of countries) {
       const option = document.createElement('option');
@@ -1549,8 +1641,13 @@ fetch('guides.json', { cache: 'no-cache' })
       countryFilter.append(option);
     }
     const types = new Set(catalog.map((guide) => guide.type));
-    typeFilter.querySelector('[data-type="Bundle"]').hidden = !types.has('Bundle');
-    typeFilter.querySelector('[data-type="Book"]').hidden = !types.has('Book');
+    const savedChip = typeFilter.querySelector('[data-type="saved"]');
+    for (const c of store.categories) if (types.has(c.key)) {
+      const chip = el('button', 'chip', c.name);
+      chip.type = 'button';
+      chip.dataset.type = c.key;
+      typeFilter.insertBefore(chip, savedChip);
+    }
     controls.hidden = catalog.length === 0;
     // Sample listings are a placeholder for the real catalog only.
     for (const element of $$('[data-sample-only]')) element.hidden = catalog.length > 0;
@@ -1558,7 +1655,7 @@ fetch('guides.json', { cache: 'no-cache' })
     const params = new URLSearchParams(location.search);
     if (params.get('country') && countries.includes(params.get('country'))) countryFilter.value = params.get('country');
     if (params.get('state')) activeRegion = params.get('state');
-    if (params.get('type') && ['Guide', 'Book', 'Bundle'].includes(params.get('type'))) activeType = params.get('type');
+    if (params.get('type') && store.categories.some((c) => c.key === params.get('type'))) activeType = params.get('type');
     if (params.get('q')) search.value = params.get('q');
     if (activeType) for (const chip of typeFilter.querySelectorAll('.chip')) chip.classList.toggle('is-active', chip.dataset.type === activeType);
     update();

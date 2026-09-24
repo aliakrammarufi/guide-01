@@ -10,6 +10,10 @@ const root = path.resolve(new URL('..', import.meta.url).pathname);
 const dist = process.env.DIST ? path.resolve(process.env.DIST) : path.join(root, 'dist');
 const local = JSON.parse(await readFile(path.join(dist, 'guides.json'), 'utf8'));
 let catalog = local;
+const DEFAULT_KINDS = { guide: 'Travel guide', book: 'Book', immigration: 'Immigration help', food: 'Restaurant list', checklist: 'Checklist', bundle: 'Bundle' };
+const kinds = { ...DEFAULT_KINDS };
+for (const c of Array.isArray(local.categories) ? local.categories : []) if (c && typeof c.key === 'string' && typeof c.name === 'string') kinds[c.key.toLowerCase()] = c.single || c.name;
+const kindOf = (g) => kinds[String(g.type || 'Guide').toLowerCase()] || 'Travel guide';
 const endpoint = typeof local.checkoutEndpoint === 'string' ? local.checkoutEndpoint.replace(/\/session\/?$/, '').replace(/\/+$/, '') : '';
 if (endpoint) {
   try {
@@ -39,7 +43,7 @@ for (const entry of await readdir(dist, { withFileTypes: true })) {
 
 function cover(g) {
   if (g.cover) return `<img src="${esc(/^https?:/.test(g.cover) ? g.cover : `../${g.cover}`)}" alt="${esc(g.coverAlt || `Cover of ${g.title}`)}" loading="lazy" />`;
-  return `<div class="cover-art" data-tone="${['clay', 'pine', 'ink', 'gold'][Math.abs(g.title.length) % 4]}"><span>${esc(g.country || g.type)}</span><strong>${esc(g.state || g.title)}</strong></div>`;
+  return `<div class="cover-art" data-tone="${['clay', 'pine', 'ink', 'gold'][Math.abs(g.title.length) % 4]}"><span>${esc(g.country || kindOf(g))}</span><strong>${esc(g.state || g.title)}</strong></div>`;
 }
 
 function page(country) {
@@ -55,13 +59,13 @@ function page(country) {
   const stateBlocks = states.map((s) => {
     const titles = inCountry.filter((g) => g.state === s);
     if (!titles.length) return `<li class="region is-empty"><div class="region-head"><strong>${esc(s)}</strong><span>Coming soon</span></div><a class="text-link" href="../?country=${encodeURIComponent(country)}#atlas">Ask to be notified <span aria-hidden="true">→</span></a></li>`;
-    return `<li class="region" id="${slug(s)}"><div class="region-head"><strong>${esc(s)}</strong><span>${titles.length} ${titles.length === 1 ? 'title' : 'titles'}</span></div><ul class="region-titles">${titles.map((g) => `<li><a class="link-button" href="#${slug(g.id)}">${esc(g.title)}</a><span class="region-type"> ${esc(g.type)}</span><span class="region-price">${money(Number(g.salePrice || g.price))}</span></li>`).join('')}</ul></li>`;
+    return `<li class="region" id="${slug(s)}"><div class="region-head"><strong>${esc(s)}</strong><span>${titles.length} ${titles.length === 1 ? 'title' : 'titles'}</span></div><ul class="region-titles">${titles.map((g) => `<li><a class="link-button" href="#${slug(g.id)}">${esc(g.title)}</a><span class="region-type"> ${esc(kindOf(g))}</span><span class="region-price">${money(Number(g.salePrice || g.price))}</span></li>`).join('')}</ul></li>`;
   }).join('');
   const cards = inCountry.map((g) => `
         <article class="guide-card" id="${slug(g.id)}">
           <a class="card-cover" href="../?country=${encodeURIComponent(country)}&q=${encodeURIComponent(g.title)}#guides">${cover(g)}${g.badge ? `<span class="card-badge">${esc(g.badge)}</span>` : ''}</a>
           <div class="card-body">
-            <div class="card-meta"><span class="card-kicker">${esc(g.type)} · ${esc([g.country, g.state].filter(Boolean).join(' / '))}</span><span class="card-price">${money(Number(g.salePrice || g.price))}</span></div>
+            <div class="card-meta"><span class="card-kicker">${esc(kindOf(g))} · ${esc([g.country, g.state].filter(Boolean).join(' / '))}</span><span class="card-price">${money(Number(g.salePrice || g.price))}</span></div>
             <h3>${esc(g.title)}</h3>
             <p>${esc(g.description)}</p>
             ${g.highlights && g.highlights.length ? `<ul class="quick-highlights">${g.highlights.slice(0, 4).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : ''}

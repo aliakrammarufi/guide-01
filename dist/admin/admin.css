@@ -248,3 +248,12 @@ body.drawer-open { overflow: hidden; }
   .repeat-item .row, .repeat-item .row-3 { grid-template-columns: 1fr; }
   .drawer-head, .drawer-body, .drawer-foot { padding-left: 1.1rem; padding-right: 1.1rem; }
 }
+
+/* Kinds of help editor */
+.categories { display: grid; gap: .6rem; }
+.category-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr 2fr auto auto; gap: .5rem; align-items: center; padding: .6rem; background: var(--card); border: 1px solid var(--rule-2); }
+.category-row input { min-width: 0; }
+.category-row .key { color: var(--ink-3); font-family: var(--mono); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; }
+.category-row .check { white-space: nowrap; }
+.category-add { display: flex; gap: .5rem; align-items: center; }
+@media (max-width: 800px) { .category-row { grid-template-columns: 1fr 1fr; } .category-row input[name="blurb"] { grid-column: 1 / -1; } }

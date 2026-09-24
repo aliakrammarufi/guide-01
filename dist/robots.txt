@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 Disallow: /thank-you.html
+Disallow: /admin/
 Sitemap: https://YOUR-DOMAIN/sitemap.xml
