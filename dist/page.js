@@ -7,7 +7,7 @@
   const page = document.body.dataset.page || '';
   // Path back to the site root, taken from this script's own src (../ on most pages, ../../ on article pages).
   const BASE = ((document.querySelector('script[src$="page.js"]') || {}).getAttribute || (() => ''))?.call(document.querySelector('script[src$="page.js"]'), 'src')?.replace(/page\.js$/, '') || '../';
-  const store = { name: 'Marufi Digital', endpoint: '', contactEmail: '', currency: 'CAD', giftCards: { enabled: true, amounts: [25, 50, 100] }, articles: [] };
+  const store = { name: 'Marufi Digital', endpoint: '', status: {}, contactEmail: '', currency: 'CAD', giftCards: { enabled: true, amounts: [25, 50, 100] }, articles: [] };
   const isHttps = (v) => { try { const u = new URL(v); return u.protocol === 'https:' || (u.protocol === 'http:' && u.hostname === 'localhost'); } catch { return false; } };
   const isEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
   function el(tag, className, text) {
@@ -118,7 +118,7 @@
       label.append(input, el('span', null, formatMoney(amount, store.currency)));
       return label;
     }));
-    if (!store.endpoint || store.giftCards.enabled === false) { form.hidden = true; if (offline) offline.hidden = false; return; }
+    if (!store.endpoint || store.status.stripe === false || store.giftCards.enabled === false) { form.hidden = true; if (offline) offline.hidden = false; return; }
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const f = form.elements;
@@ -217,6 +217,7 @@
         clearTimeout(timer);
         if (live && typeof live === 'object') data = { ...data, ...live };
       } catch { /* keep guides.json */ }
+      try { store.status = await fetch(`${store.endpoint}/status`).then((r) => (r.ok ? r.json() : {})); } catch { store.status = {}; }
     }
     if (typeof data.storeName === 'string' && data.storeName.trim()) store.name = data.storeName.trim();
     if (isEmail(data.contactEmail)) store.contactEmail = data.contactEmail.trim();
@@ -226,7 +227,7 @@
     fillChrome();
     setupSubscribe();
     // Hand the catalog to page-specific scripts (account.js) that load after this one.
-    window.marufiStore = { endpoint: store.endpoint, currency: store.currency, name: store.name, contactEmail: store.contactEmail, guides: (Array.isArray(data.guides) ? data.guides : []).filter((g) => g && g.title && g.status !== 'draft').map((g) => ({ id: String(g.id || g.priceId || ''), title: g.title, country: g.country || '', state: g.state || '', cover: g.cover || '', format: g.format || '', priceId: g.priceId || '', variants: Array.isArray(g.variants) ? g.variants.map((v) => ({ priceId: v.priceId || '', label: v.label })) : [] })) };
+    window.marufiStore = { endpoint: store.endpoint, status: store.status, currency: store.currency, name: store.name, contactEmail: store.contactEmail, guides: (Array.isArray(data.guides) ? data.guides : []).filter((g) => g && g.title && g.status !== 'draft').map((g) => ({ id: String(g.id || g.priceId || ''), title: g.title, country: g.country || '', state: g.state || '', cover: g.cover || '', format: g.format || '', priceId: g.priceId || '', variants: Array.isArray(g.variants) ? g.variants.map((v) => ({ priceId: v.priceId || '', label: v.label })) : [] })) };
     window.dispatchEvent(new CustomEvent('marufi:ready', { detail: window.marufiStore }));
     if (page === 'contact') setupContact();
     if (page === 'gift') setupGift();

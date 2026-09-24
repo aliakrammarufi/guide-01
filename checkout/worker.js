@@ -7,6 +7,7 @@
  *   GET  /file?t=<signed token>                                            → streams a purchased file from R2
  *   GET  /media/<key>                                                      → serves public media (covers, samples, zones, free PDFs)
  *   GET  /catalog                                                          → the live catalog saved from the admin dashboard
+ *   GET  /status                                                           → { stripe, email, accounts, files } booleans for the storefront
  *   POST /notify    { email, place }                                       → { ok }
  *   POST /resend    { email }                                              → { ok }
  *   POST /contact   { name, email, message }                               → { ok }   stored, and e-mailed to CONTACT_EMAIL
@@ -87,6 +88,8 @@ export default {
       if (path === '/file' && request.method === 'GET') return serveFile(url.searchParams.get('t'), env);
       if (path.startsWith('/media/') && request.method === 'GET') return serveMedia(path.slice('/media/'.length), env, cors);
       if (path === '/catalog' && request.method === 'GET') return catalogResponse(env, json);
+      // What the storefront can offer right now (booleans only, nothing secret).
+      if (path === '/status' && request.method === 'GET') return json({ stripe: Boolean(env.STRIPE_SECRET_KEY), email: Boolean(env.RESEND_API_KEY && env.FROM_EMAIL), accounts: Boolean(env.STORE) && Boolean(env.RESEND_API_KEY && env.FROM_EMAIL), files: files(env) ? files(env).kind : '' }, 200, { 'Cache-Control': 'public, max-age=60' });
       if (path === '/notify' && request.method === 'POST') return json(await notifyRequest(await readJson(request), env));
       if (path === '/resend' && request.method === 'POST') return json(await resendLinks(await readJson(request), env, url));
       if (path === '/announce' && request.method === 'POST') { await requireAdmin(request, env); return json(await announce(await readJson(request), env)); }

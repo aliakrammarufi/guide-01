@@ -358,7 +358,14 @@
     state.name = store.name;
     state.guides = store.guides;
     const offline = $('#account-offline');
-    if (!state.endpoint) { $('#auth-panel').hidden = true; if (offline) offline.hidden = false; return; }
+    if (!state.endpoint || (store.status && store.status.accounts === false)) {
+      $('#auth-panel').hidden = true;
+      if (offline) {
+        offline.hidden = false;
+        if (state.endpoint) { offline.querySelector('h2').textContent = 'Accounts open once e-mail sending is connected.'; offline.querySelector('p').textContent = 'Sign-in codes go out by e-mail, and the store cannot send e-mail yet. Your Stripe receipt has your download links in the meantime.'; }
+      }
+      return;
+    }
     setupAuth();
     for (const item of $$('.dash-nav button')) item.addEventListener('click', () => showView(item.dataset.view));
     $('#dash-signout').addEventListener('click', () => signOut());
