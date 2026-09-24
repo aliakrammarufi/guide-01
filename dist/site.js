@@ -22,7 +22,8 @@ let displayCurrency = '';
 /* ---------- Helpers ---------- */
 function isHttps(value) {
   try {
-    return new URL(value).protocol === 'https:';
+    const url = new URL(value);
+    return url.protocol === 'https:' || (url.protocol === 'http:' && url.hostname === 'localhost');
   } catch {
     return false;
   }
@@ -1350,6 +1351,21 @@ fetch('guides.json', { cache: 'no-cache' })
   .then((response) => {
     if (!response.ok) throw new Error('Could not load the catalog');
     return response.json();
+  })
+  .then(async (local) => {
+    // When the Worker is deployed, the catalog published from the admin dashboard takes over.
+    // guides.json stays as the bootstrap config and the fallback.
+    const endpoint = isHttps(local.checkoutEndpoint) ? local.checkoutEndpoint.replace(/\/session\/?$/, '').replace(/\/+$/, '') : '';
+    if (!endpoint) return local;
+    try {
+      const response = await fetch(`${endpoint}/catalog`, { cache: 'no-cache' });
+      if (!response.ok) return local;
+      const live = await response.json();
+      if (!live || !Array.isArray(live.guides)) return local;
+      return { ...local, ...live, checkoutEndpoint: local.checkoutEndpoint };
+    } catch {
+      return local;
+    }
   })
   .then((data) => {
     catalog = Array.isArray(data.guides)

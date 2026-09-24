@@ -52,15 +52,39 @@ Per title (required: `title`, `description`, numeric `price`, and `paymentLink` 
 | `reviews` | Per-title quotes shown in quick view. |
 | `includes` | For bundles: ids of the included titles. |
 
-## Deploy the Worker (optional but recommended)
+## The admin dashboard: `/admin/`
+
+Open `https://your-domain.com/admin/` (locally, `http://localhost:8765/admin/`). It has two modes:
+
+- **Connected.** Sign in with your Worker URL and the admin password. Everything is stored by the Worker: the live catalog (KV), images and product files (R2), orders (Stripe), reader requests, and backups. Publishing makes changes live within a minute; the storefront reads `<worker>/catalog` and falls back to `guides.json` when the Worker is unreachable.
+- **Offline.** Click "Work offline with guides.json". The dashboard edits the catalog in your browser and downloads a new `guides.json` to commit. Uploads are not available offline; put files in `dist/assets/` and paste the path.
+
+What it does:
+
+| Section | What you can do |
+|---|---|
+| Overview | Stats, setup checklist, recent orders, quick actions. |
+| Titles | Add, edit, duplicate, delete guides, books, and bundles. Every field the storefront uses, plus cover upload, sample pages, the private product file, editions, bundle contents, and per-title reviews. **Create product, price, and payment link in Stripe** fills the Stripe ids in one click. |
+| Zones | Cities people are heading to. Drag to reorder. |
+| Reviews | Home-page reader quotes with ratings. |
+| Media & files | Upload images (public) and product files (private), copy URLs and keys, delete. |
+| Orders | Paid checkouts for 7 to 365 days, revenue by currency, best sellers, CSV export. |
+| Requests | "Notify me" requests by place, CSV export. |
+| Announce | Email every buyer of a title (dry-run count first). |
+| Store settings | Name, site URL, currencies, contact, social links, refund policy, analytics, author, and the state lists per country. |
+| Backups & tools | Import or export `guides.json`, restore any earlier published version, discard the local draft. |
+
+Unpublished edits are kept in the browser until you publish, so you can stop and continue later. A backup is stored every time you publish.
+
+## Deploy the Worker
 
 1. `npm i -g wrangler`, then `wrangler login`.
-2. In `checkout/wrangler.toml` set `SUCCESS_URL`, `CANCEL_URL`, `ALLOWED_ORIGINS`, `FROM_EMAIL`, `CONTACT_EMAIL`. Create the bucket with `wrangler r2 bucket create marufi-files` and upload your files to it. Optionally create the KV namespace for notify-me and gifts.
-3. From `checkout/`, set secrets: `wrangler secret put STRIPE_SECRET_KEY`, `wrangler secret put DOWNLOAD_SECRET` (any long random string), `wrangler secret put RESEND_API_KEY` (for e-mail, from resend.com), `wrangler secret put ADMIN_TOKEN` (for announcements).
-4. `wrangler deploy`, then put the Worker URL in `guides.json` as `checkoutEndpoint`.
-5. In Stripe, add metadata `file` to every product with the R2 object key of its download.
+2. Create storage: `wrangler r2 bucket create marufi-files` and `wrangler kv namespace create STORE`. Paste the KV id into `checkout/wrangler.toml`.
+3. In `checkout/wrangler.toml` set `SITE_URL`, `SUCCESS_URL`, `CANCEL_URL`, `ALLOWED_ORIGINS`, `FROM_EMAIL`, `CONTACT_EMAIL`.
+4. From `checkout/`, set secrets: `wrangler secret put STRIPE_SECRET_KEY`, `wrangler secret put ADMIN_PASSWORD`, `wrangler secret put DOWNLOAD_SECRET` (any long random string), and optionally `RESEND_API_KEY` (e-mail via resend.com) and `ADMIN_TOKEN` (for scripts).
+5. `wrangler deploy`, then put the Worker URL in `dist/guides.json` as `checkoutEndpoint` and push. Sign in at `/admin/` with that URL and the password.
 
-To e-mail every buyer of a title about an update, POST to `<worker>/announce` with header `Authorization: Bearer <ADMIN_TOKEN>` and body `{ "priceId": "price_...", "subject": "...", "message": "..." }`.
+To try the Worker locally without deploying: `node checkout/dev-server.mjs` starts it on `http://localhost:8787` with in-memory storage (password `letmein`, override with `ADMIN_PASSWORD=...`). Stripe and e-mail calls need real keys in the environment; everything else works offline.
 
 ## Preview locally
 

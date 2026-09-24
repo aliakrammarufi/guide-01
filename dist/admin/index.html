@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#14201c" />
+    <title>Marufi Digital · Admin</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="admin.css" />
+    <script src="admin.js" defer></script>
+  </head>
+  <body>
+    <!-- Sign in -->
+    <div class="login" id="login">
+      <form class="login-card" id="login-form" novalidate>
+        <p class="eyebrow">Marufi Digital · Admin</p>
+        <h1>Sign in to <em>the studio.</em></h1>
+        <label class="field"><span>Worker URL</span><input type="url" id="login-endpoint" placeholder="https://marufi-checkout.your-account.workers.dev" autocomplete="url" /></label>
+        <label class="field"><span>Password</span><input type="password" id="login-password" autocomplete="current-password" /></label>
+        <label class="check"><input type="checkbox" id="login-remember" checked /> Keep me signed in on this device</label>
+        <button type="submit" class="button" id="login-submit">Sign in <span aria-hidden="true">→</span></button>
+        <p class="login-note" id="login-note"></p>
+        <div class="login-alt">
+          <span>No Worker yet?</span>
+          <button type="button" class="link-button" id="login-offline">Work offline with guides.json</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- App -->
+    <div class="app" id="app" hidden>
+      <aside class="sidebar">
+        <a class="brand" href="../" target="_blank" rel="noopener">Marufi <em>Digital</em><small>Admin</small></a>
+        <nav class="nav" id="nav" aria-label="Admin sections">
+          <button type="button" class="nav-item is-active" data-view="overview">Overview</button>
+          <button type="button" class="nav-item" data-view="titles">Titles <span class="count" id="nav-titles"></span></button>
+          <button type="button" class="nav-item" data-view="zones">Zones <span class="count" id="nav-zones"></span></button>
+          <button type="button" class="nav-item" data-view="reviews">Reviews <span class="count" id="nav-reviews"></span></button>
+          <button type="button" class="nav-item" data-view="media">Media &amp; files</button>
+          <button type="button" class="nav-item" data-view="orders">Orders</button>
+          <button type="button" class="nav-item" data-view="requests">Requests <span class="count" id="nav-requests"></span></button>
+          <button type="button" class="nav-item" data-view="announce">Announce</button>
+          <button type="button" class="nav-item" data-view="settings">Store settings</button>
+          <button type="button" class="nav-item" data-view="tools">Backups &amp; tools</button>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="mode" id="mode-pill">Offline</div>
+          <button type="button" class="link-button" id="sign-out">Sign out</button>
+        </div>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="view-title">Overview</h1>
+            <p class="topbar-sub" id="view-sub"></p>
+          </div>
+          <div class="topbar-actions">
+            <span class="unsaved" id="unsaved" hidden>Unsaved changes</span>
+            <a class="button-ghost" href="../" target="_blank" rel="noopener">View site ↗</a>
+            <button type="button" class="button" id="save">Publish changes</button>
+          </div>
+        </header>
+        <div class="status-row" id="status-row"></div>
+
+        <!-- Overview -->
+        <section class="view" data-view="overview">
+          <div class="stats" id="stats"></div>
+          <div class="two-col">
+            <div class="panel">
+              <div class="panel-head"><h2>Quick actions</h2></div>
+              <div class="actions-grid">
+                <button type="button" class="action" data-action="new-title"><strong>Add a title</strong><span>Guide, book, or bundle</span></button>
+                <button type="button" class="action" data-action="new-zone"><strong>Add a zone</strong><span>A city people are heading to</span></button>
+                <button type="button" class="action" data-action="new-review"><strong>Add a review</strong><span>Reader quote for the home page</span></button>
+                <button type="button" class="action" data-action="go-media"><strong>Upload files</strong><span>Covers, samples, and products</span></button>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Setup checklist</h2></div>
+              <ul class="checklist" id="checklist"></ul>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h2>Recent orders</h2><button type="button" class="link-button" data-view-link="orders">All orders</button></div>
+            <div id="overview-orders" class="table-wrap"></div>
+          </div>
+        </section>
+
+        <!-- Titles -->
+        <section class="view" data-view="titles" hidden>
+          <div class="toolbar">
+            <input type="search" id="titles-search" placeholder="Search titles, countries, states" />
+            <select id="titles-type"><option value="">All types</option><option>Guide</option><option>Book</option><option>Bundle</option></select>
+            <button type="button" class="button" data-action="new-title">Add a title</button>
+          </div>
+          <div class="table-wrap" id="titles-table"></div>
+        </section>
+
+        <!-- Zones -->
+        <section class="view" data-view="zones" hidden>
+          <div class="toolbar"><p class="hint">Zones show the cities people are heading to, what is special there, and which title covers it. Drag the handle to reorder.</p><button type="button" class="button" data-action="new-zone">Add a zone</button></div>
+          <div class="cards" id="zones-list"></div>
+        </section>
+
+        <!-- Reviews -->
+        <section class="view" data-view="reviews" hidden>
+          <div class="toolbar"><p class="hint">Store-wide reviews appear in the "What readers say" section. Per-title reviews are edited inside each title.</p><button type="button" class="button" data-action="new-review">Add a review</button></div>
+          <div class="cards" id="reviews-list"></div>
+        </section>
+
+        <!-- Media -->
+        <section class="view" data-view="media" hidden>
+          <div class="two-col">
+            <div class="panel">
+              <div class="panel-head"><h2>Images</h2><label class="button button-sm upload-button">Upload images<input type="file" id="media-upload" accept="image/*" multiple hidden /></label></div>
+              <p class="hint">Covers, sample pages, zone photos, and the author photo. Public. Up to 12 MB each.</p>
+              <div class="media-grid" id="media-grid"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Product files</h2><label class="button button-sm upload-button">Upload files<input type="file" id="file-upload" accept=".pdf,.epub,.zip,.mobi,.mp3,.mp4" multiple hidden /></label></div>
+              <p class="hint">The guides and books buyers download. Private: served only through signed links after payment. Up to 95 MB each.</p>
+              <div class="file-list" id="file-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Orders -->
+        <section class="view" data-view="orders" hidden>
+          <div class="toolbar">
+            <select id="orders-days"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select>
+            <button type="button" class="button-ghost" id="orders-refresh">Refresh</button>
+            <button type="button" class="button-ghost" id="orders-export">Export CSV</button>
+          </div>
+          <div class="stats" id="orders-stats"></div>
+          <div class="two-col">
+            <div class="panel"><div class="panel-head"><h2>By title</h2></div><div class="table-wrap" id="orders-by-title"></div></div>
+            <div class="panel"><div class="panel-head"><h2>Orders</h2></div><div class="table-wrap" id="orders-table"></div></div>
+          </div>
+        </section>
+
+        <!-- Requests -->
+        <section class="view" data-view="requests" hidden>
+          <div class="toolbar"><p class="hint">Readers who asked to be told when a place is covered. Tell them with Announce once the title is live, then clear the request.</p><button type="button" class="button-ghost" id="requests-export">Export CSV</button></div>
+          <div class="table-wrap" id="requests-table"></div>
+        </section>
+
+        <!-- Announce -->
+        <section class="view" data-view="announce" hidden>
+          <div class="panel narrow">
+            <div class="panel-head"><h2>Email every buyer of a title</h2></div>
+            <p class="hint">Use this when you revise a guide. It goes to everyone who bought that title through Stripe.</p>
+            <form id="announce-form" class="form" novalidate>
+              <label class="field"><span>Title</span><select id="announce-title"></select></label>
+              <label class="field"><span>Subject</span><input type="text" id="announce-subject" maxlength="150" placeholder="Vancouver guide updated for 2027" /></label>
+              <label class="field"><span>Message</span><textarea id="announce-message" rows="8" maxlength="4000" placeholder="What changed and how to get the new file."></textarea></label>
+              <div class="form-actions">
+                <button type="button" class="button-ghost" id="announce-count">Count recipients</button>
+                <button type="submit" class="button" id="announce-send">Send</button>
+              </div>
+              <p class="hint" id="announce-note"></p>
+            </form>
+          </div>
+        </section>
+
+        <!-- Settings -->
+        <section class="view" data-view="settings" hidden>
+          <form id="settings-form" class="form settings" novalidate>
+            <div class="panel">
+              <div class="panel-head"><h2>Store</h2></div>
+              <div class="grid-2">
+                <label class="field"><span>Store name</span><input type="text" name="storeName" /></label>
+                <label class="field"><span>Site URL</span><input type="url" name="siteUrl" placeholder="https://your-domain.com" /></label>
+                <label class="field"><span>Base currency (the one Stripe charges)</span><input type="text" name="currency" maxlength="3" placeholder="CAD" /></label>
+                <label class="field"><span>Display currencies (comma separated)</span><input type="text" name="currencies" placeholder="CAD, USD, EUR, GBP" /></label>
+                <label class="field"><span>Contact email</span><input type="email" name="contactEmail" /></label>
+                <label class="field"><span>Plausible analytics domain</span><input type="text" name="plausibleDomain" placeholder="your-domain.com" /></label>
+              </div>
+              <label class="field"><span>Refund policy (shown in the FAQ; leave empty to hide)</span><textarea name="refundPolicy" rows="3"></textarea></label>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Social links</h2></div>
+              <div class="grid-2">
+                <label class="field"><span>Instagram</span><input type="url" name="social.instagram" /></label>
+                <label class="field"><span>TikTok</span><input type="url" name="social.tiktok" /></label>
+                <label class="field"><span>YouTube</span><input type="url" name="social.youtube" /></label>
+                <label class="field"><span>Pinterest</span><input type="url" name="social.pinterest" /></label>
+                <label class="field"><span>X</span><input type="url" name="social.x" /></label>
+                <label class="field"><span>Facebook</span><input type="url" name="social.facebook" /></label>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>About the author</h2></div>
+              <div class="grid-2">
+                <label class="field"><span>Name</span><input type="text" name="author.name" /></label>
+                <label class="field"><span>Role</span><input type="text" name="author.role" placeholder="Writer and publisher, Marufi Digital" /></label>
+              </div>
+              <div class="field"><span>Photo</span><div class="image-picker" data-target="author.photo"><img alt="" hidden /><input type="url" name="author.photo" placeholder="Paste an image URL or upload" /><label class="button-ghost upload-button">Upload<input type="file" accept="image/*" hidden /></label></div></div>
+              <label class="field"><span>Bio (blank line = new paragraph)</span><textarea name="author.bio" rows="5"></textarea></label>
+              <label class="field"><span>Closing line</span><input type="text" name="author.note" /></label>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Regions by country</h2><button type="button" class="button-ghost" id="region-add">Add a country</button></div>
+              <p class="hint">Full lists of states or provinces, one per line, so the atlas can show "Coming soon" entries. Countries with published titles appear automatically; add the rest here.</p>
+              <div id="regions-editor" class="regions"></div>
+            </div>
+          </form>
+        </section>
+
+        <!-- Tools -->
+        <section class="view" data-view="tools" hidden>
+          <div class="two-col">
+            <div class="panel">
+              <div class="panel-head"><h2>Import and export</h2></div>
+              <p class="hint">The catalog is a single JSON file. Export it to keep a copy or to commit as <code>dist/guides.json</code>; import one to replace everything here.</p>
+              <div class="form-actions">
+                <button type="button" class="button" id="export-json">Download guides.json</button>
+                <label class="button-ghost upload-button">Import JSON<input type="file" id="import-json" accept="application/json" hidden /></label>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Backups</h2><button type="button" class="button-ghost" id="backups-refresh">Refresh</button></div>
+              <p class="hint">A backup is kept every time you publish. Restore one, then publish again to make it live.</p>
+              <div id="backups-list" class="file-list"></div>
+            </div>
+          </div>
+          <div class="panel danger">
+            <div class="panel-head"><h2>Local draft</h2></div>
+            <p class="hint">Unpublished edits are kept in this browser. Discard them to return to the last published catalog.</p>
+            <button type="button" class="button-ghost" id="discard-draft">Discard local draft</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Editor drawer (titles, zones, reviews) -->
+    <div class="drawer-overlay" id="drawer-overlay" hidden></div>
+    <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+      <div class="drawer-head">
+        <div><span class="eyebrow" id="drawer-kicker"></span><h2 id="drawer-title"></h2></div>
+        <button type="button" class="icon-button" id="drawer-close" aria-label="Close">×</button>
+      </div>
+      <form id="drawer-form" class="drawer-body form" novalidate></form>
+      <div class="drawer-foot">
+        <button type="button" class="link-button danger-link" id="drawer-delete" hidden>Delete</button>
+        <div class="form-actions">
+          <button type="button" class="button-ghost" id="drawer-cancel">Cancel</button>
+          <button type="button" class="button" id="drawer-save">Save</button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
