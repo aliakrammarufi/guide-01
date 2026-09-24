@@ -1740,25 +1740,30 @@ function splitWords(node) {
 }
 
 /** One block rises and fades in when it scrolls into view. */
-function revealOnView(node, { y = 56, scale = 1, delay = 0, duration = 1.1, start = 'top 88%' } = {}) {
+function revealOnView(node, { y = 44, scale = 1, delay = 0, duration = 1.3, start = 'top 88%' } = {}) {
   if (!motionOn || !node || node.dataset.motion) return;
   node.dataset.motion = 'pending';
-  gsapLib.from(node, { opacity: 0, y, scale, duration, delay, clearProps: CLEAR, scrollTrigger: { trigger: node, start, once: true, onEnter: () => { node.dataset.motion = 'playing'; } }, onComplete: () => markDone(node) });
+  gsapLib.from(node, { opacity: 0, y, scale, duration, delay, ease: 'expo.out', clearProps: CLEAR, scrollTrigger: { trigger: node, start, once: true, onEnter: () => { node.dataset.motion = 'playing'; } }, onComplete: () => markDone(node) });
 }
 
 /** Cards and tiles enter with depth: a slight tilt, a rise, and a stagger as each one reaches the viewport. */
-function revealBatch(nodes, { y = 70, scale = 0.94, rotate = 6, step = 0.1, duration = 1.1, start = 'top 92%' } = {}) {
+function revealBatch(nodes, { y = 48, scale = 0.985, rotate = 0, step = 0.08, duration = 1.3, start = 'top 92%' } = {}) {
   if (!motionOn || !nodes.length) return;
   const fresh = nodes.filter((n) => !n.dataset.motion);
   if (!fresh.length) return;
   for (const n of fresh) { n.dataset.motion = 'pending'; if (n.parentElement) n.parentElement.classList.add('depth'); }
   gsapLib.set(fresh, { opacity: 0, y, scale, rotateX: rotate, transformOrigin: '50% 100%' });
+  // Cover images settle from a slight zoom as their card arrives.
+  const covers = fresh.flatMap((n) => [...n.querySelectorAll('.card-cover img, .cover-art')]);
+  if (covers.length) gsapLib.set(covers, { scale: 1.12 });
   window.ScrollTrigger.batch(fresh, {
     start,
     once: true,
     onEnter: (batch) => {
       for (const n of batch) n.dataset.motion = 'playing';
-      gsapLib.to(batch, { opacity: 1, y: 0, scale: 1, rotateX: 0, duration, stagger: step, ease: 'power4.out', clearProps: CLEAR, onComplete: () => batch.forEach(markDone) });
+      gsapLib.to(batch, { opacity: 1, y: 0, scale: 1, rotateX: 0, duration, stagger: step, ease: 'expo.out', clearProps: CLEAR, onComplete: () => batch.forEach(markDone) });
+      const imgs = batch.flatMap((n) => [...n.querySelectorAll('.card-cover img, .cover-art')]);
+      if (imgs.length) gsapLib.to(imgs, { scale: 1, duration: duration + 0.4, stagger: step, ease: 'expo.out', clearProps: 'transform' });
     }
   });
 }
@@ -1773,7 +1778,7 @@ function revealHeading(head, { start = 'top 82%' } = {}) {
   const rest = [...head.children].filter((c) => c !== h);
   const tl = gsapLib.timeline({ scrollTrigger: { trigger: head, start, once: true, onEnter: () => { head.dataset.motion = 'playing'; } }, onComplete: () => markDone(head) });
   if (index) tl.from(index, { clipPath: 'inset(0 100% 0 0)', duration: 1.2, ease: 'power4.out', clearProps: CLEAR }, 0);
-  if (words.length) tl.from(words, { yPercent: 115, rotate: 3, duration: 1, stagger: 0.045, ease: 'power4.out', clearProps: CLEAR }, 0.1);
+  if (words.length) tl.from(words, { yPercent: 115, rotate: 2, duration: 1.15, stagger: 0.04, ease: 'expo.out', clearProps: CLEAR }, 0.1);
   else if (h) tl.from(h, { opacity: 0, y: 48, duration: 1, clearProps: CLEAR }, 0.1);
   if (rest.length) tl.from(rest, { opacity: 0, y: 32, duration: 0.9, stagger: 0.1, clearProps: CLEAR }, 0.5);
 }
@@ -1842,13 +1847,13 @@ function setupArrival() {
   const small = overlay.querySelector('small');
   const line = overlay.querySelector('.arrival-line');
   const tl = gsapLib.timeline({ defaults: { ease: 'power4.out' }, onComplete: finish });
-  tl.from(words, { yPercent: 115, rotate: 5, duration: 1.1, stagger: 0.09 }, 0.1)
-    .fromTo(line, { scaleX: 0, transformOrigin: 'left' }, { scaleX: 1, duration: 1.1, ease: 'power3.inOut' }, 0.35)
-    .from(small, { opacity: 0, y: 12, duration: 0.7 }, 0.8)
-    .to([overlay.querySelector('.arrival-mark'), line], { opacity: 0, y: -40, duration: 0.5, ease: 'power2.in' }, 1.55)
-    .to(overlay.querySelector('.arrival-top'), { yPercent: -100, duration: 1.05, ease: 'power4.inOut' }, 1.75)
-    .to(overlay.querySelector('.arrival-bottom'), { yPercent: 100, duration: 1.05, ease: 'power4.inOut' }, 1.75);
-  return 1.9;
+  tl.from(words, { yPercent: 115, rotate: 3, duration: 1, stagger: 0.08, ease: 'expo.out' }, 0.05)
+    .fromTo(line, { scaleX: 0, transformOrigin: 'left' }, { scaleX: 1, duration: 0.9, ease: 'power3.inOut' }, 0.25)
+    .from(small, { opacity: 0, y: 10, duration: 0.6 }, 0.6)
+    .to([overlay.querySelector('.arrival-mark'), line], { opacity: 0, y: -30, duration: 0.45, ease: 'power2.in' }, 1.25)
+    .to(overlay.querySelector('.arrival-top'), { yPercent: -100, duration: 0.95, ease: 'expo.inOut' }, 1.4)
+    .to(overlay.querySelector('.arrival-bottom'), { yPercent: 100, duration: 0.95, ease: 'expo.inOut' }, 1.4);
+  return 1.5;
 }
 
 /** Large screens: the hero pins and the film plate grows until it fills the viewport, then the page moves on. */
@@ -1872,7 +1877,7 @@ function setupHeroScene() {
     const shiftX = () => innerWidth / 2 - (within().x + plateImg.offsetWidth / 2);
     const shiftY = () => innerHeight / 2 - (within().y + plateImg.offsetHeight / 2);
     const tl = gsapLib.timeline({ defaults: { ease: 'none' }, scrollTrigger: { trigger: hero, start: 'top top', end: '+=120%', pin: true, scrub: 0.6, anticipatePin: 1, invalidateOnRefresh: true } });
-    tl.to(copy, { x: -140, opacity: 0, scale: 0.94, duration: 0.45, ease: 'power2.in' }, 0)
+    tl.to(copy, { y: -90, opacity: 0, scale: 0.96, duration: 0.45, ease: 'power2.in' }, 0)
       .to([$('.hero-side'), plate.querySelector('figcaption'), hint].filter(Boolean), { opacity: 0, duration: 0.25 }, 0)
       .to(plateImg, { scale: fit, x: shiftX, y: shiftY, duration: 0.7, ease: 'power2.inOut' }, 0.05)
       .to(chrome, { scale: () => 1 / fit(), duration: 0.7, ease: 'power2.inOut' }, 0.05)
@@ -1954,20 +1959,15 @@ function renumberGhosts() {
   }
 }
 
-/** Grids lean with the speed of the scroll and settle when it stops. */
-function setupVelocitySkew() {
-  const targets = $$('#guide-list, .sample-grid, #help-grid, #needs-grid, #zones-track, .reviews-grid, .features, #featured');
-  if (!targets.length) return;
-  const proxy = { skew: 0 };
-  const set = gsapLib.quickSetter(targets, 'skewY', 'deg');
-  const clamp = gsapLib.utils.clamp(-7, 7);
-  window.ScrollTrigger.create({ onUpdate: (self) => {
-    const skew = clamp(self.getVelocity() / -320);
-    if (Math.abs(skew) > Math.abs(proxy.skew)) {
-      proxy.skew = skew;
-      gsapLib.to(proxy, { skew: 0, duration: 0.9, ease: 'power3', overwrite: true, onUpdate: () => set(proxy.skew) });
-    }
-  } });
+/** The header slips away while you read downward and returns the moment you scroll up. */
+function setupMasthead() {
+  const head = $('#masthead');
+  if (!head) return;
+  let hidden = false;
+  const show = () => { if (!hidden) return; hidden = false; gsapLib.to(head, { yPercent: 0, duration: 0.5, ease: 'expo.out', overwrite: true }); };
+  const hide = () => { if (hidden || document.body.classList.contains('nav-open')) return; hidden = true; gsapLib.to(head, { yPercent: -100, duration: 0.5, ease: 'power3.in', overwrite: true }); };
+  window.ScrollTrigger.create({ start: 0, end: 'max', onUpdate: (self) => { if (self.direction === 1 && self.scroll() > innerHeight * 0.6) hide(); else show(); } });
+  new MutationObserver(() => { if (document.body.classList.contains('nav-open')) show(); }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 }
 
 /** Buttons lean toward the pointer and spring back. */
@@ -1977,7 +1977,7 @@ function setupMagnetic() {
     for (const target of $$('.button, .nav-shop, .plate-control')) {
       const xTo = gsapLib.quickTo(target, 'x', { duration: 0.5, ease: 'power3' });
       const yTo = gsapLib.quickTo(target, 'y', { duration: 0.5, ease: 'power3' });
-      const move = (e) => { const r = target.getBoundingClientRect(); xTo((e.clientX - (r.left + r.width / 2)) * 0.28); yTo((e.clientY - (r.top + r.height / 2)) * 0.28); };
+      const move = (e) => { const r = target.getBoundingClientRect(); xTo((e.clientX - (r.left + r.width / 2)) * 0.16); yTo((e.clientY - (r.top + r.height / 2)) * 0.16); };
       const leave = () => { xTo(0); yTo(0); };
       target.addEventListener('mousemove', move);
       target.addEventListener('mouseleave', leave);
@@ -2033,7 +2033,7 @@ function setupTilt() {
       const r = current.getBoundingClientRect();
       const px = (e.clientX - r.left) / r.width - 0.5;
       const py = (e.clientY - r.top) / r.height - 0.5;
-      gsapLib.to(current, { rotateY: px * 9, rotateX: -py * 9, y: -6, duration: 0.5, ease: 'power2.out', transformPerspective: 900 });
+      gsapLib.to(current, { rotateY: px * 4.5, rotateX: -py * 4.5, y: -5, duration: 0.6, ease: 'power2.out', transformPerspective: 1100 });
     };
     document.addEventListener('mousemove', move, { passive: true });
     return () => { document.removeEventListener('mousemove', move); if (current) reset(current); };
@@ -2069,7 +2069,7 @@ function setupScrollAnimation() {
   setupGhostIndex();
   setupStatement();
   setupSteps();
-  setupVelocitySkew();
+  setupMasthead();
   setupMagnetic();
   setupCursor();
   setupTilt();
