@@ -179,7 +179,7 @@ To try the Worker locally without deploying: `node checkout/dev-server.mjs` star
 
 ## Live site on Vercel
 
-The site is served from **https://marufi-digital.vercel.app** (Vercel project `marufi-digital`, static output from `dist/`, config in `vercel.json`). Deploy with `npx vercel deploy --prod` from the repo root, or connect the GitHub repository in the Vercel dashboard so every push to `main` deploys itself. `siteUrl` in `guides.json` is set to that address; change it (and `checkout/wrangler.toml`) when you attach your own domain. Vercel's free Hobby plan is for non-commercial use, so move to Pro before real sales.
+The site is served from **https://marufidigital.vercel.app** (Vercel project `marufi-digital`, static output from `dist/`, config in `vercel.json`). Deploy with `npx vercel deploy --prod` from the repo root, or connect the GitHub repository in the Vercel dashboard so every push to `main` deploys itself. `siteUrl` in `guides.json` is set to that address; change it (and `checkout/wrangler.toml`) when you attach your own domain. Vercel's free Hobby plan is for non-commercial use, so move to Pro before real sales.
 
 ## Preview locally
 

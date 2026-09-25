@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://marufi-digital.vercel.app/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/travel-guides/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/books/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/immigration/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/food/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/checklists/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/articles/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/gift/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/contact/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/account/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/privacy/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://marufi-digital.vercel.app/terms/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://marufidigital.vercel.app/travel-guides/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/books/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/immigration/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/food/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/checklists/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/articles/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/gift/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/contact/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/account/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/privacy/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://marufidigital.vercel.app/terms/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
 </urlset>

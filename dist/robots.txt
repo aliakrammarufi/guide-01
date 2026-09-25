@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /thank-you.html
 Disallow: /admin/
-Sitemap: https://marufi-digital.vercel.app/sitemap.xml
+Sitemap: https://marufidigital.vercel.app/sitemap.xml
