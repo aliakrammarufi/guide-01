@@ -73,3 +73,26 @@ def test_bar_path_fills_at_levels_conservatively():
     sell = N(side="SELL", is_open=True, status="active", effective_sl=110.0, entry=100.0, tp1=90.0, tp2=80.0)
     assert _bar_path(sell, 85, 99, 88) == [90.0, 88]
     assert _bar_path(N(side="SELL", is_open=False), 85, 111, 88) == [111, 85, 88]
+
+
+def test_decode_dukascopy_candles_and_period_breakdown():
+    from market.history import decode_candles
+    payload = {"timestamp": 1700000000000, "multiplier": 0.001, "open": 1980.5, "high": 1981.0, "low": 1980.0, "close": 1980.8,
+               "shift": 60000, "times": [0, 1, 2], "opens": [0, 300, -100], "highs": [0, 500, 0], "lows": [0, 200, -300],
+               "closes": [0, 100, -200], "volumes": [1.0, 2.0, 3.0]}
+    df = decode_candles(payload)
+    assert len(df) == 3 and str(df.index[0]) == "2023-11-14 22:13:20+00:00"
+    assert abs(df["open"].iloc[1] - 1980.8) < 1e-9 and abs(df["close"].iloc[2] - 1980.7) < 1e-9
+    assert (df.index[2] - df.index[1]).total_seconds() == 120           # a gap of one minute, not filled
+    from datetime import datetime, timedelta, timezone
+    from signals.tracker import TradeSignal
+    from signals.backtest import summarize, ReplayParams
+    rows = []
+    t0 = datetime(2024, 1, 10, tzinfo=timezone.utc)
+    for i in range(12):
+        opened = t0 + timedelta(days=40 * i)
+        rows.append(TradeSignal(id=i + 1, side="BUY", entry=2000, sl=1990, tp1=2010, tp2=2020, confidence=50, opened_at=opened,
+                                status="tp2" if i % 3 else "stopped", closed_at=opened + timedelta(hours=5), exit_price=2020 if i % 3 else 1990,
+                                result_r=1.5 if i % 3 else -1.0, triggered_at=opened))
+    res = summarize(rows, {}, ReplayParams())
+    assert "by_year" in res and set(res["by_year"]) == {"2024", "2025"} and "by_quarter" in res

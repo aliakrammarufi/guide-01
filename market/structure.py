@@ -294,33 +294,56 @@ def order_blocks(df: pd.DataFrame, lookback: int = 200, window: int = 3) -> list
 # ---------------------------------------------------------------------------
 # regime, divergence, candle read
 # ---------------------------------------------------------------------------
+def _wilder(x: np.ndarray, period: int) -> np.ndarray:
+    """Wilder smoothing (an EMA with alpha = 1/period, seeded with the first value), NaN-aware."""
+    out = np.full(len(x), np.nan)
+    alpha = 1.0 / period
+    acc = None
+    for i, v in enumerate(x):
+        if np.isnan(v):
+            continue
+        acc = v if acc is None else acc + alpha * (v - acc)
+        out[i] = acc
+    return out
+
+
 def adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Wilder's ADX."""
-    up = df["high"].diff()
-    down = -df["low"].diff()
-    plus_dm = up.where((up > down) & (up > 0), 0.0)
-    minus_dm = down.where((down > up) & (down > 0), 0.0)
-    tr = ind.true_range(df)
-    atr_w = tr.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
-    plus_di = 100.0 * plus_dm.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean() / atr_w.replace(0.0, np.nan)
-    minus_di = 100.0 * minus_dm.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean() / atr_w.replace(0.0, np.nan)
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0.0, np.nan)
-    return dx.ewm(alpha=1.0 / period, adjust=False, min_periods=period).mean()
+    """Wilder's ADX (numpy; identical to the pandas ewm(adjust=False) formulation)."""
+    h, l, c = df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float), df["close"].to_numpy(dtype=float)
+    n = len(df)
+    if n < period + 2:
+        return pd.Series(np.nan, index=df.index)
+    up = np.diff(h, prepend=np.nan)
+    down = -np.diff(l, prepend=np.nan)
+    plus_dm = np.where((up > down) & (up > 0), up, 0.0)
+    minus_dm = np.where((down > up) & (down > 0), down, 0.0)
+    prev_c = np.r_[np.nan, c[:-1]]
+    tr = np.nanmax(np.vstack([h - l, np.abs(h - prev_c), np.abs(l - prev_c)]), axis=0)
+    atr_w = _wilder(tr, period)
+    atr_w[: period - 1] = np.nan                       # min_periods = period, as in the pandas formulation
+    with np.errstate(divide="ignore", invalid="ignore"):
+        plus_di = 100.0 * _wilder(plus_dm, period) / atr_w
+        minus_di = 100.0 * _wilder(minus_dm, period) / atr_w
+        dx = 100.0 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+    out = _wilder(dx, period)
+    out[: 2 * period - 2] = np.nan
+    return pd.Series(out, index=df.index)
 
 
-def atr_percentile(df: pd.DataFrame, period: int = 14, lookback: int = 200) -> float:
+def atr_percentile(df: pd.DataFrame, period: int = 14, lookback: int = 200, atr_series: pd.Series | None = None) -> float:
     """Where the current ATR sits in its recent history (0–100)."""
-    a = ind.atr(df, period).dropna().tail(lookback)
+    a = (ind.atr(df, period) if atr_series is None else atr_series).dropna().tail(lookback)
     if len(a) < 20:
         return 50.0
     cur = float(a.iloc[-1])
     return round(100.0 * float((a < cur).mean()), 0)
 
 
-def rsi_divergence(df: pd.DataFrame, window: int = 3, lookback: int = 200, sw: list[Swing] | None = None) -> str:
+def rsi_divergence(df: pd.DataFrame, window: int = 3, lookback: int = 200, sw: list[Swing] | None = None,
+                   rsi_series: pd.Series | None = None) -> str:
     """'bearish' when the last two swing highs rise while RSI falls; 'bullish' for lows; '' otherwise."""
     d = df.tail(lookback)
-    r = ind.rsi(d["close"], 14).to_numpy()
+    r = (ind.rsi(d["close"], 14) if rsi_series is None else rsi_series.reindex(d.index)).to_numpy()
     sw = swings(d, window) if sw is None else sw
     highs = [s for s in sw if s.kind == "H"][-2:]
     lows = [s for s in sw if s.kind == "L"][-2:]
@@ -390,21 +413,35 @@ class PriceAction:
                 "atr_pct": self.atr_pct, "divergence": self.divergence, "candle": self.candle}
 
 
-def analyze_price_action(h1: pd.DataFrame, daily: pd.DataFrame, m15: pd.DataFrame | None, atr_value: float) -> PriceAction:
+_H4_CACHE: dict = {}      # (last H1 bar time floored to 4h, len) → Structure – the H4 read changes only every 4 hours
+
+
+def analyze_price_action(h1: pd.DataFrame, daily: pd.DataFrame, m15: pd.DataFrame | None, atr_value: float,
+                         atr_series: pd.Series | None = None, rsi_series: pd.Series | None = None) -> PriceAction:
     pa = PriceAction()
     d = h1.tail(300)
+    tol = 0.15 * max(atr_value, 1e-6)
     try:
         sw = swings(d, 4)
     except Exception:  # noqa: BLE001
         sw = []
     try:
-        pa.h1 = structure(d, window=4, lookback=300, sw=sw)
+        pa.h1 = structure(d, window=4, lookback=300, sw=sw, tol=tol)
     except Exception:  # noqa: BLE001
         pass
     try:
-        h4 = resample_h4(h1.tail(720))
-        if len(h4) >= 30:
-            pa.h4 = structure(h4, window=2, lookback=180)
+        # H4 structure uses completed H4 bars only (a break is only known at the H4 close), so it changes every 4 h
+        key = (h1.index[-1].floor("4h"), len(h1) // 4)
+        cached = _H4_CACHE.get(key)
+        if cached is None:
+            h4 = resample_h4(h1.tail(720))
+            if len(h4) and h4.index[-1] + timedelta(hours=4) > h1.index[-1] + timedelta(hours=1):
+                h4 = h4.iloc[:-1]                      # drop the in-progress H4 bar
+            cached = structure(h4, window=2, lookback=180, tol=2 * tol) if len(h4) >= 30 else Structure()
+            if len(_H4_CACHE) > 64:
+                _H4_CACHE.clear()
+            _H4_CACHE[key] = cached
+        pa.h4 = cached
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -421,13 +458,13 @@ def analyze_price_action(h1: pd.DataFrame, daily: pd.DataFrame, m15: pd.DataFram
     except Exception:  # noqa: BLE001
         pass
     try:
-        a = adx(h1.tail(400), 14).dropna()
+        a = adx(h1.tail(250), 14).dropna()
         pa.adx = float(a.iloc[-1]) if len(a) else float("nan")
-        pa.atr_pct = atr_percentile(h1)
+        pa.atr_pct = atr_percentile(h1, atr_series=atr_series)
     except Exception:  # noqa: BLE001
         pass
     try:
-        pa.divergence = rsi_divergence(d, window=4, lookback=300, sw=sw)
+        pa.divergence = rsi_divergence(d, window=4, lookback=300, sw=sw, rsi_series=rsi_series)
         pa.candle = candle_read(h1, atr_value)
     except Exception:  # noqa: BLE001
         pass

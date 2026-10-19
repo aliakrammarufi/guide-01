@@ -509,7 +509,8 @@ class SentinelBot:
     async def cmd_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         bt = await asyncio.to_thread(self.store.get_state, "backtest")
         variants = await asyncio.to_thread(self.store.get_state, "backtest_variants")
-        await self._send(update.effective_chat.id, fmt.format_backtest(bt, on_start=self.settings.backtest_on_start, variants=variants))
+        deep = await asyncio.to_thread(self.store.get_state, "backtest_deep")
+        await self._send(update.effective_chat.id, fmt.format_backtest(bt, on_start=self.settings.backtest_on_start, variants=variants, deep=deep))
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         rep = self.cache.report

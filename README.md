@@ -292,9 +292,15 @@ stop / TP1 / TP2, on a private in-memory tracker. `/backtest` on Telegram, the S
 rate, and breakdowns by confidence, session and confirmation type, plus "what if the confidence bar were
 higher". `python tools/backtest.py --min-conf 55` does the same from the command line.
 
-It is technical-only (no news history, no calendar blackouts, no spreads), fills at the confirming
-15-minute close and checks the stop before the targets inside a bar — a way to judge the rules on numbers,
-not a forecast.
+It is technical-only (no news history, no calendar blackouts), fills at the confirming 15-minute close,
+checks the stop before the targets inside a bar, books half at TP1 and charges `SPREAD_USD` plus
+`SLIPPAGE_USD` on stop fills — a way to judge the rules on numbers, not a forecast.
+
+**Deep check.** `DEEP_CHECK=true` adds the same replay over `DEEP_CHECK_YEARS` (default 3) of spot XAU/USD
+15-minute bars built from Dukascopy's public 1-minute candles (`market/history.py`; cached compressed in the
+key-value store, only new days are fetched later). It takes hours on a small instance and runs in the
+background after the 60-day check; `/backtest` then shows a per-year table and `/api/selfcheck` carries the
+full report with `by_year` / `by_quarter`. `python tools/backtest.py --deep 3` runs it locally.
 
 ## Tuning tips
 

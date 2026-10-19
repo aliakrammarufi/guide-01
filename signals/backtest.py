@@ -22,6 +22,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Callable
@@ -134,7 +135,7 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
     tracker.quiet = True
     news = NewsScore(score=0, n_articles=0, n_bullish=0, n_bearish=0, n_neutral=0, top_themes=[], drivers=[])
     step = timedelta(minutes=15)
-    h1_idx, d1_idx = h1.index, d1.index
+    h1_idx, d1_idx, m15_idx = h1.index, d1.index, m15.index
     h1_end = h1_idx + timedelta(hours=1)        # when each hourly bar is complete
     analysis_every = max(1, p.analysis_every_min // 15)
 
@@ -171,12 +172,14 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
             hourly = h1.iloc[max(0, k - H1_WINDOW):k]
             hour_start = t.floor("h")
             if hour_start < t:
-                part = _agg(m15[(m15.index >= hour_start) & (m15.index < t)], hour_start)
+                j0 = int(m15_idx.searchsorted(hour_start, side="left"))
+                part = _agg(m15.iloc[j0:i + 1], hour_start)
                 if part is not None and (hourly.empty or part.index[0] > hourly.index[-1]):
                     hourly = pd.concat([hourly, part])
             kd = int(d1_idx.searchsorted(t.normalize(), side="left"))
             daily = d1.iloc[max(0, kd - D1_WINDOW):kd]
-            part = _agg(m15[(m15.index >= t.normalize()) & (m15.index < t)], t.normalize())
+            j0 = int(m15_idx.searchsorted(t.normalize(), side="left"))
+            part = _agg(m15.iloc[j0:i + 1], t.normalize())
             if part is not None and (daily.empty or part.index[0] > daily.index[-1]):
                 daily = pd.concat([daily, part])
             m15_slice = m15.iloc[max(0, i + 1 - M15_WINDOW):i + 1]
@@ -284,10 +287,18 @@ def summarize(signals: list, meta: dict[int, dict], p: ReplayParams) -> dict:
         "session": meta.get(s.id, {}).get("session", ""), "trigger": meta.get(s.id, {}).get("trigger", s.trigger_note),
         "mode": meta.get(s.id, {}).get("mode", s.setup_mode),
     } for s in traded[-60:]]
+    span_days = ((traded[-1].closed_at - traded[0].opened_at).days if len(traded) >= 2 and traded[-1].closed_at else 0)
+    by_period = {}
+    if span_days > 150:
+        by_period = {
+            "by_year": group(lambda s: str(s.opened_at.year)),
+            "by_quarter": group(lambda s: f"{s.opened_at.year} Q{(s.opened_at.month - 1) // 3 + 1}"),
+        }
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "params": p.to_dict(),
         "summary": summary,
+        **by_period,
         "by_confidence": group(lambda s: _conf_bucket(meta.get(s.id, {}).get("conf", s.confidence) or 0)),
         "by_session": group(lambda s: meta.get(s.id, {}).get("session", "n/a")),
         "by_side": group(lambda s: s.side),
@@ -414,6 +425,39 @@ def _fresh(stored: dict | None, base: ReplayParams, max_age_days: float, params_
     return age < timedelta(days=max_age_days) and stored.get(params_key) == base.to_dict()
 
 
+DEEP_KEY = "backtest_deep"
+
+
+def run_deep(settings, store: Store, yield_sleep: float = 0.02) -> dict:
+    """The deep self-check: the rules replayed over DEEP_CHECK_YEARS of Dukascopy 15-minute bars (spot basis).
+    Blocking and slow (hours on a small instance) – call from a thread."""
+    from market.history import load_history
+
+    cache_path = Path(settings.db_path).parent / "history_m15.pkl.gz"
+    h1, d1, m15 = load_history(years=settings.deep_check_years, cache_path=cache_path, redis_url=settings.redis_url,
+                               progress=lambda n, t: log.info("Deep check: fetched %d/%d days", n, t) if n else None)
+    p = params_from_settings(settings)
+    p.yield_sleep = yield_sleep
+    log.info("Deep check: replaying %d 15-minute bars (%s → %s) through the signal rules…", len(m15),
+             m15.index[0].date(), m15.index[-1].date())
+    result = replay(h1, d1, m15, p, progress=lambda n, t: log.info("Deep check: %d/%d bars", n, t) if n and n % 5000 == 0 else None)
+    result["symbol"] = "XAU/USD spot (Dukascopy)"
+    if len(result.get("equity") or []) > 1500:                       # keep the stored report small
+        eq = result["equity"]
+        step = max(1, len(eq) // 1500)
+        result["equity"] = eq[::step] + ([eq[-1]] if eq[-1] != eq[::step][-1] else [])
+    result["trades"] = result["trades"][-100:]
+    store.set_state(DEEP_KEY, result)
+    s = result["summary"]
+    log.info("Deep check done in %.0fs: %d setups, %d trades, win rate %s%%, avg %sR, total %+.1fR, PF %s, max drawdown %.1fR",
+             result["took_sec"], s["setups"], s["count"], s["win_rate"], s["avg_r"], s["total_r"], s["profit_factor"], s["max_drawdown_r"])
+    for key in ("by_year", "by_quarter", "by_session", "by_confluence", "by_trigger", "thresholds"):
+        if key in result:
+            log.info("Deep check %s: %s", key, "; ".join(f"{k}: n={v['count']} win={v['win_rate']}% avg={v['avg_r']}R tot={v['total_r']}R"
+                                                       for k, v in result[key].items() if v.get("count")))
+    return result
+
+
 async def run_on_start(cache, delay_sec: int = 150) -> None:
     """Server-side: run the replay in a worker thread shortly after start-up when the stored one is stale
     (and the variant sweep when BACKTEST_SWEEP is on and its stored result is stale)."""
@@ -423,14 +467,17 @@ async def run_on_start(cache, delay_sec: int = 150) -> None:
     store = cache.pipeline.store
     base = params_from_settings(settings)
     main_fresh = _fresh(store.get_state(STATE_KEY), base, settings.backtest_max_age_days, "params")
+    deep_due = settings.deep_check and not _fresh(store.get_state(DEEP_KEY), base, settings.backtest_max_age_days, "params")
     sweep_due = settings.backtest_sweep and not _fresh(store.get_state(VARIANTS_KEY), base, settings.backtest_max_age_days, "base_params")
-    if main_fresh and not sweep_due:
-        log.info("Self-check: stored replay is recent – skipping")
+    if main_fresh and not deep_due and not sweep_due:
+        log.info("Self-check: stored replays are recent – skipping")
         return
     try:
         if not main_fresh:
-            await asyncio.to_thread(run_and_store, settings, store, 0.01, sweep_due)
-        else:
+            await asyncio.to_thread(run_and_store, settings, store, 0.01, False)
+        if deep_due:
+            await asyncio.to_thread(run_deep, settings, store)
+        if sweep_due:
             def _sweep_only():
                 h1, d1, m15, _sym = fetch_history(settings.yf_symbol)
                 p = params_from_settings(settings)
@@ -438,4 +485,4 @@ async def run_on_start(cache, delay_sec: int = 150) -> None:
                 run_variants(h1, d1, m15, p, store, base_summary=store.get_state(STATE_KEY)["summary"])
             await asyncio.to_thread(_sweep_only)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Self-check failed: %s", exc)
+        log.exception("Self-check failed: %s", exc)

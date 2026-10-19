@@ -229,6 +229,9 @@ class Settings:
     backtest_max_age_days: float = field(default_factory=lambda: _env_float("BACKTEST_MAX_AGE_DAYS", 7.0))
     # Also replay a few alternative ways to manage the calls (no break-even, other targets…) for comparison
     backtest_sweep: bool = field(default_factory=lambda: _env_bool("BACKTEST_SWEEP", False))
+    # Deep check: the same replay over DEEP_CHECK_YEARS of Dukascopy spot 15-minute history (slow, runs in the background)
+    deep_check: bool = field(default_factory=lambda: _env_bool("DEEP_CHECK", False))
+    deep_check_years: float = field(default_factory=lambda: _env_float("DEEP_CHECK_YEARS", 3.0))
 
     @property
     def ai_enabled(self) -> bool:

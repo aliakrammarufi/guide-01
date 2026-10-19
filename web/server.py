@@ -140,9 +140,17 @@ def selfcheck_summary(store) -> dict | None:
     if not bt or not isinstance(bt, dict) or "summary" not in bt:
         return None
     s = bt["summary"]
-    return {"generated_at": bt.get("generated_at"), "period": bt.get("period"), "count": s.get("count"), "setups": s.get("setups"),
-            "win_rate": s.get("win_rate"), "avg_r": s.get("avg_r"), "total_r": s.get("total_r"),
-            "profit_factor": s.get("profit_factor"), "max_drawdown_r": s.get("max_drawdown_r"), "tp1_rate": s.get("tp1_rate")}
+    out = {"generated_at": bt.get("generated_at"), "period": bt.get("period"), "count": s.get("count"), "setups": s.get("setups"),
+           "win_rate": s.get("win_rate"), "avg_r": s.get("avg_r"), "total_r": s.get("total_r"),
+           "profit_factor": s.get("profit_factor"), "max_drawdown_r": s.get("max_drawdown_r"), "tp1_rate": s.get("tp1_rate")}
+    deep = store.get_state("backtest_deep")
+    if isinstance(deep, dict) and deep.get("summary"):
+        ds = deep["summary"]
+        out["deep"] = {"period": deep.get("period"), "count": ds.get("count"), "win_rate": ds.get("win_rate"), "avg_r": ds.get("avg_r"),
+                       "total_r": ds.get("total_r"), "profit_factor": ds.get("profit_factor"), "max_drawdown_r": ds.get("max_drawdown_r"),
+                       "by_year": {k: {"count": v["count"], "win_rate": v["win_rate"], "avg_r": v["avg_r"], "total_r": v["total_r"]}
+                                   for k, v in (deep.get("by_year") or {}).items()}}
+    return out
 
 
 def signals_json(tracker, session=None) -> dict:
@@ -279,7 +287,8 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
         if not bt:
             raise HTTPException(status_code=404, detail="no self-check has run yet")
         variants = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest_variants")
-        return JSONResponse(bt | {"variants": variants}, headers={"Cache-Control": "no-store"})
+        deep = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest_deep")
+        return JSONResponse(bt | {"variants": variants, "deep": deep}, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/tape")
     async def tape():

@@ -1140,7 +1140,13 @@
     if (!sc || !sc.count) { el.innerHTML = ''; return; }
     const d = sc.period && sc.period.days ? `${Math.round(sc.period.days)}-day` : 'historical';
     const cls = v => v >= 0 ? 'up' : 'down';
-    el.innerHTML = `SELF-CHECK · ${d} replay of these rules on real bars (technical only): <b>${sc.count}</b> trades · win rate <b class="${sc.win_rate >= 50 ? 'up' : 'down'}">${sc.win_rate}%</b> · avg <b class="${cls(sc.avg_r)}">${signed(Number(sc.avg_r).toFixed(2))}R</b> · total <b class="${cls(sc.total_r)}">${signed(Number(sc.total_r).toFixed(1))}R</b> · profit factor <b>${sc.profit_factor ?? '—'}</b> · max drawdown <b>${sc.max_drawdown_r}R</b> — past replay ≠ future results`;
+    let html = `SELF-CHECK · ${d} replay of these rules on real bars (technical only): <b>${sc.count}</b> trades · win rate <b class="${sc.win_rate >= 50 ? 'up' : 'down'}">${sc.win_rate}%</b> · avg <b class="${cls(sc.avg_r)}">${signed(Number(sc.avg_r).toFixed(2))}R</b> · total <b class="${cls(sc.total_r)}">${signed(Number(sc.total_r).toFixed(1))}R</b> · profit factor <b>${sc.profit_factor ?? '—'}</b> · max drawdown <b>${sc.max_drawdown_r}R</b> — past replay ≠ future results`;
+    const dp = sc.deep;
+    if (dp && dp.count) {
+      const yrs = Object.entries(dp.by_year || {}).map(([y, v]) => `${y}: ${v.count} trades, ${signed(Number(v.total_r).toFixed(1))}R`).join(' · ');
+      html += `<br>DEEP CHECK · ${Math.round(((dp.period || {}).days || 0) / 365 * 10) / 10} years of spot bars: <b>${dp.count}</b> trades · win rate <b class="${dp.win_rate >= 50 ? 'up' : 'down'}">${dp.win_rate}%</b> · avg <b class="${cls(dp.avg_r)}">${signed(Number(dp.avg_r).toFixed(2))}R</b> · total <b class="${cls(dp.total_r)}">${signed(Number(dp.total_r).toFixed(1))}R</b> · PF <b>${dp.profit_factor ?? '—'}</b> · max DD <b>${dp.max_drawdown_r}R</b>${yrs ? ' — ' + yrs : ''}`;
+    }
+    el.innerHTML = html;
   }
   function renderSignals(sg) {
     if (!sg) return;

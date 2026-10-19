@@ -30,10 +30,17 @@ def main() -> int:
     ap.add_argument("--target-mult", type=float, default=None)
     ap.add_argument("--no-session-filter", action="store_true")
     ap.add_argument("--json", default=None, help="write the full report here")
+    ap.add_argument("--deep", type=float, default=None, metavar="YEARS", help="use Dukascopy spot history for this many years instead of Yahoo's 60 days")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
 
-    h1, d1, m15, sym = fetch_history(args.symbol, m15_period=args.days)
+    if args.deep:
+        from market.history import load_history
+
+        h1, d1, m15 = load_history(years=args.deep, cache_path=Path(settings.db_path).parent / "history_m15.pkl.gz")
+        sym = "XAU/USD spot (Dukascopy)"
+    else:
+        h1, d1, m15, sym = fetch_history(args.symbol, m15_period=args.days)
     p = params_from_settings(settings)
     if args.min_conf is not None:
         p.min_conf = args.min_conf
@@ -50,7 +57,9 @@ def main() -> int:
     print(f"setups {s['setups']}  traded {s['count']}  no-trade {s['no_trade']} {s['no_trade_breakdown']}")
     print(f"win rate {s['win_rate']}%  ({s['wins']} W / {s['losses']} L / {s['breakeven']} BE)  avg {s['avg_r']}R  total {s['total_r']}R  "
           f"PF {s['profit_factor']}  maxDD {s['max_drawdown_r']}R  TP1 {s['tp1_rate']}%  hold {s['avg_hold_h']} h")
-    for key in ("by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "by_confluence", "thresholds"):
+    for key in ("by_year", "by_quarter", "by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "by_confluence", "thresholds"):
+        if key not in res:
+            continue
         print(f"\n{key}:")
         for k, v in res[key].items():
             print(f"  {k:<34} n={v['count']:<3} win={v['win_rate']}%  avg={v['avg_r']}R  total={v['total_r']}R  PF={v['profit_factor']}")

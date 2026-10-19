@@ -660,7 +660,33 @@ def _bt_block(name: str, b: dict) -> tuple:
     return (name, str(b.get("count", 0)), wr, avg)
 
 
-def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | None = None) -> str:
+def _deep_section(deep: dict | None) -> str:
+    """The multi-year replay, by year."""
+    if not deep or not isinstance(deep, dict) or not deep.get("summary"):
+        return ""
+    s, per = deep["summary"], deep.get("period") or {}
+    try:
+        f = datetime.fromisoformat(per["from"]).strftime("%b %Y")
+        t = datetime.fromisoformat(per["to"]).strftime("%b %Y")
+        when = f"{f} → {t}"
+    except (KeyError, ValueError, TypeError):
+        when = "multi-year"
+    wr = f"{s['win_rate']:.1f}%" if s.get("win_rate") is not None else "–"
+    pf = "–" if s.get("profit_factor") is None else f"{s['profit_factor']:.2f}"
+    rows = [("Period", when), ("Trades", f"{s.get('count', 0)} (from {s.get('setups', 0)} setups)"),
+            ("Win rate", wr), ("Average / total", f"{_r(s['avg_r']) if s.get('avg_r') is not None else '–'} / {_r(s.get('total_r', 0.0), 1)}"),
+            ("Profit factor", f"{pf} · max drawdown {s.get('max_drawdown_r', 0):.1f}R")]
+    out = f"<b>DEEP CHECK — {escape(when)} of spot bars</b>\n{_pre(rows, right=())}"
+    years = deep.get("by_year") or {}
+    if years:
+        trows = [("Year", "Trades", "Win", "Avg", "Total")] + [(k, str(v["count"]), f"{v['win_rate']:.0f}%" if v.get("win_rate") is not None else "–",
+                                                                _r(v["avg_r"]) if v.get("avg_r") is not None else "–", _r(v["total_r"], 1))
+                                                               for k, v in years.items() if v.get("count")]
+        out += "\n" + _pre(trows, right=(1, 2, 3, 4))
+    return out
+
+
+def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | None = None, deep: dict | None = None) -> str:
     title = "🧪 <b>SELF-CHECK</b> — how these rules did on real bars"
     if not bt or not isinstance(bt, dict) or "summary" not in bt:
         why = ("It runs automatically a few minutes after the bot starts and takes about ten minutes; check back soon."
@@ -694,6 +720,9 @@ def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | Non
         trows = [("Min conf", "Trades", "Win", "Avg")] + [_bt_block(f"≥ {k}%", v) for k, v in th.items() if v.get("count")]
         if len(trows) > 1:
             parts.append(f"<b>IF THE BAR WERE HIGHER</b>\n{_pre(trows, right=(1, 2, 3))}")
+    deep_text = _deep_section(deep)
+    if deep_text:
+        parts.append(deep_text)
     rows_v = (variants or {}).get("variants") or []
     if rows_v:
         trows = [("", "Trades", "Win", "Avg", "Total")]

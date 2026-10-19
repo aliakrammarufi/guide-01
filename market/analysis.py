@@ -96,10 +96,17 @@ class TechSnapshot:
 
 
 def _last(series: pd.Series, offset: int = 0) -> float:
-    clean = series.dropna()
-    if len(clean) <= offset:
-        return float("nan")
-    return float(clean.iloc[-1 - offset])
+    """The last non-NaN value (``offset`` = 0), or the one before it (1) – without a full dropna pass."""
+    a = series.to_numpy(dtype=float)
+    i = len(a) - 1
+    seen = 0
+    while i >= 0:
+        if a[i] == a[i]:
+            if seen == offset:
+                return float(a[i])
+            seen += 1
+        i -= 1
+    return float("nan")
 
 
 def _clamp(x: float, lo: float = -100.0, hi: float = 100.0) -> float:
@@ -150,7 +157,7 @@ def analyze_technicals(data: MarketData) -> TechSnapshot:
         pivots=pivots,
     )
     try:
-        snap.pa = analyze_price_action(h, d, data.m15, snap.atr if snap.atr == snap.atr else 1.0)
+        snap.pa = analyze_price_action(h, d, data.m15, snap.atr if snap.atr == snap.atr else 1.0, atr_series=atr, rsi_series=rsi)
     except Exception:  # noqa: BLE001 – the read is descriptive; the score must never depend on it crashing
         snap.pa = None
     _score(snap, ema20_slope=ind.slope_pct(ema20, 12))
