@@ -66,6 +66,7 @@ class TradeSignal:
     trigger_note: str = ""
     setup_mode: str = ""              # pullback | in-zone | market (legacy)
     touched: bool = False             # price has visited the zone (persisted)
+    confluence: str = ""              # what coincides with the zone ("EMA50 · 61.8% fib · prev-day low")
 
     # ---- state ---------------------------------------------------------------
     @property
@@ -117,6 +118,7 @@ class TradeSignal:
             "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
             "trigger_note": self.trigger_note, "setup_mode": self.setup_mode,
             "is_open": self.is_open, "is_pending": self.is_pending, "touched": self.touched,
+            "confluence": self.confluence,
         }
 
 
@@ -255,7 +257,8 @@ class SignalTracker:
             return None
         return {"zone_lo": engine_sig.zone_lo, "zone_hi": engine_sig.zone_hi, "chase": engine_sig.chase_limit,
                 "sl": engine_sig.stop, "tp1": engine_sig.target1, "tp2": engine_sig.target2,
-                "entry": engine_sig.zone_mid, "mode": engine_sig.entry_mode or "pullback"}
+                "entry": engine_sig.zone_mid, "mode": engine_sig.entry_mode or "pullback",
+                "confluence": " · ".join(getattr(engine_sig, "confluence", None) or [])}
 
     def on_analysis(self, report, now: datetime | None = None) -> list[SignalEvent]:
         """Called after every analysis. May publish a setup, trigger it, cancel it, or close an open call."""
@@ -304,7 +307,7 @@ class SignalTracker:
             if plan and not pend.touched and eng.direction == ("long" if pend.side == "BUY" else "short"):
                 pend.zone_lo, pend.zone_hi, pend.chase = plan["zone_lo"], plan["zone_hi"], plan["chase"]
                 pend.sl, pend.tp1, pend.tp2, pend.entry = plan["sl"], plan["tp1"], plan["tp2"], plan["entry"]
-                pend.setup_mode, pend.confidence = plan["mode"], eng.confidence
+                pend.setup_mode, pend.confidence, pend.confluence = plan["mode"], eng.confidence, plan["confluence"]
                 self.store.update_signal(pend)
             events.extend(self._try_trigger(pend, tech, m15, now))
             return events
@@ -326,6 +329,7 @@ class SignalTracker:
             id=0, side=side, entry=plan["entry"], sl=plan["sl"], tp1=plan["tp1"], tp2=plan["tp2"],
             confidence=eng.confidence, opened_at=now, reason=reason[:200], status="pending",
             zone_lo=plan["zone_lo"], zone_hi=plan["zone_hi"], chase=plan["chase"], setup_mode=plan["mode"],
+            confluence=plan["confluence"],
         )
         sig.id = self.store.insert_signal(sig)
         events.append(self._emit("setup", sig, price))

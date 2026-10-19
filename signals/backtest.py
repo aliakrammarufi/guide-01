@@ -59,7 +59,7 @@ class ReplayParams:
     asia_entries: bool = True
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
-    method: int = 2                       # replay/accounting version: a change invalidates stored results
+    method: int = 3                       # replay/accounting/engine version: a change invalidates stored results
 
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
@@ -110,6 +110,10 @@ def _bar_path(sig, lo: float, hi: float, close: float) -> list[float]:
         return path
     path.append(close)
     return path
+
+
+def _confluence_bucket(n: int) -> str:
+    return "3+" if n >= 3 else str(int(n))
 
 
 def _conf_bucket(c: int) -> str:
@@ -190,6 +194,7 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
                     m["session"] = session.name if session else "n/a"
                     m["mode"] = ev.signal.setup_mode
                     m["conf"] = ev.signal.confidence
+                    m["confluence"] = len([c for c in (ev.signal.confluence or "").split(" · ") if c])
                 elif ev.kind == "triggered":
                     m["trigger"] = ev.signal.trigger_note
                     m["trigger_session"] = session.name if session else "n/a"
@@ -285,6 +290,7 @@ def summarize(signals: list, meta: dict[int, dict], p: ReplayParams) -> dict:
         "by_side": group(lambda s: s.side),
         "by_trigger": group(lambda s: (meta.get(s.id, {}).get("trigger", s.trigger_note) or "n/a")),
         "by_mode": group(lambda s: meta.get(s.id, {}).get("mode", s.setup_mode) or "n/a"),
+        "by_confluence": group(lambda s: _confluence_bucket(meta.get(s.id, {}).get("confluence", len([c for c in (s.confluence or "").split(" · ") if c])))),
         "thresholds": thresholds,
         "equity": equity,
         "trades": trades,
@@ -388,7 +394,7 @@ def _log_result(result: dict) -> None:
     log.info("Self-check done in %.0fs: %d setups, %d trades, win rate %s%%, avg %sR, total %+.1fR, max drawdown %.1fR, no-trade %d",
              result["took_sec"], s["setups"], s["count"], s["win_rate"], s["avg_r"], s["total_r"], s["max_drawdown_r"], s["no_trade"])
     log.info("Self-check outcomes %s · no-trade %s · TP1 %s%% · PF %s", s["outcomes"], s["no_trade_breakdown"], s["tp1_rate"], s["profit_factor"])
-    for key in ("by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "thresholds"):
+    for key in ("by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "by_confluence", "thresholds"):
         log.info("Self-check %s: %s", key, "; ".join(f"{k}: n={v['count']} win={v['win_rate']}% avg={v['avg_r']}R tot={v['total_r']}R"
                                                     for k, v in result[key].items() if v.get("count")))
 

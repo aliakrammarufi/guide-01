@@ -230,7 +230,9 @@ def format_signal(sig: Signal, compact: bool = False) -> str:
         how = ("Price is in the zone — wait for a 15-minute confirmation."
                if sig.entry_mode == "in-zone" else
                f"Wait for a pullback into the zone. Don't chase beyond {_num(sig.chase_limit)}.")
-        parts.append(f"🎯 <b>{side} PLAN</b> — entry zone <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b>\n{_pre(rows)}\n{how}")
+        conf = confluence_line(sig.confluence)
+        parts.append(f"🎯 <b>{side} PLAN</b> — entry zone <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b>\n{_pre(rows)}\n{how}"
+                     + (f"\n{conf}" if conf else ""))
 
     tail = []
     sl = session_line(sig.session)
@@ -246,8 +248,87 @@ def format_signal(sig: Signal, compact: bool = False) -> str:
     return "\n\n".join(parts)
 
 
+def price_action_line(tech: TechSnapshot) -> str:
+    """One line: H4 / H1 structure and the regime."""
+    pa = tech.pa
+    if pa is None:
+        return ""
+    def st(x, tf):
+        return f"{_STRUCT_ICON.get(x.trend, '⚪')} {tf} {x.trend}" + (f" ({escape(x.label)})" if x.label else "")
+    adx = f" · ADX {pa.adx:.0f}" if pa.adx == pa.adx else ""
+    return f"🧱 {st(pa.h4, 'H4')} · {st(pa.h1, 'H1')} · {escape(pa.regime)}{adx}"
+
+
 def format_signal_message(tech: TechSnapshot, sig: Signal, source: str, as_of: datetime) -> str:
-    return f"{price_header(tech)}\n\n{format_signal(sig)}\n\n{_footer(source, as_of)}"
+    pa = price_action_line(tech)
+    return f"{price_header(tech)}\n\n{format_signal(sig)}" + (f"\n\n{pa}" if pa else "") + f"\n\n{_footer(source, as_of)}"
+
+
+# ---------------------------------------------------------------------------
+# price action
+# ---------------------------------------------------------------------------
+def confluence_line(items) -> str:
+    """'Zone confluence: EMA50 · 61.8% fib · prev-day low (3)' – or a plain warning when there is none."""
+    items = [c for c in (items.split(" · ") if isinstance(items, str) else list(items or [])) if c]
+    if not items:
+        return "Zone confluence: <i>none — the zone is only the moving-average pullback</i>"
+    strength = "strong" if len(items) >= 3 else "fair" if len(items) == 2 else "thin"
+    return f"Zone confluence: <b>{escape(' · '.join(items))}</b> ({strength})"
+
+
+_STRUCT_ICON = {"bullish": "🟢", "bearish": "🔴", "range": "⚪"}
+_LEVEL_SHORT = {"PDH": "Prev-day high", "PDL": "Prev-day low", "PWH": "Prev-week high", "PWL": "Prev-week low",
+                "ASIA_H": "Asia high", "ASIA_L": "Asia low", "VWAP": "Daily VWAP", "Round": "Round number"}
+
+
+def format_price_action(tech: TechSnapshot) -> str:
+    """Structure, regime, imbalances and key levels – the chart read in words and one table."""
+    pa = tech.pa
+    if pa is None:
+        return ""
+    h1, h4 = pa.h1, pa.h4
+
+    def struct_text(st, tf: str) -> str:
+        icon = _STRUCT_ICON.get(st.trend, "⚪")
+        txt = f"{icon} <b>{tf}</b> {escape(st.trend)}" + (f" ({escape(st.label)})" if st.label else "")
+        if st.bos:
+            txt += f" · BOS {st.bos} at {st.bos_level:,.1f}"
+        if st.choch:
+            txt += f" · CHoCH {st.choch} at {st.choch_level:,.1f}"
+        return txt
+
+    lines = [struct_text(h4, "H4"), struct_text(h1, "H1")]
+    regime = pa.regime
+    adx_txt = f"ADX {pa.adx:.0f}" if pa.adx == pa.adx else "ADX n/a"
+    vol = ("high" if pa.atr_pct >= 85 else "low" if pa.atr_pct <= 15 else "normal")
+    lines.append(f"🌡 Regime: <b>{escape(regime)}</b> ({adx_txt}) · volatility {vol} (ATR {pa.atr_pct:.0f}th pct)")
+    if pa.divergence:
+        lines.append(f"⚠️ {pa.divergence.title()} RSI divergence at the last swing {'high' if pa.divergence == 'bearish' else 'low'}")
+    if pa.candle:
+        lines.append(f"🕯 {escape(pa.candle[0].upper() + pa.candle[1:])}")
+    if pa.impulse:
+        imp = pa.impulse
+        lv = imp["levels"]
+        lines.append(f"📏 Last impulse {imp['direction']} {imp['from']:,.1f} → {imp['to']:,.1f} · fib 50% {lv['50']:,.1f} · 61.8% {lv['61.8']:,.1f}")
+    # key levels table
+    below, above = tech.levels_around(max_dist_atr=4.0)
+    rows: list[tuple] = []
+    for name, lvl in reversed(above[:4]):
+        rows.append((_LEVEL_SHORT.get(name, name), f"{lvl:,.1f}", _diff(lvl - tech.price)))
+    rows.append(("▶ now", f"{tech.price:,.1f}", ""))
+    for name, lvl in below[:4]:
+        rows.append((_LEVEL_SHORT.get(name, name), f"{lvl:,.1f}", _diff(lvl - tech.price)))
+    zones = []
+    for ob in pa.order_blocks[-2:]:
+        zones.append(f"{ob['kind']} order block {ob['lo']:,.1f}–{ob['hi']:,.1f}")
+    for g in pa.fvgs[-2:]:
+        zones.append(f"{g['kind']} fair value gap {g['lo']:,.1f}–{g['hi']:,.1f}")
+    out = "🧱 <b>PRICE ACTION</b>\n" + "\n".join(lines)
+    if len(rows) > 1:
+        out += "\n<b>Key levels</b>\n" + _pre(rows, right=(1, 2))
+    if zones:
+        out += "\n<b>Unfilled zones</b>\n" + "\n".join(f"• {escape(z)}" for z in zones)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +369,18 @@ def format_levels(tech: TechSnapshot) -> str:
     if tech.pivots:
         out += "\n<b>Daily pivots</b>\n" + _pivot_table(tech.pivots)
     out += "\n<b>EMA (H1)</b>\n" + _pre([("EMA 20", f"{tech.ema20:,.1f}"), ("EMA 50", f"{tech.ema50:,.1f}"), ("EMA 200", f"{tech.ema200:,.1f}")])
+    pa = tech.pa
+    if pa is not None:
+        kl = [(k, v) for k, v in (("Prev-day high", pa.levels.get("PDH")), ("Prev-day low", pa.levels.get("PDL")),
+                                  ("Prev-week high", pa.levels.get("PWH")), ("Prev-week low", pa.levels.get("PWL")),
+                                  ("Asia high", pa.levels.get("ASIA_H")), ("Asia low", pa.levels.get("ASIA_L")),
+                                  ("Daily VWAP", pa.levels.get("VWAP"))) if v]
+        if kl:
+            out += "\n<b>Session levels</b>\n" + _pre([(k, f"{v:,.1f}", _diff(v - tech.price)) for k, v in kl], right=(1, 2))
+        if pa.impulse:
+            lv = pa.impulse["levels"]
+            out += (f"\n<b>Fib of the last {pa.impulse['direction']} leg</b> {pa.impulse['from']:,.1f} → {pa.impulse['to']:,.1f}\n"
+                    + _pre([(f"{k}%", f"{v:,.1f}", _diff(v - tech.price)) for k, v in lv.items()], right=(1, 2)))
     return out
 
 
@@ -420,6 +513,8 @@ def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = N
             tail.append(note)
     if t.trigger_note:
         tail.append(f"Confirmed by: <b>{escape(t.trigger_note)}</b>")
+    if getattr(t, "confluence", ""):
+        tail.append(confluence_line(t.confluence))
     if t.reason:
         tail.append(f"<i>{escape(t.reason)}</i>")
     tail.append(f"<i>{'Entered' if t.traded else 'Posted'} {when.strftime('%d %b %H:%M UTC')}</i>")
@@ -486,6 +581,9 @@ def format_full_report(tech: TechSnapshot, news: NewsScore, sig: Signal, briefin
         sections.append(format_next_event(nxt))
     if briefing:
         sections.append(f"🧠 <b>AI BRIEFING</b>\n{escape(briefing)}")
+    pa_text = format_price_action(tech)
+    if pa_text:
+        sections.append(pa_text)
     sections.append(format_technicals(tech))
     sections.append(format_news(news, max_items=max_headlines, hours=hours))
     if events:
@@ -589,14 +687,14 @@ HELP = """📖 <b>COMMANDS</b>
 
 <b>Market</b>
 /price — live price, trend, RSI, ATR, nearest levels
-/levels — support, resistance and daily pivots
+/levels — support, resistance, pivots, session levels and fibs
 /news — latest gold-moving headlines with sentiment
 /calendar — upcoming CPI, FOMC, payrolls and other USD releases
 
 <b>Signals</b>
 /signal — current bias, confidence and the entry plan
 /signals — setup or live BUY / SELL call with stop, targets and results
-/analyze — full report with chart, AI briefing, technicals and news
+/analyze — full report with chart, price action, technicals and news
 /backtest — how these rules did on the last two months of real bars
 
 <b>Settings</b>

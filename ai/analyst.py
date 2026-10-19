@@ -41,6 +41,20 @@ def build_context(tech: TechSnapshot, news: NewsScore, events: list | None = Non
         f"Nearest support: {_fmt_level(tech.nearest_support())}  Nearest resistance: {_fmt_level(tech.nearest_resistance())}",
         "Technical reasons: " + "; ".join(tech.reasons),
         "Technical flags: " + ("; ".join(tech.flags) if tech.flags else "none"),
+    ]
+    pa = tech.pa
+    if pa is not None:
+        lv = pa.levels
+        lines += [
+            f"Market structure: H4 {pa.h4.trend} ({pa.h4.label}); H1 {pa.h1.trend} ({pa.h1.label})"
+            + (f"; H1 BOS {pa.h1.bos} at {pa.h1.bos_level:,.1f}" if pa.h1.bos else "")
+            + (f"; H1 CHoCH {pa.h1.choch} at {pa.h1.choch_level:,.1f}" if pa.h1.choch else ""),
+            f"Regime: {pa.regime} (ADX {pa.adx:.0f}), ATR percentile {pa.atr_pct:.0f}" + (f", {pa.divergence} RSI divergence" if pa.divergence else ""),
+            "Key levels: " + ", ".join(f"{k} {v:,.1f}" for k, v in lv.items() if v is not None and not k.startswith("ROUND")),
+        ]
+        if pa.impulse:
+            lines.append(f"Last impulse {pa.impulse['direction']} {pa.impulse['from']:,.1f}→{pa.impulse['to']:,.1f}; fib 50 {pa.impulse['levels']['50']:,.1f}, 61.8 {pa.impulse['levels']['61.8']:,.1f}")
+    lines += [
         f"News score: {news.score:+d}/100 ({news.label}); {news.n_bullish} bullish / {news.n_bearish} bearish / {news.n_neutral} neutral headlines",
         "Top themes: " + ", ".join(f"{t} ({v:+.1f})" for t, v in news.top_themes),
         "Headlines (impact, age):",

@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS signals (
     triggered_at TEXT,
     trigger_note TEXT,
     setup_mode  TEXT,
-    touched     INTEGER DEFAULT 0
+    touched     INTEGER DEFAULT 0,
+    confluence  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS signal_events (
@@ -262,7 +263,7 @@ class Store:
         """Add columns introduced after the first release (SQLite has no IF NOT EXISTS for columns)."""
         have = {r[1] for r in self._conn.execute("PRAGMA table_info(signals)").fetchall()}
         for col, typ in (("zone_lo", "REAL"), ("zone_hi", "REAL"), ("chase", "REAL"), ("triggered_at", "TEXT"),
-                         ("trigger_note", "TEXT"), ("setup_mode", "TEXT"), ("touched", "INTEGER DEFAULT 0")):
+                         ("trigger_note", "TEXT"), ("setup_mode", "TEXT"), ("touched", "INTEGER DEFAULT 0"), ("confluence", "TEXT")):
             if col not in have:
                 with self._conn:
                     self._conn.execute(f"ALTER TABLE signals ADD COLUMN {col} {typ}")
@@ -272,10 +273,11 @@ class Store:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 """INSERT INTO signals (side, entry, sl, sl_current, tp1, tp2, confidence, opened_at, status, reason,
-                                        zone_lo, zone_hi, chase, triggered_at, trigger_note, setup_mode, touched)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                        zone_lo, zone_hi, chase, triggered_at, trigger_note, setup_mode, touched, confluence)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (sig.side, sig.entry, sig.sl, sig.sl_current, sig.tp1, sig.tp2, sig.confidence, _iso(sig.opened_at), sig.status, sig.reason,
-                 sig.zone_lo, sig.zone_hi, sig.chase, _iso(sig.triggered_at) if sig.triggered_at else None, sig.trigger_note, sig.setup_mode, int(sig.touched)),
+                 sig.zone_lo, sig.zone_hi, sig.chase, _iso(sig.triggered_at) if sig.triggered_at else None, sig.trigger_note, sig.setup_mode, int(sig.touched),
+                 sig.confluence),
             )
             return int(cur.lastrowid)
 
@@ -283,12 +285,14 @@ class Store:
         with self._lock, self._conn:
             self._conn.execute(
                 """UPDATE signals SET status=?, closed_at=?, exit_price=?, result_r=?, tp1_hit_at=?, sl_current=?,
-                                      entry=?, sl=?, tp1=?, tp2=?, zone_lo=?, zone_hi=?, chase=?, triggered_at=?, trigger_note=?, setup_mode=?, confidence=?, touched=?
+                                      entry=?, sl=?, tp1=?, tp2=?, zone_lo=?, zone_hi=?, chase=?, triggered_at=?, trigger_note=?, setup_mode=?, confidence=?, touched=?,
+                                      confluence=?
                    WHERE id=?""",
                 (sig.status, _iso(sig.closed_at) if sig.closed_at else None, sig.exit_price, sig.result_r,
                  _iso(sig.tp1_hit_at) if sig.tp1_hit_at else None, sig.sl_current,
                  sig.entry, sig.sl, sig.tp1, sig.tp2, sig.zone_lo, sig.zone_hi, sig.chase,
-                 _iso(sig.triggered_at) if sig.triggered_at else None, sig.trigger_note, sig.setup_mode, sig.confidence, int(sig.touched), sig.id),
+                 _iso(sig.triggered_at) if sig.triggered_at else None, sig.trigger_note, sig.setup_mode, sig.confidence, int(sig.touched),
+                 sig.confluence, sig.id),
             )
 
     def _row_to_signal(self, r: sqlite3.Row):
@@ -303,6 +307,7 @@ class Store:
             triggered_at=_parse(r["triggered_at"]) if r["triggered_at"] else None,
             trigger_note=r["trigger_note"] or "", setup_mode=r["setup_mode"] or "",
             touched=bool(r["touched"]) if "touched" in r.keys() else False,
+            confluence=(r["confluence"] or "") if "confluence" in r.keys() else "",
         )
 
     def active_signal(self):

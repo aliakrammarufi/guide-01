@@ -89,6 +89,7 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
             "supports": [_r(s, 2) for s in t.supports],
             "resistances": [_r(r, 2) for r in t.resistances],
             "pivots": {k: _r(v, 2) for k, v in t.pivots.items()},
+            "price_action": t.pa.to_dict() if t.pa is not None else None,
         },
         "news": {
             "score": rep.news.score,
@@ -114,6 +115,7 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
             "target2": _r(sig.target2, 2) if sig.target2 else None,
             "zone_lo": sig.zone_lo, "zone_hi": sig.zone_hi, "zone_mid": sig.zone_mid, "chase_limit": sig.chase_limit,
             "entry_mode": sig.entry_mode, "planned_rr": sig.planned_rr, "raw_confidence": sig.raw_confidence,
+            "confluence": list(sig.confluence),
             "nearest_support": _r(sig.nearest_support, 2) if sig.nearest_support else None,
             "nearest_resistance": _r(sig.nearest_resistance, 2) if sig.nearest_resistance else None,
             "notes": sig.notes,

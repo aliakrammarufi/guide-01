@@ -122,7 +122,8 @@ has the same calculator (Account / Risk inputs in the Signals panel, kept in you
 
 ```
 price data ──► technical score (-100..+100)
-                 EMA stack (H1 + daily), EMA slope, MACD, RSI, Bollinger, 24h momentum
+                 EMA stack (H1 + daily), market structure (H1 + H4), EMA slope, MACD, RSI,
+                 Bollinger, 24h momentum · discounted when ADX says "range" · ± RSI divergence, VWAP side
 news feeds ──► per-headline impact (-2..+2) ──► news score (-100..+100)
                  Claude classifier (if key)         time-decayed, confidence-weighted
                  or keyword rules (always)
@@ -134,6 +135,24 @@ news feeds ──► per-headline impact (-2..+2) ──► news score (-100..+1
                       −5 per warning flag (overbought, stretched band, squeeze…)
           levels: stop = 1.5 × ATR (tucked under/over structure), T1 = 1.25 × ATR, T2 = 2.5 × ATR
 ```
+
+**Price action** (`market/structure.py`) reads the chart the way a discretionary trader does and feeds both
+the score and the entry plan:
+
+* *Market structure* on H1 and H4 – swing highs/lows, HH·HL / LH·LL (equal highs and lows within 0.15 ATR
+  count as equal), the latest break of structure (continuation) and change of character (first break against
+  the trend).
+* *Key levels* – previous day / week high & low, the Asian-session range, the daily VWAP, round numbers.
+* *Last impulse + Fibonacci* 38.2 / 50 / 61.8 / 78.6 % retracements.
+* *Imbalances* – unfilled fair-value gaps and unmitigated order blocks near price.
+* *Regime* – ADX (trending ≥ 25, ranging < 18 → trend parts of the score ×0.6) and the ATR percentile.
+* *RSI divergence* at the last swing and a one-line read of the last closed H1 candle.
+
+The entry zone is still the EMA20 ↔ EMA50/support pullback, but a 50/61.8 % fib or an order block just
+beyond it pulls the far edge out (bounded at 1.5 ATR), and everything coinciding with the zone is listed as
+**confluence** ("EMA50 · 61.8% fib · prev-day low") on Telegram, the terminal and the replay's
+`by_confluence` table. `/analyze` has a PRICE ACTION section; `/levels` adds session levels and fibs; the
+chart draws PDH / PDL / VWAP and shades the zone.
 
 **Keyword rules** understand the real gold drivers and are subject-aware:
 "dollar slides" is bullish, "gold slides" is bearish, "rate-cut hopes dented" is

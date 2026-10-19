@@ -50,7 +50,7 @@ def main() -> int:
     print(f"setups {s['setups']}  traded {s['count']}  no-trade {s['no_trade']} {s['no_trade_breakdown']}")
     print(f"win rate {s['win_rate']}%  ({s['wins']} W / {s['losses']} L / {s['breakeven']} BE)  avg {s['avg_r']}R  total {s['total_r']}R  "
           f"PF {s['profit_factor']}  maxDD {s['max_drawdown_r']}R  TP1 {s['tp1_rate']}%  hold {s['avg_hold_h']} h")
-    for key in ("by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "thresholds"):
+    for key in ("by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "by_confluence", "thresholds"):
         print(f"\n{key}:")
         for k, v in res[key].items():
             print(f"  {k:<34} n={v['count']:<3} win={v['win_rate']}%  avg={v['avg_r']}R  total={v['total_r']}R  PF={v['profit_factor']}")

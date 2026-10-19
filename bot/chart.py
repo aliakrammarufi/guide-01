@@ -66,7 +66,14 @@ def render_chart(hourly: pd.DataFrame, tech: TechSnapshot, sig: Signal, bars: in
 
     hline(tech.nearest_support(), INK_2, "S")
     hline(tech.nearest_resistance(), INK_2, "R")
+    kl = tech.key_levels
+    hline(kl.get("PDH"), "#8B7CF6", "PDH", "-.")
+    hline(kl.get("PDL"), "#8B7CF6", "PDL", "-.")
+    hline(kl.get("VWAP"), "#F59E0B", "VWAP", "--")
     if sig.direction != "flat":
+        if sig.zone_lo is not None and sig.zone_hi is not None:
+            ax.axhspan(sig.zone_lo, sig.zone_hi, color=GOLD, alpha=0.12, linewidth=0)
+            ax.text(x[0], sig.zone_hi, " entry zone", color=GOLD, fontsize=7.5, va="bottom", ha="left", alpha=0.9)
         hline(sig.stop, BEAR, "stop", ":")
         hline(sig.target1, BULL, "T1", ":")
         hline(sig.target2, BULL, "T2", ":")
@@ -82,8 +89,10 @@ def render_chart(hourly: pd.DataFrame, tech: TechSnapshot, sig: Signal, bars: in
 
     title = f"XAU/USD  {tech.price:,.2f}   {sig.label}  ·  confidence {sig.confidence}%"
     ax.set_title(title, color=INK, fontsize=11, loc="left", pad=24, fontweight="bold")
+    pa = tech.pa
+    struct = (f" · H4 {pa.h4.trend} · H1 {pa.h1.trend} ({pa.h1.label}) · {pa.regime}" if pa is not None else "")
     ax.text(
-        0.0, 1.012, f"H1 · tech {tech.score:+d} · news {sig.news_score:+d} · RSI {tech.rsi:.0f} · ATR {tech.atr:.1f}",
+        0.0, 1.012, f"H1 · tech {tech.score:+d} · news {sig.news_score:+d} · RSI {tech.rsi:.0f} · ATR {tech.atr:.1f}{struct}",
         transform=ax.transAxes, color=INK_2, fontsize=8, va="bottom",
     )
     leg = ax.legend(loc="upper left", fontsize=8, frameon=False, ncol=3)
