@@ -13,6 +13,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -125,7 +126,33 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
 
     app = FastAPI(title="XAU Sentinel", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
-    quotes = QuoteService(demo=demo)
+    basis: dict = {"key": None, "value": 1.0}
+
+    def prev_close_for(spot: float) -> float | None:
+        """Previous daily close, scaled to the live tick's basis.
+
+        The live tick is spot XAU/USD; the bars may be COMEX futures (GC=F), which trade
+        at a premium. The ratio spot / last hourly close (captured once per analysis
+        refresh, when the hourly bar is fresh) converts the bar-based previous close
+        to the spot basis so "today's change" is right and ticks with the price.
+        """
+        rep = cache.report
+        if rep is None or rep.data is None:
+            return None
+        daily, hourly = rep.data.daily, rep.data.hourly
+        if daily is None or len(daily) < 2:
+            return None
+        last_day = daily.index[-1]
+        today = pd.Timestamp.now(tz="UTC").normalize()
+        prev = float(daily["close"].iloc[-2] if last_day.tz_convert("UTC").normalize() >= today else daily["close"].iloc[-1])
+        key = (rep.data.last_bar_time, rep.data.source)
+        if basis["key"] != key and hourly is not None and len(hourly) and spot:
+            ref = float(hourly["close"].iloc[-1])
+            ratio = spot / ref if ref else 1.0
+            basis["key"], basis["value"] = key, (ratio if abs(ratio - 1.0) > 0.0015 else 1.0)
+        return prev * basis["value"]
+
+    quotes = QuoteService(demo=demo, prev_close_fn=None if demo else prev_close_for)
 
     @app.get("/api/quote")
     async def quote():

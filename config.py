@@ -95,7 +95,6 @@ DEFAULT_FEEDS: list[str] = [
     "https://www.aljazeera.com/xml/rss/all.xml",                  # geopolitics
     "https://www.federalreserve.gov/feeds/press_all.xml",         # Fed statements, first-hand
     "https://www.bls.gov/feed/bls_latest.rss",                    # CPI / jobs releases, first-hand
-    "https://www.kitco.com/rss/category/news",
     "https://www.fxstreet.com/rss/news",
     "https://www.forexlive.com/feed/news",
     "https://www.dailyfx.com/feeds/market-news",

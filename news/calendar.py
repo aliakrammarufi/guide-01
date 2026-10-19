@@ -102,20 +102,35 @@ class CalendarService:
         self._ts = 0.0
         self._lock = threading.Lock()
 
+    FALLBACK_URLS = (
+        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+        "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
+    )
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept": "application/json,text/plain,*/*",
+    }
+
     def refresh(self) -> list[Event]:
         if not self.url:
             return []
-        try:
-            r = httpx.get(self.url, timeout=15, headers={"User-Agent": "XAUSentinel/1.0"}, follow_redirects=True)
-            r.raise_for_status()
-            events = parse_events(r.json(), self.currencies)
-            with self._lock:
-                self._events, self._ts = events, time.time()
-            log.info("Calendar: %d %s events this week", len(events), "/".join(self.currencies))
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Calendar fetch failed: %s", exc)
-            with self._lock:
-                self._ts = time.time()  # back off, don't hammer a dead endpoint
+        urls = [self.url] + [u for u in self.FALLBACK_URLS if u != self.url]
+        last_exc: Exception | None = None
+        for url in urls:
+            try:
+                r = httpx.get(url, timeout=15, headers=self.HEADERS, follow_redirects=True)
+                r.raise_for_status()
+                events = parse_events(r.json(), self.currencies)
+                with self._lock:
+                    self._events, self._ts = events, time.time()
+                log.info("Calendar: %d %s events this week", len(events), "/".join(self.currencies))
+                return self.events()
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        log.warning("Calendar fetch failed: %s", last_exc)
+        with self._lock:
+            # retry in 5 min (rate limits are short-lived), but keep whatever we had
+            self._ts = time.time() - self.ttl + 300
         return self.events()
 
     def events(self) -> list[Event]:

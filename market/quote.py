@@ -16,6 +16,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 import httpx
 
@@ -52,10 +53,15 @@ class Quote:
 
 
 class QuoteService:
-    def __init__(self, demo: bool = False, min_interval: float | None = None, tape_interval: float = 60.0):
+    def __init__(self, demo: bool = False, min_interval: float | None = None, tape_interval: float = 60.0,
+                 prev_close_fn: Callable[[float], float | None] | None = None):
         self.demo = demo
         self.min_interval = min_interval if min_interval is not None else max(0.5, settings.quote_interval_sec)
         self.tape_interval = tape_interval
+        # Optional: previous close supplied by the analysis cache (same basis as the live tick)
+        self._prev_close_fn = prev_close_fn
+        self._prev_cached: float | None = None   # last good previous close from any source
+        self._prev_yf_ts = 0.0                   # last time we asked yfinance for it
         self._lock = threading.Lock()
         self._quote: Quote | None = None
         self._tape: list[dict] = []
@@ -96,15 +102,35 @@ class QuoteService:
         r = httpx.get("https://api.gold-api.com/price/XAU", timeout=6, headers={"User-Agent": "XAUSentinel/1.0"})
         r.raise_for_status()
         price = float(r.json()["price"])
-        prev = self._quote.prev_close if self._quote and self._quote.prev_close else None
-        if prev is None:
-            try:  # previous close from the data provider (once); fall back to the price itself
+        return Quote(price=price, prev_close=self._prev_close(price))
+
+    def _prev_close(self, price: float) -> float:
+        """Previous daily close on the same basis as ``price``.
+
+        1. the analysis cache (basis-adjusted, see web/server.py) – preferred
+        2. yfinance fast_info, retried at most every 10 min
+        3. the last good value we had; finally the price itself (0.00% change)
+        """
+        if self._prev_close_fn is not None:
+            try:
+                v = self._prev_close_fn(price)
+                if v and v > 0:
+                    self._prev_cached = float(v)
+                    return self._prev_cached
+            except Exception as exc:  # noqa: BLE001
+                log.debug("prev_close_fn failed: %s", exc)
+        now = time.time()
+        if self._prev_cached is None and now - self._prev_yf_ts > 600:
+            self._prev_yf_ts = now
+            try:
                 import yfinance as yf
                 fi = yf.Ticker(settings.yf_symbol).fast_info
-                prev = float(fi.get("previous_close") or fi.get("regular_market_previous_close") or price)
-            except Exception:  # noqa: BLE001
-                prev = price
-        return Quote(price=price, prev_close=prev)
+                v = fi.get("previous_close") or fi.get("regular_market_previous_close")
+                if v:
+                    self._prev_cached = float(v)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("yfinance previous close failed: %s", exc)
+        return self._prev_cached or price
 
     def _live_quote(self) -> Quote:
         if settings.quote_provider == "goldapi":
