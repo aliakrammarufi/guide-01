@@ -270,12 +270,13 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
         return JSONResponse(await asyncio.to_thread(signals_json, cache.tracker, rep.session if rep else None) | {"demo": demo})
 
     @app.get("/api/backtest")
+    @app.get("/api/selfcheck")
     async def backtest():
         """The last historical replay of the signal rules (technical-only self-check)."""
         bt = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest")
         if not bt:
             raise HTTPException(status_code=404, detail="no self-check has run yet")
-        return JSONResponse(bt)
+        return JSONResponse(bt, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/tape")
     async def tape():

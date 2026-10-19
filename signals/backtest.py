@@ -340,6 +340,10 @@ def run_and_store(settings, store: Store, yield_sleep: float = 0.01) -> dict:
     s = result["summary"]
     log.info("Self-check done in %.0fs: %d setups, %d trades, win rate %s%%, avg %sR, total %+.1fR, max drawdown %.1fR, no-trade %d",
              result["took_sec"], s["setups"], s["count"], s["win_rate"], s["avg_r"], s["total_r"], s["max_drawdown_r"], s["no_trade"])
+    log.info("Self-check outcomes %s · no-trade %s · TP1 %s%% · PF %s", s["outcomes"], s["no_trade_breakdown"], s["tp1_rate"], s["profit_factor"])
+    for key in ("by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "thresholds"):
+        log.info("Self-check %s: %s", key, "; ".join(f"{k}: n={v['count']} win={v['win_rate']}% avg={v['avg_r']}R tot={v['total_r']}R"
+                                                    for k, v in result[key].items() if v.get("count")))
     return result
 
 
