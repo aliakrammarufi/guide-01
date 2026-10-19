@@ -157,14 +157,18 @@ class SentinelBot:
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         self.store.subscribe(chat_id)
+        private = bool(self.settings.allowed_chat_ids)
+        lock = ("🔒 This bot is private to your chat." if private else
+                f"🔓 Your chat id is <code>{chat_id}</code>. To make this bot private, set "
+                f"<code>TELEGRAM_ALLOWED_CHAT_IDS={chat_id}</code> on the server.")
         await self._send(
             chat_id,
-            "🥇 <b>XAU Sentinel</b> is online.\n"
-            "I watch the gold market (XAU/USD) and the news that moves it, and I send you a "
-            f"report every {self.settings.analysis_interval_min} min plus alerts when something changes.\n\n"
-            "You are subscribed in this chat. Try /analyze for a full report.\n\n"
-            f"🔒 Your chat id is <code>{chat_id}</code>. To make this bot private, set "
-            f"<code>TELEGRAM_ALLOWED_CHAT_IDS={chat_id}</code> on the server.\n\n" + fmt.HELP,
+            "🥇 <b>XAU Sentinel is online</b>\n"
+            "I watch gold (XAU/USD) and the news that moves it.\n\n"
+            f"✅ Subscribed — you'll get a report here every <b>{self.settings.analysis_interval_min} min</b>, "
+            "plus alerts for bias changes, big moves, breaking news, pre-release warnings and every BUY / SELL call.\n"
+            f"{lock}\n\n"
+            "Try /price for a quick look or /analyze for the full report.\n\n" + fmt.HELP,
         )
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -178,8 +182,7 @@ class SentinelBot:
     async def cmd_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
         rep = await self.cache.get(with_briefing=False)
-        text = fmt.format_price(rep.tech, rep.data.source, rep.data.last_bar_time) + "\n\n" + fmt.format_signal(rep.signal) + "\n\n" + fmt.DISCLAIMER
-        await self._send(update.effective_chat.id, text)
+        await self._send(update.effective_chat.id, fmt.format_signal_message(rep.tech, rep.signal, rep.data.source, rep.data.last_bar_time))
 
     async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
@@ -226,35 +229,24 @@ class SentinelBot:
     async def cmd_levels(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
         rep = await self.cache.get(with_briefing=False)
-        t = rep.tech
-        sup = ", ".join(f"{s:,.1f}" for s in sorted((s for s in t.supports if s < t.price), reverse=True)[:4]) or "n/a"
-        res = ", ".join(f"{r:,.1f}" for r in sorted(r for r in t.resistances if r > t.price)[:4]) or "n/a"
-        p = t.pivots
-        text = (
-            f"📐 <b>Levels</b>  (price {t.price:,.2f}, ATR {t.atr:.1f})\n"
-            f"Resistance: {res}\nSupport: {sup}\n"
-        )
-        if p:
-            text += f"Pivots: S2 {p['S2']:,.1f} · S1 {p['S1']:,.1f} · P {p['P']:,.1f} · R1 {p['R1']:,.1f} · R2 {p['R2']:,.1f}\n"
-        text += f"EMA20/50/200 (H1): {t.ema20:,.1f} / {t.ema50:,.1f} / {t.ema200:,.1f}"
-        await self._send(update.effective_chat.id, text)
+        await self._send(update.effective_chat.id, fmt.format_levels(rep.tech))
 
     async def cmd_subscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         self.store.subscribe(chat_id)
-        await self._send(chat_id, f"✅ Subscribed. You'll get a report here every {self.settings.analysis_interval_min} min. Use /alerts off to mute alerts.")
+        await self._send(chat_id, f"✅ <b>Subscribed.</b> You'll get a report here every {self.settings.analysis_interval_min} min. Use /alerts off to mute alerts.")
 
     async def cmd_unsubscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         self.store.unsubscribe(chat_id)
-        await self._send(chat_id, "🔕 Unsubscribed from scheduled reports and alerts. Commands still work.")
+        await self._send(chat_id, "🔕 <b>Unsubscribed</b> from scheduled reports and alerts. Commands still work.")
 
     async def cmd_alerts(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         arg = (context.args[0].lower() if context.args else "")
         if arg in {"on", "off"}:
             self.store.set_alerts(chat_id, arg == "on")
-            await self._send(chat_id, "🔔 Alerts on." if arg == "on" else "🔕 Alerts off.")
+            await self._send(chat_id, "🔔 <b>Alerts on.</b>" if arg == "on" else "🔕 <b>Alerts off.</b>")
         else:
             state = "on" if self.store.alerts_enabled(chat_id) else "off"
             await self._send(chat_id, f"Alerts are <b>{state}</b>. Use /alerts on or /alerts off.")
@@ -262,23 +254,24 @@ class SentinelBot:
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         rep = self.cache.report
         s = self.settings
-        last = rep.generated_at.strftime("%Y-%m-%d %H:%M UTC") if rep else "never"
+        last = rep.generated_at.strftime("%H:%M UTC · %d %b") if rep else "never"
         recent = len(self.store.recent_articles(s.news_lookback_hours))
+        tr = self.cache.tracker
+        open_call = f"open {tr.active().side}" if tr.active() else "none open"
+        ai = f"on · {escape(s.classifier_model)} / {escape(s.analyst_model)}" if s.ai_enabled else "off · keyword scoring"
         text = (
-            "🛰 <b>XAU Sentinel status</b>\n"
-            f"Last analysis: {last}\n"
-            f"Data: {escape(s.data_provider)} ({escape(s.yf_symbol if s.data_provider == 'yfinance' else s.twelvedata_symbol)})\n"
-            f"AI: {'on (' + escape(s.classifier_model) + ' / ' + escape(s.analyst_model) + ')' if s.ai_enabled else 'off – keyword scoring'}\n"
-            f"Articles in last {s.news_lookback_hours}h: {recent} (from {len(s.feeds)} feeds)\n"
-            f"Calendar: {'on' if s.calendar_url else 'off'} · warn {s.event_warn_min} min before high-impact USD releases\n"
-            f"Report every {s.analysis_interval_min} min · news scan every {s.news_scan_interval_min} min\n"
-            f"Subscribers: {len(self.store.subscribers())} · alerts on: {len(self.store.subscribers(alerts_only=True))}\n"
-            f"Signals: {'open ' + self.cache.tracker.active().side if self.cache.tracker.active() else 'none open'} · min confidence {s.signal_min_conf}% · "
-            f"{self.cache.tracker.stats()['count']} closed\n"
-            f"Weights: technical {s.tech_weight:.1f} / news {s.news_weight:.1f}"
+            "🛰 <b>XAU Sentinel — status</b>\n\n"
+            f"Last analysis: <b>{last}</b>\n"
+            f"Report every <b>{s.analysis_interval_min} min</b> · news scan every <b>{s.news_scan_interval_min} min</b>\n"
+            f"Headlines in last {s.news_lookback_hours}h: <b>{recent}</b> from {len(s.feeds)} feeds\n"
+            f"Calendar: {'on' if s.calendar_url else 'off'} · warning {s.event_warn_min} min before high-impact releases\n"
+            f"AI: {ai}\n"
+            f"Signals: {open_call} · opens at ≥ {s.signal_min_conf}% confidence · {tr.stats()['count']} closed\n"
+            f"Weights: technicals {s.tech_weight:.0%} / news {s.news_weight:.0%}\n"
+            f"Subscribers: {len(self.store.subscribers())} · alerts on: {len(self.store.subscribers(alerts_only=True))}"
         )
         if self.cache.last_error:
-            text += f"\n⚠️ Last error: <code>{escape(self.cache.last_error)[:200]}</code>"
+            text += f"\n\n⚠️ Last error: <code>{escape(self.cache.last_error)[:200]}</code>"
         await self._send(update.effective_chat.id, text)
 
     # ------------------------------------------------------------------ jobs
