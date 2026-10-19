@@ -120,7 +120,7 @@ class Store:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()   # re-entrant: locked methods may call each other
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._conn:
@@ -129,8 +129,9 @@ class Store:
 
     # ---- articles ----------------------------------------------------------
     def has_article(self, article_id: str) -> bool:
-        row = self._conn.execute("SELECT 1 FROM articles WHERE id = ?", (article_id,)).fetchone()
-        return row is not None
+        with self._lock:
+            row = self._conn.execute("SELECT 1 FROM articles WHERE id = ?", (article_id,)).fetchone()
+            return row is not None
 
     def upsert_articles(self, articles: Iterable[Article]) -> int:
         """Insert new articles (skip ids already stored). Returns inserted count."""
@@ -166,27 +167,30 @@ class Store:
             self._conn.executemany("UPDATE articles SET alerted=1 WHERE id=?", [(i,) for i in ids])
 
     def recent_articles(self, hours: float, limit: int = 200) -> list[Article]:
-        since = _iso(datetime.now(timezone.utc) - timedelta(hours=hours))
-        rows = self._conn.execute(
-            "SELECT * FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT ?",
-            (since, limit),
-        ).fetchall()
-        return [self._row_to_article(r) for r in rows]
+        with self._lock:
+            since = _iso(datetime.now(timezone.utc) - timedelta(hours=hours))
+            rows = self._conn.execute(
+                "SELECT * FROM articles WHERE published_at >= ? ORDER BY published_at DESC LIMIT ?",
+                (since, limit),
+            ).fetchall()
+            return [self._row_to_article(r) for r in rows]
 
     def unscored_articles(self, limit: int = 50) -> list[Article]:
-        rows = self._conn.execute(
-            "SELECT * FROM articles WHERE impact IS NULL ORDER BY published_at DESC LIMIT ?", (limit,)
-        ).fetchall()
-        return [self._row_to_article(r) for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM articles WHERE impact IS NULL ORDER BY published_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [self._row_to_article(r) for r in rows]
 
     def unalerted_high_impact(self, hours: float = 6) -> list[Article]:
-        since = _iso(datetime.now(timezone.utc) - timedelta(hours=hours))
-        rows = self._conn.execute(
-            """SELECT * FROM articles WHERE high_impact=1 AND alerted=0 AND published_at >= ?
-               ORDER BY published_at DESC""",
-            (since,),
-        ).fetchall()
-        return [self._row_to_article(r) for r in rows]
+        with self._lock:
+            since = _iso(datetime.now(timezone.utc) - timedelta(hours=hours))
+            rows = self._conn.execute(
+                """SELECT * FROM articles WHERE high_impact=1 AND alerted=0 AND published_at >= ?
+                   ORDER BY published_at DESC""",
+                (since,),
+            ).fetchall()
+            return [self._row_to_article(r) for r in rows]
 
     def prune(self, days: int = 14) -> int:
         cutoff = _iso(datetime.now(timezone.utc) - timedelta(days=days))
@@ -222,25 +226,29 @@ class Store:
             self._conn.execute("UPDATE subscribers SET alerts=? WHERE chat_id=?", (int(enabled), chat_id))
 
     def subscribers(self, alerts_only: bool = False) -> list[int]:
-        q = "SELECT chat_id FROM subscribers" + (" WHERE alerts=1" if alerts_only else "")
-        return [int(r["chat_id"]) for r in self._conn.execute(q).fetchall()]
+        with self._lock:
+            q = "SELECT chat_id FROM subscribers" + (" WHERE alerts=1" if alerts_only else "")
+            return [int(r["chat_id"]) for r in self._conn.execute(q).fetchall()]
 
     def is_subscribed(self, chat_id: int) -> bool:
-        return self._conn.execute("SELECT 1 FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone() is not None
+        with self._lock:
+            return self._conn.execute("SELECT 1 FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone() is not None
 
     def alerts_enabled(self, chat_id: int) -> bool:
-        row = self._conn.execute("SELECT alerts FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
-        return bool(row and row["alerts"])
+        with self._lock:
+            row = self._conn.execute("SELECT alerts FROM subscribers WHERE chat_id=?", (chat_id,)).fetchone()
+            return bool(row and row["alerts"])
 
     # ---- state -------------------------------------------------------------
     def get_state(self, key: str, default: Any = None) -> Any:
-        row = self._conn.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
-        if row is None or row["value"] is None:
-            return default
-        try:
-            return json.loads(row["value"])
-        except json.JSONDecodeError:
-            return row["value"]
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
+            if row is None or row["value"] is None:
+                return default
+            try:
+                return json.loads(row["value"])
+            except json.JSONDecodeError:
+                return row["value"]
 
     def set_state(self, key: str, value: Any) -> None:
         with self._lock, self._conn:
@@ -296,16 +304,19 @@ class Store:
         )
 
     def active_signal(self):
-        row = self._conn.execute("SELECT * FROM signals WHERE status IN ('active','tp1') ORDER BY id DESC LIMIT 1").fetchone()
-        return self._row_to_signal(row) if row else None
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM signals WHERE status IN ('active','tp1') ORDER BY id DESC LIMIT 1").fetchone()
+            return self._row_to_signal(row) if row else None
 
     def pending_signal(self):
-        row = self._conn.execute("SELECT * FROM signals WHERE status = 'pending' ORDER BY id DESC LIMIT 1").fetchone()
-        return self._row_to_signal(row) if row else None
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM signals WHERE status = 'pending' ORDER BY id DESC LIMIT 1").fetchone()
+            return self._row_to_signal(row) if row else None
 
     def signals(self, limit: int = 20) -> list:
-        rows = self._conn.execute("SELECT * FROM signals ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-        return [self._row_to_signal(r) for r in rows]
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM signals ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+            return [self._row_to_signal(r) for r in rows]
 
     def add_signal_event(self, signal_id: int, kind: str, price: float | None, text: str, at: datetime | None = None) -> None:
         with self._lock, self._conn:
@@ -315,10 +326,11 @@ class Store:
             )
 
     def signal_events(self, limit: int = 30) -> list[dict]:
-        rows = self._conn.execute(
-            "SELECT e.*, s.side FROM signal_events e JOIN signals s ON s.id = e.signal_id ORDER BY e.id DESC LIMIT ?", (limit,)
-        ).fetchall()
-        return [{"id": r["id"], "signal_id": r["signal_id"], "kind": r["kind"], "price": r["price"], "at": r["at"], "text": r["text"], "side": r["side"]} for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT e.*, s.side FROM signal_events e JOIN signals s ON s.id = e.signal_id ORDER BY e.id DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [{"id": r["id"], "signal_id": r["signal_id"], "kind": r["kind"], "price": r["price"], "at": r["at"], "text": r["text"], "side": r["side"]} for r in rows]
 
     def close(self) -> None:
         self._conn.close()
