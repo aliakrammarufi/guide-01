@@ -9,4 +9,5 @@ python-dotenv>=1.0
 matplotlib>=3.8
 fastapi>=0.110
 uvicorn[standard]>=0.29
+websockets>=12
 pytest>=8.0

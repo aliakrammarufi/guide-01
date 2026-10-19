@@ -140,6 +140,9 @@
   .pair { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 13px; }
   .chip { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--ink-2); letter-spacing: .04em; }
   .price-row { position: relative; display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+  .bidask { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--muted); margin: 2px 0 6px; }
+  .bidask b { color: var(--text); font-weight: 600; margin-left: 4px; }
+  .bidask .tps { margin-left: auto; color: var(--cyan); }
   .odo { display: inline-flex; align-items: flex-end; font-family: var(--display); font-weight: 700; font-size: clamp(42px, 5.4vw, 60px); line-height: 1; letter-spacing: .02em; height: 1em; overflow: hidden; color: var(--gold-2); transition: text-shadow .3s; }
   .odo.up { text-shadow: 0 0 22px var(--bull-glow), 0 0 2px var(--bull); } .odo.down { text-shadow: 0 0 22px var(--bear-glow), 0 0 2px var(--bear); }
   .odo .d { display: inline-block; height: 1em; overflow: hidden; }
@@ -477,12 +480,13 @@
 
   <section class="grid" id="top">
     <div class="panel c5 price-panel reveal" id="price-panel">
-      <div class="pair"><span>XAU / USD</span><span class="chip">SPOT GOLD</span><span class="chip" id="trend">—</span></div>
+      <div class="pair"><span>XAU / USD</span><span class="chip" id="src-chip">SPOT GOLD</span><span class="chip" id="trend">—</span></div>
       <div class="price-row">
         <div class="floaters" id="floaters"></div>
         <div id="price" class="odo" aria-live="off">—</div>
         <div id="delta-chip" class="delta-chip">—</div>
       </div>
+      <div class="bidask" id="bidask" hidden><span>BID <b id="bid">—</b></span><span>ASK <b id="ask">—</b></span><span>SPREAD <b id="spread">—</b></span><span class="tps" id="tps"></span></div>
       <svg class="spark" id="spark" viewBox="0 0 400 124" preserveAspectRatio="none" aria-hidden="true">
         <defs><linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22D3EE" stop-opacity=".35"/><stop offset="1" stop-color="#E040FB" stop-opacity="0"/></linearGradient></defs>
         <path class="a" id="spark-area" d=""/><path class="l" id="spark-line" d=""/>
@@ -751,14 +755,17 @@
     const cols = el.querySelectorAll('.d .col'); let k = 0;
     for (const ch of str) if (/\d/.test(ch)) cols[k++].style.transform = `translateY(-${+ch * 10}%)`;
   }
-  function showPrice(p, animateMs = 350) {
+  let priceTween = 0, lastFloater = 0;
+  function showPrice(p, animateMs = 220) {
     const el = $('price'), from = shownPrice == null ? p - (last ? last.price.atr : 5) : shownPrice;
-    tween(from, p, animateMs, (v) => renderOdo(v));
+    const my = ++priceTween;
+    tween(from, p, shownPrice == null ? 600 : animateMs, (v) => { if (my === priceTween) renderOdo(v); });
     if (shownPrice != null && p !== shownPrice) {
       const up = p > shownPrice;
       el.classList.remove('up', 'down'); void el.offsetWidth; el.classList.add(up ? 'up' : 'down');
-      setTimeout(() => el.classList.remove('up', 'down'), 800);
-      if (!reduced) {
+      setTimeout(() => { if (my === priceTween) el.classList.remove('up', 'down'); }, 600);
+      if (!reduced && performance.now() - lastFloater > 350) {
+        lastFloater = performance.now();
         const f = document.createElement('span'); f.className = 'floater ' + (up ? 'up' : 'down');
         f.textContent = (up ? '+' : '') + (p - shownPrice).toFixed(2); f.style.left = (8 + Math.random() * 45) + '%';
         $('floaters').appendChild(f); setTimeout(() => f.remove(), 1600);
@@ -901,10 +908,21 @@
 
 
 
+  let tickTimes = [], lastTickAt = 0;
   function applyQuote(q) {
     if (q.price == null) return;
     quoteDemo = !!q.demo;
+    lastTickAt = Date.now(); tickTimes.push(lastTickAt); while (tickTimes.length && tickTimes[0] < lastTickAt - 10000) tickTimes.shift();
     showPrice(q.price);
+    const ba = $('bidask');
+    if (q.bid != null && q.ask != null) {
+      ba.hidden = false; $('bid').textContent = fmt(q.bid, 2); $('ask').textContent = fmt(q.ask, 2); $('spread').textContent = (q.ask - q.bid).toFixed(2);
+    } else if (q.source) { ba.hidden = false; $('bid').textContent = '—'; $('ask').textContent = '—'; $('spread').textContent = '—'; }
+    if (q.source) {
+      const src = String(q.source); const name = src.startsWith('tradingview') ? (src.split(':')[1] || 'OANDA') + ' · LIVE' : src.startsWith('finnhub') ? 'OANDA · LIVE' : src.startsWith('goldapi') ? 'GOLD-API · LIVE' : 'LIVE';
+      $('src-chip').textContent = name;
+      const rate = tickTimes.length / 10; $('tps').textContent = rate >= 0.2 ? `${rate.toFixed(1)} ticks/s` : '';
+    }
     const chip = $('delta-chip'); chip.textContent = `${signed(fmt(q.price - q.prev_close, 2))}  (${pct(q.change_pct)}) today`;
     chip.className = 'delta-chip ' + (q.change_pct > 0 ? 'up' : q.change_pct < 0 ? 'down' : '');
     $('price-panel').classList.toggle('bull', q.change_pct > 0); $('price-panel').classList.toggle('bear', q.change_pct < 0);
@@ -1261,6 +1279,24 @@
     try { const q = await (await fetch('/api/quote', { cache: 'no-store' })).json(); if (last) applyQuote(q); if (q && q.interval_ms) next = Math.max(700, q.interval_ms + 200); } catch (e) { console.error('quote update failed', e); }
     setTimeout(pollQuote, next);
   }
+  // Live tick stream (server-sent events): every tick is pushed the moment the feed prints it.
+  // Falls back to polling if the browser or the server cannot stream.
+  let streamOk = false;
+  function startQuoteStream() {
+    if ((last && last.demo) || !window.EventSource) { pollQuote(); return; }
+    const connect = () => {
+      let es;
+      try { es = new EventSource('/api/stream'); } catch (_) { pollQuote(); return; }
+      es.onmessage = (e) => { try { const q = JSON.parse(e.data); streamOk = true; if (last) applyQuote(q); } catch (_) {} };
+      es.onerror = () => { streamOk = false; es.close(); setTimeout(connect, 2500); };
+    };
+    connect();
+    // safety net: if nothing has arrived for 12 s, pull a quote the old way
+    setInterval(async () => {
+      if (Date.now() - lastTickAt < 12000) return;
+      try { const q = await (await fetch('/api/quote', { cache: 'no-store' })).json(); if (last) applyQuote(q); } catch (_) {}
+    }, 6000);
+  }
   async function pollTape() {
     try {
       const t = await (await fetch('/api/tape', { cache: 'no-store' })).json();
@@ -1274,7 +1310,7 @@
   $('toggle-table').addEventListener('click', (e) => { const tb = $('data-table'); tb.classList.toggle('hidden'); e.target.textContent = tb.classList.contains('hidden') ? 'Show last 24 bars as a table' : 'Hide table'; });
   window.addEventListener('resize', () => { updateLadderMarker(shownPrice ?? (last && last.price.last), true); layoutLadderTags(); });
   buildChart();
-  load(false).then(() => { pollQuote(); pollTape(); pollCalendar(); pollSignals(); });
+  load(false).then(() => { startQuoteStream(); pollTape(); pollCalendar(); pollSignals(); });
   setInterval(() => load(false), 60000);
   setInterval(() => { if (last) $('status-text').textContent = 'Updated ' + ago(last.generated_at); }, 15000);
 })();

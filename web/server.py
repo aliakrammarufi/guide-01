@@ -9,13 +9,15 @@ GET  /api/health     liveness
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from market import indicators as ind
@@ -154,10 +156,86 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
 
     quotes = QuoteService(demo=demo, prev_close_fn=None if demo else prev_close_for)
 
+    # ---- real-time tick engine (websocket feeds → SSE to the browser) --------------
+    from market.ticks import TickEngine
+
+    engine = TickEngine()
+    tracker_state = {"last": 0.0}
+
+    def tick_json(t) -> dict:
+        """A tick plus the fields the page needs: previous close / today's change."""
+        d = t.to_dict()
+        prev = None
+        try:
+            prev = prev_close_for(t.price)
+        except Exception:  # noqa: BLE001
+            prev = None
+        prev = prev or t.price
+        d.update({"prev_close": round(prev, 2), "change_pct": round((t.price / prev - 1) * 100, 3) if prev else 0.0,
+                  "stale": False, "demo": demo, "stream": True})
+        return d
+
+    async def tracker_feed():
+        """Feed the trade-signal tracker at most once a second from the live ticks."""
+        q = engine.subscribe()
+        try:
+            while True:
+                t = await q.get()
+                if time.monotonic() - tracker_state["last"] < 1.0:
+                    continue
+                tracker_state["last"] = time.monotonic()
+                try:
+                    await asyncio.to_thread(cache.tracker.on_price, t.price)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("tracker on_price failed: %s", exc)
+        finally:
+            engine.unsubscribe(q)
+
+    @app.on_event("startup")
+    async def _start_ticks():
+        if demo:
+            return
+        await engine.start()
+        asyncio.create_task(tracker_feed(), name="tracker-feed")
+
+    @app.on_event("shutdown")
+    async def _stop_ticks():
+        await engine.stop()
+
+    @app.get("/api/stream")
+    async def stream(request: Request):
+        """Server-sent events: one message per tick, instantly."""
+        if demo:
+            raise HTTPException(404, "no live stream in demo mode")
+        q = engine.subscribe()
+
+        async def gen():
+            try:
+                t = engine.latest()
+                yield f"data: {json.dumps(tick_json(t))}\n\n" if t else ": connected\n\n"
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        t = await asyncio.wait_for(q.get(), timeout=10)
+                    except asyncio.TimeoutError:
+                        yield ": ping\n\n"
+                        continue
+                    yield f"data: {json.dumps(tick_json(t))}\n\n"
+            finally:
+                engine.unsubscribe(q)
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
+
     @app.get("/api/quote")
     async def quote():
         if demo and cache.report is not None:
             quotes.set_demo_anchor(cache.report.tech.price)
+        live = None if demo else engine.latest()
+        if live is not None and time.monotonic() - live.seen <= 20:
+            q = tick_json(live) | {"interval_ms": 1000}
+            return JSONResponse(q)
         q = await asyncio.to_thread(quotes.get_quote)
         if q.get("price") is not None:
             try:
@@ -190,6 +268,7 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
         return {
             "ok": True,
             "demo": demo,
+            "ticks": {"source": engine.active_source(), "updates": engine.updates, "per_source": engine.stats},
             "last_run": rep.generated_at.isoformat() if rep else None,
             "stale": cache.is_stale(),
             "error": cache.last_error,

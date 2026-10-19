@@ -141,6 +141,11 @@ class Settings:
     quote_interval_sec: float = field(default_factory=lambda: _env_float("QUOTE_INTERVAL_SEC", 1.0))
     # Rescale futures/ETF bars onto the spot XAU/USD basis of the live tick (levels & SL/TP match MT5)
     spot_basis: bool = field(default_factory=lambda: _env_bool("SPOT_BASIS", True))
+    # Real-time tick sources, best available wins: finnhub (needs key), tradingview (no key), goldapi (no key)
+    tick_sources: list[str] = field(default_factory=lambda: _env_list("TICK_SOURCES", ["finnhub", "tradingview", "goldapi"]))
+    finnhub_api_key: str = field(default_factory=lambda: _env("FINNHUB_API_KEY"))
+    finnhub_symbol: str = field(default_factory=lambda: _env("FINNHUB_SYMBOL", "OANDA:XAU_USD"))
+    tv_symbols: list[str] = field(default_factory=lambda: _env_list("TV_SYMBOLS", ["OANDA:XAUUSD", "FX_IDC:XAUUSD", "TVC:GOLD"]))
     # Keep a free-tier host (Render) awake by pinging our own public URL every few minutes.
     keepalive: bool = field(default_factory=lambda: _env_bool("KEEPALIVE", False))
     keepalive_url: str = field(default_factory=lambda: _env("KEEPALIVE_URL", _env("RENDER_EXTERNAL_URL")))
