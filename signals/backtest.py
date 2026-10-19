@@ -328,8 +328,21 @@ def params_from_settings(settings) -> ReplayParams:
     )
 
 
-def run_and_store(settings, store: Store, yield_sleep: float = 0.01) -> dict:
-    """Fetch history, replay, save the report under ``state['backtest']``. Blocking – call from a thread."""
+# Structurally different ways to manage the same calls, replayed on the same bars so they can be
+# compared on numbers. Deliberately few and coarse: 70 days of data cannot support fine tuning.
+VARIANTS: list[tuple[str, dict]] = [
+    ("no break-even stop", {"breakeven_after_tp1": False}),
+    ("closer targets (TP1 1.0 · TP2 2.0 ATR)", {"atr_target_mult": 2.0}),
+    ("further targets (TP1 1.5 · TP2 3.0 ATR)", {"atr_target_mult": 3.0}),
+    ("wider stop (2.0 ATR)", {"atr_stop_mult": 2.0}),
+    ("no Asian-session entries", {"asia_entries": False}),
+]
+VARIANTS_KEY = "backtest_variants"
+
+
+def run_and_store(settings, store: Store, yield_sleep: float = 0.01, sweep: bool = False) -> dict:
+    """Fetch history, replay, save the report under ``state['backtest']``. Blocking – call from a thread.
+    With ``sweep`` the VARIANTS are replayed on the same bars afterwards (state['backtest_variants'])."""
     h1, d1, m15, sym = fetch_history(settings.yf_symbol)
     p = params_from_settings(settings)
     p.yield_sleep = yield_sleep
@@ -337,6 +350,39 @@ def run_and_store(settings, store: Store, yield_sleep: float = 0.01) -> dict:
     result = replay(h1, d1, m15, p, progress=lambda n, t: log.info("Self-check: %d/%d bars", n, t) if n and n % 2000 == 0 else None)
     result["symbol"] = sym
     store.set_state(STATE_KEY, result)
+    _log_result(result)
+    if sweep:
+        run_variants(h1, d1, m15, p, store, base_summary=result["summary"])
+    return result
+
+
+def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: dict | None = None) -> dict:
+    rows = []
+    if base_summary is not None:
+        rows.append({"name": "current rules", "overrides": {}, "summary": _brief(base_summary)})
+    for name, overrides in VARIANTS:
+        p = ReplayParams(**{**base.__dict__, **overrides})
+        log.info("Self-check variant '%s'…", name)
+        try:
+            r = replay(h1, d1, m15, p)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Self-check variant '%s' failed: %s", name, exc)
+            continue
+        b = _brief(r["summary"])
+        rows.append({"name": name, "overrides": overrides, "summary": b})
+        log.info("Self-check variant '%s': trades %d · win %s%% · avg %sR · total %sR · PF %s · maxDD %sR",
+                 name, b["count"], b["win_rate"], b["avg_r"], b["total_r"], b["profit_factor"], b["max_drawdown_r"])
+        out = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "base_params": base.to_dict(), "variants": rows}
+        store.set_state(VARIANTS_KEY, out)          # saved after every variant: a restart loses nothing
+    return out if rows else {}
+
+
+def _brief(s: dict) -> dict:
+    keys = ("count", "wins", "losses", "breakeven", "win_rate", "avg_r", "total_r", "profit_factor", "max_drawdown_r", "tp1_rate", "setups", "no_trade")
+    return {k: s.get(k) for k in keys}
+
+
+def _log_result(result: dict) -> None:
     s = result["summary"]
     log.info("Self-check done in %.0fs: %d setups, %d trades, win rate %s%%, avg %sR, total %+.1fR, max drawdown %.1fR, no-trade %d",
              result["took_sec"], s["setups"], s["count"], s["win_rate"], s["avg_r"], s["total_r"], s["max_drawdown_r"], s["no_trade"])
@@ -344,25 +390,40 @@ def run_and_store(settings, store: Store, yield_sleep: float = 0.01) -> dict:
     for key in ("by_confidence", "by_session", "by_trigger", "by_mode", "by_side", "thresholds"):
         log.info("Self-check %s: %s", key, "; ".join(f"{k}: n={v['count']} win={v['win_rate']}% avg={v['avg_r']}R tot={v['total_r']}R"
                                                     for k, v in result[key].items() if v.get("count")))
-    return result
+
+
+def _fresh(stored: dict | None, base: ReplayParams, max_age_days: float, params_key: str) -> bool:
+    if not stored or not stored.get("generated_at"):
+        return False
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(stored["generated_at"])
+    except (TypeError, ValueError):
+        return False
+    return age < timedelta(days=max_age_days) and stored.get(params_key) == base.to_dict()
 
 
 async def run_on_start(cache, delay_sec: int = 150) -> None:
-    """Server-side: run the replay in a worker thread shortly after start-up when the stored one is stale."""
+    """Server-side: run the replay in a worker thread shortly after start-up when the stored one is stale
+    (and the variant sweep when BACKTEST_SWEEP is on and its stored result is stale)."""
     from config import settings
 
     await asyncio.sleep(delay_sec)          # let the first live analysis and the Telegram bot settle first
     store = cache.pipeline.store
-    old = store.get_state(STATE_KEY)
-    if old and old.get("generated_at"):
-        try:
-            age = datetime.now(timezone.utc) - datetime.fromisoformat(old["generated_at"])
-            if age < timedelta(days=settings.backtest_max_age_days) and old.get("params") == params_from_settings(settings).to_dict():
-                log.info("Self-check: last replay is %.1f days old – skipping", age.total_seconds() / 86400)
-                return
-        except (TypeError, ValueError):
-            pass
+    base = params_from_settings(settings)
+    main_fresh = _fresh(store.get_state(STATE_KEY), base, settings.backtest_max_age_days, "params")
+    sweep_due = settings.backtest_sweep and not _fresh(store.get_state(VARIANTS_KEY), base, settings.backtest_max_age_days, "base_params")
+    if main_fresh and not sweep_due:
+        log.info("Self-check: stored replay is recent – skipping")
+        return
     try:
-        await asyncio.to_thread(run_and_store, settings, store)
+        if not main_fresh:
+            await asyncio.to_thread(run_and_store, settings, store, 0.01, sweep_due)
+        else:
+            def _sweep_only():
+                h1, d1, m15, _sym = fetch_history(settings.yf_symbol)
+                p = params_from_settings(settings)
+                p.yield_sleep = 0.01
+                run_variants(h1, d1, m15, p, store, base_summary=store.get_state(STATE_KEY)["summary"])
+            await asyncio.to_thread(_sweep_only)
     except Exception as exc:  # noqa: BLE001
         log.warning("Self-check failed: %s", exc)

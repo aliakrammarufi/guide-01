@@ -221,6 +221,8 @@ class Settings:
     # rules would have done. Technical-only: news history is not available.
     backtest_on_start: bool = field(default_factory=lambda: _env_bool("BACKTEST_ON_START", False))
     backtest_max_age_days: float = field(default_factory=lambda: _env_float("BACKTEST_MAX_AGE_DAYS", 7.0))
+    # Also replay a few alternative ways to manage the calls (no break-even, other targets…) for comparison
+    backtest_sweep: bool = field(default_factory=lambda: _env_bool("BACKTEST_SWEEP", False))
 
     @property
     def ai_enabled(self) -> bool:

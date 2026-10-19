@@ -524,7 +524,7 @@ def _bt_block(name: str, b: dict) -> tuple:
     return (name, str(b.get("count", 0)), wr, avg)
 
 
-def format_backtest(bt: dict | None, on_start: bool = True) -> str:
+def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | None = None) -> str:
     title = "🧪 <b>SELF-CHECK</b> — how these rules did on real bars"
     if not bt or not isinstance(bt, dict) or "summary" not in bt:
         why = ("It runs automatically a few minutes after the bot starts and takes about ten minutes; check back soon."
@@ -558,14 +558,26 @@ def format_backtest(bt: dict | None, on_start: bool = True) -> str:
         trows = [("Min conf", "Trades", "Win", "Avg")] + [_bt_block(f"≥ {k}%", v) for k, v in th.items() if v.get("count")]
         if len(trows) > 1:
             parts.append(f"<b>IF THE BAR WERE HIGHER</b>\n{_pre(trows, right=(1, 2, 3))}")
+    rows_v = (variants or {}).get("variants") or []
+    if rows_v:
+        trows = [("", "Trades", "Win", "Avg", "Total")]
+        for v in rows_v:
+            b = v.get("summary") or {}
+            if not b.get("count"):
+                continue
+            wr = f"{b['win_rate']:.0f}%" if b.get("win_rate") is not None else "–"
+            trows.append((v["name"], str(b["count"]), wr, _r(b["avg_r"]) if b.get("avg_r") is not None else "–",
+                          _r(b["total_r"], 1) if b.get("total_r") is not None else "–"))
+        if len(trows) > 1:
+            parts.append(f"<b>SAME CALLS, OTHER MANAGEMENT</b>\n{_pre(trows, right=(1, 2, 3, 4))}")
     gen = bt.get("generated_at")
     try:
         gen_s = datetime.fromisoformat(gen).strftime("%d %b %H:%M UTC")
     except (TypeError, ValueError):
         gen_s = "n/a"
     parts.append(f"<i>Technical-only replay on {escape(str(bt.get('symbol', 'gold')))} bars — news, calendar blackouts and spreads are not included; "
-                 f"entries at the confirming 15-minute close, stop checked before targets inside a bar. "
-                 f"Past replay results never predict future results. Run {gen_s}.</i>")
+                 f"entries at the confirming 15-minute close, stops and targets fill at their level, stop checked before targets inside a bar; "
+                 f"results count half the position booked at TP1. Past replay results never predict future results. Run {gen_s}.</i>")
     parts.append(DISCLAIMER)
     return "\n\n".join(parts)
 
