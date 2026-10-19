@@ -95,10 +95,11 @@ class SentinelBot:
             if chat is None:
                 return
             if self.settings.allowed_chat_ids and chat.id not in self.settings.allowed_chat_ids:
+                where = "This group's" if chat.type in ("group", "supergroup") else "Your"
                 await context.bot.send_message(
                     chat.id,
-                    f"This bot is private. Your chat id is <code>{chat.id}</code> – add it to "
-                    f"TELEGRAM_ALLOWED_CHAT_IDS to use it.",
+                    f"🔒 <b>PRIVATE BOT</b>\n{where} chat id is <code>{chat.id}</code>.\n"
+                    f"The owner can allow it by adding it to <code>TELEGRAM_ALLOWED_CHAT_IDS</code> on the server.",
                     parse_mode=ParseMode.HTML,
                 )
                 return
@@ -404,6 +405,12 @@ class SentinelBot:
         event loop with the web dashboard)."""
         async with self.app:
             await self._post_init(self.app)
+            # Allowed chats are the intended recipients: subscribe them on every start, so a
+            # redeploy (which resets the free-tier database) never silently drops the reports.
+            for cid in self.settings.allowed_chat_ids:
+                if cid not in self.store.subscribers():
+                    self.store.subscribe(cid)
+                    log.info("Auto-subscribed allowed chat %s", cid)
             await self.app.start()
             await self.app.updater.start_polling(drop_pending_updates=True)
             log.info("Polling Telegram…")
