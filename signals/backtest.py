@@ -372,7 +372,8 @@ def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: di
         rows.append({"name": name, "overrides": overrides, "summary": b})
         log.info("Self-check variant '%s': trades %d · win %s%% · avg %sR · total %sR · PF %s · maxDD %sR",
                  name, b["count"], b["win_rate"], b["avg_r"], b["total_r"], b["profit_factor"], b["max_drawdown_r"])
-        out = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "base_params": base.to_dict(), "variants": rows}
+        out = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "base_params": base.to_dict(), "variants": rows,
+               "complete": len(rows) >= len(VARIANTS) + (1 if base_summary is not None else 0)}
         store.set_state(VARIANTS_KEY, out)          # saved after every variant: a restart loses nothing
     return out if rows else {}
 
@@ -393,7 +394,7 @@ def _log_result(result: dict) -> None:
 
 
 def _fresh(stored: dict | None, base: ReplayParams, max_age_days: float, params_key: str) -> bool:
-    if not stored or not stored.get("generated_at"):
+    if not stored or not stored.get("generated_at") or stored.get("complete") is False:
         return False
     try:
         age = datetime.now(timezone.utc) - datetime.fromisoformat(stored["generated_at"])
