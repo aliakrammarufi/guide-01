@@ -154,12 +154,12 @@ def _sizing_row(sz: Sizing | None) -> tuple | None:
 def format_risk_settings(account: float | None, risk_pct: float | None) -> str:
     if not account:
         return ("💼 <b>POSITION SIZING — OFF</b>\n"
-                "Send your account size and the % you risk per trade:\n"
-                "<code>/risk 5000 1</code>  →  $5,000 account, 1% ($50) per trade.\n"
+                "Send /risk and answer with your account size and the % you risk per trade "
+                "(for example <code>5000 1</code>), or type it in one go: <code>/risk 5000 1</code>.\n"
                 "Every setup and live call will then include the lot size for its stop.")
     return ("💼 <b>POSITION SIZING</b>\n"
             + _pre([("Account", f"${account:,.0f}"), ("Risk per trade", f"{risk_pct:g}%  =  ${account * risk_pct / 100:,.0f}"), ("Contract", "1 lot = 100 oz")], right=())
-            + "\nLots are sized so hitting the stop loses about that amount.\n<code>/risk off</code> turns it off.")
+            + "\nLots are sized so hitting the stop loses about that amount.\nSend /risk again to change it, or <code>/risk off</code>.")
 
 
 # ---------------------------------------------------------------------------

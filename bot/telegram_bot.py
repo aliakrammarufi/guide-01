@@ -10,15 +10,16 @@ Jobs:     scheduled full report (every ANALYSIS_INTERVAL_MIN)
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from html import escape
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, ForceReply, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import Forbidden, TelegramError
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot import formatting as fmt
 from bot.chart import render_chart
@@ -39,6 +40,7 @@ class SentinelBot:
         self.store = store
         self.cache = cache
         self.app: Application = ApplicationBuilder().token(settings.telegram_token).build()
+        self._awaiting_risk: set[int] = set()
         self._register()
 
     # ------------------------------------------------------------------ setup
@@ -62,6 +64,8 @@ class SentinelBot:
         }
         for name, func in handlers.items():
             self.app.add_handler(CommandHandler(name, self._guard(func)))
+        # plain text: answers to the /risk question (replies to the bot work in groups too)
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._guard(self.on_text)))
         self.app.add_error_handler(self._on_error)
 
         jq = self.app.job_queue
@@ -169,27 +173,89 @@ class SentinelBot:
         acct, pct = self._risk_settings(chat_id)
         return size_for(acct or 0, pct or 0, entry, stop, self.settings.contract_oz)
 
+    RISK_PROMPT = "Reply with your account size and the % you risk per trade"
+
+    @staticmethod
+    def _parse_risk(text: str) -> tuple[float, float] | None:
+        """'5000 1', '$5,000 1%', '5000, 1', '5000' → (account, pct). None if it doesn't look like that."""
+        nums = re.findall(r"\d[\d,]*(?:\.\d+)?", text or "")
+        if not nums or len(nums) > 2:
+            return None
+        try:
+            account = float(nums[0].replace(",", ""))
+            pct = float(nums[1].replace(",", "")) if len(nums) > 1 else 1.0
+        except ValueError:
+            return None
+        if account < 10 or not (0 < pct <= 10):
+            return None
+        return account, pct
+
+    async def _save_risk(self, chat_id: int, account: float, pct: float) -> None:
+        self.store.set_state(f"risk:{chat_id}", {"account": account, "risk_pct": pct})
+        self._awaiting_risk.discard(chat_id)
+        await self._send(chat_id, "✅ <b>SAVED</b>\n\n" + fmt.format_risk_settings(account, pct))
+
+    async def _ask_risk(self, update: Update) -> None:
+        chat_id = update.effective_chat.id
+        self._awaiting_risk.add(chat_id)
+        acct, pct = self._risk_settings(chat_id)
+        current = fmt.format_risk_settings(acct, pct) if acct else "💼 <b>POSITION SIZING</b> — not set yet"
+        try:
+            await update.effective_message.reply_text(
+                f"{current}\n\n✍️ {self.RISK_PROMPT}, for example <code>5000 1</code> "
+                f"($5,000 account, 1% risk = $50 per trade). Send <code>off</code> to turn it off.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=ForceReply(selective=True, input_field_placeholder="account size  risk %   e.g. 5000 1"),
+            )
+        except TelegramError as exc:
+            log.warning("risk prompt failed: %s", exc)
+
     async def cmd_risk(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
-        args = [a.replace(",", "").replace("$", "").replace("%", "") for a in (context.args or [])]
-        if args and args[0].lower() == "off":
+        raw = " ".join(context.args or []).strip()
+        if raw.lower() in {"off", "stop", "none"}:
             self.store.set_state(f"risk:{chat_id}", {})
+            self._awaiting_risk.discard(chat_id)
             await self._send(chat_id, "💼 <b>POSITION SIZING OFF</b>")
             return
-        if len(args) >= 1:
-            try:
-                account = float(args[0])
-                pct = float(args[1]) if len(args) > 1 else 1.0
-                if account <= 0 or not (0 < pct <= 10):
-                    raise ValueError
-            except ValueError:
-                await self._send(chat_id, "Usage: <code>/risk 5000 1</code> (account size, % risk per trade – max 10%) or <code>/risk off</code>")
-                return
-            self.store.set_state(f"risk:{chat_id}", {"account": account, "risk_pct": pct})
-            await self._send(chat_id, "✅ <b>SAVED</b>\n\n" + fmt.format_risk_settings(account, pct))
+        if raw:
+            parsed = self._parse_risk(raw)
+            if parsed:
+                await self._save_risk(chat_id, *parsed)
+            else:
+                await self._send(chat_id, "I couldn't read that. Send it as <code>/risk 5000 1</code> — account size, then % risk per trade (max 10%).")
             return
-        acct, pct = self._risk_settings(chat_id)
-        await self._send(chat_id, fmt.format_risk_settings(acct, pct))
+        await self._ask_risk(update)
+
+    async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Plain text: only used to answer the /risk question."""
+        msg = update.effective_message
+        if msg is None or not msg.text:
+            return
+        chat_id = update.effective_chat.id
+        replied = msg.reply_to_message
+        answering = chat_id in self._awaiting_risk or (
+            replied is not None and replied.from_user is not None and replied.from_user.id == context.bot.id
+            and self.RISK_PROMPT.lower() in (replied.text or "").lower()
+        )
+        if not answering:
+            if update.effective_chat.type == "private":
+                parsed = self._parse_risk(msg.text)
+                if parsed:
+                    await self._save_risk(chat_id, *parsed)
+                else:
+                    await self._send(chat_id, "Use a command — /help lists them. To set position sizing, send /risk.")
+            return
+        if msg.text.strip().lower() in {"off", "stop", "none"}:
+            self.store.set_state(f"risk:{chat_id}", {})
+            self._awaiting_risk.discard(chat_id)
+            await self._send(chat_id, "💼 <b>POSITION SIZING OFF</b>")
+            return
+        parsed = self._parse_risk(msg.text)
+        if parsed:
+            await self._save_risk(chat_id, *parsed)
+        else:
+            await self._ask_risk(update)
 
     # -------------------------------------------------------------- commands
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
