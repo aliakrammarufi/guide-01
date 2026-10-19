@@ -140,12 +140,13 @@ still works – you just get rule-based scores and no written briefing.
 
 | Setting | Default | Notes |
 |---|---|---|
-| `DATA_PROVIDER=yfinance` | `GC=F` | COMEX gold futures, free, no key. Tracks spot within a few dollars (contango). Use `YF_SYMBOL=XAUUSD=X` for spot if it is stable for you. |
-| `DATA_PROVIDER=twelvedata` | `XAU/USD` | True spot. Free key at twelvedata.com (800 requests/day is plenty). Falls back to yfinance on error. |
-| `NEWS_FEEDS` | 46 built-in feeds | see below. All are fetched **concurrently** (16 workers, 8 s timeout) so a full scan takes a few seconds; any feed that fails is skipped. |
-| `CALENDAR_URL` | ForexFactory weekly JSON | free economic calendar; `CALENDAR_CURRENCIES=USD` by default. |
+| `QUOTE_PROVIDER=goldapi` | every 1 s | Live spot XAU/USD ticks for the terminal from gold-api.com – free, no key. Falls back to the data provider. |
+| `DATA_PROVIDER=yfinance` | `GC=F` | COMEX gold futures bars, free, no key. With `SPOT_BASIS=true` (default) the bars are **rescaled onto the live spot price** at every refresh, so candles, support/resistance and SL/TP are on the same scale as your MT5 quote. Falls back to `XAUUSD=X`, then `GLD` if Yahoo refuses the symbol. |
+| `DATA_PROVIDER=twelvedata` | `XAU/USD` | True spot bars. Free key at twelvedata.com (800 requests/day is plenty). Falls back to yfinance on error. |
+| `NEWS_FEEDS` | 45 built-in feeds | see below. All are fetched **concurrently** (16 workers, 8 s timeout) so a full scan takes a few seconds; any feed that fails is skipped. |
+| `CALENDAR_URL` | ForexFactory weekly JSON | free economic calendar, `CALENDAR_CURRENCIES=USD` by default. ForexFactory rate-limits shared cloud IPs, so the bot falls back to TradingView's calendar feed, then Nasdaq's (impact classified by event name). |
 
-### The 46 built-in news feeds
+### The 45 built-in news feeds
 
 **Google News searches** (each aggregates Reuters, Bloomberg, AP, CNBC, WSJ, FT,
 MarketWatch and hundreds more – the cheapest way to get the big wires):
