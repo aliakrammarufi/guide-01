@@ -94,6 +94,25 @@ async def main_async(args: argparse.Namespace) -> int:
 
     tasks.append(asyncio.create_task(warm(), name="warm"))
 
+    # Free-tier hosts spin the instance down after ~15 idle minutes, which stops the
+    # news scans and alerts. A periodic request to our own public URL keeps it warm.
+    if settings.keepalive and settings.keepalive_url and not args.no_web:
+        import httpx
+
+        async def keepalive():
+            url = settings.keepalive_url.rstrip("/") + "/api/health"
+            interval = max(60, settings.keepalive_interval_min * 60)
+            log.info("Keep-alive: pinging %s every %d s", url, interval)
+            async with httpx.AsyncClient(timeout=20) as client:
+                while True:
+                    await asyncio.sleep(interval)
+                    try:
+                        await client.get(url)
+                    except Exception as exc:  # noqa: BLE001
+                        log.debug("keep-alive ping failed: %s", exc)
+
+        tasks.append(asyncio.create_task(keepalive(), name="keepalive"))
+
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:

@@ -140,6 +140,10 @@ class Settings:
     # Live tick source for the terminal: "goldapi" (free, no key, ~1 s), "twelvedata", or "yfinance"
     quote_provider: str = field(default_factory=lambda: _env("QUOTE_PROVIDER", "goldapi"))
     quote_interval_sec: float = field(default_factory=lambda: _env_float("QUOTE_INTERVAL_SEC", 1.0))
+    # Keep a free-tier host (Render) awake by pinging our own public URL every few minutes.
+    keepalive: bool = field(default_factory=lambda: _env_bool("KEEPALIVE", False))
+    keepalive_url: str = field(default_factory=lambda: _env("KEEPALIVE_URL", _env("RENDER_EXTERNAL_URL")))
+    keepalive_interval_min: int = field(default_factory=lambda: _env_int("KEEPALIVE_INTERVAL_MIN", 10))
 
     # --- AI (optional, Anthropic API) --------------------------------------
     anthropic_api_key: str = field(default_factory=lambda: _env("ANTHROPIC_API_KEY"))
