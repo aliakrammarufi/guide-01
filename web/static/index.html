@@ -355,6 +355,8 @@
   .sig-open { font-family: var(--mono); font-size: 12px; }
   .sig-open b.up { color: var(--bull); } .sig-open b.down { color: var(--bear); }
   .sig-hist { min-width: 0; }
+  .sig-check { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); font-family: var(--mono); font-size: 11px; color: var(--ink-3); letter-spacing: .03em; line-height: 1.5; }
+  .sig-check b { color: var(--ink-2); font-weight: 500; } .sig-check b.up { color: var(--bull); } .sig-check b.down { color: var(--bear); }
   .sig-hist-head { display: flex; justify-content: space-between; font-family: var(--display); font-size: 11px; letter-spacing: .18em; color: var(--ink-2); margin-bottom: 6px; }
   .sig-scroll { overflow: auto; max-height: 220px; border: 1px solid var(--line); }
   .sigtable { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
@@ -587,6 +589,7 @@
         <div class="sig-hist">
           <div class="sig-hist-head"><span>History</span><span id="sig-count"></span></div>
           <div class="sig-scroll"><table class="sigtable" id="sig-table"><thead><tr><th>Opened</th><th>Side</th><th>Entry</th><th>SL</th><th>TP2</th><th>Exit</th><th>Result</th></tr></thead><tbody></tbody></table></div>
+          <div class="sig-check" id="sig-check"></div>
         </div>
       </div>
     </div>
@@ -1129,6 +1132,13 @@
     el.className = 'sig-trigger ' + (touched ? 'touch' : 'wait');
     el.textContent = inZone ? '◉ price in the zone · waiting for a 15-minute confirmation' : touched ? '◉ zone touched · waiting for a 15-minute confirmation' : '◌ waiting for a pullback into the zone';
   }
+  function renderSelfcheck(sc) {
+    const el = $('sig-check'); if (!el) return;
+    if (!sc || !sc.count) { el.innerHTML = ''; return; }
+    const d = sc.period && sc.period.days ? `${Math.round(sc.period.days)}-day` : 'historical';
+    const cls = v => v >= 0 ? 'up' : 'down';
+    el.innerHTML = `SELF-CHECK · ${d} replay of these rules on real bars (technical only): <b>${sc.count}</b> trades · win rate <b class="${sc.win_rate >= 50 ? 'up' : 'down'}">${sc.win_rate}%</b> · avg <b class="${cls(sc.avg_r)}">${signed(Number(sc.avg_r).toFixed(2))}R</b> · total <b class="${cls(sc.total_r)}">${signed(Number(sc.total_r).toFixed(1))}R</b> · profit factor <b>${sc.profit_factor ?? '—'}</b> · max drawdown <b>${sc.max_drawdown_r}R</b> — past replay ≠ future results`;
+  }
   function renderSignals(sg) {
     if (!sg) return;
     const prevActiveId = sigState && sigState.active ? sigState.active.id : null;
@@ -1137,7 +1147,7 @@
     // stats
     const st = sg.stats || {};
     $('sig-stats').innerHTML = st.count ? `<span>closed <b>${st.count}</b></span><span>win rate <b class="${st.win_rate >= 50 ? 'up' : 'down'}">${st.win_rate}%</b></span><span>total <b class="${st.total_r >= 0 ? 'up' : 'down'}">${signed(st.total_r.toFixed(2))}R</b></span><span>avg <b>${signed(st.avg_r.toFixed(2))}R</b></span>` : '<span>no closed calls yet</span>';
-    renderSession(sg.session); renderTrigger(sg);
+    renderSession(sg.session); renderTrigger(sg); renderSelfcheck(sg.selfcheck);
     if (sg.sizing && sg.sizing.account) { const ai = $('risk-acct'), pi = $('risk-pct'); if (ai && !ai.value) ai.placeholder = `${sg.sizing.account} ${sg.sizing.currency}`; if (pi && !pi.value) pi.placeholder = sg.sizing.risk_pct; }
     if (a) {
       const buy = a.side === 'BUY', pending = a.status === 'pending';

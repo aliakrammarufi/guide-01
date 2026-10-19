@@ -334,6 +334,21 @@ class Store:
             ).fetchall()
             return [{"id": r["id"], "signal_id": r["signal_id"], "kind": r["kind"], "price": r["price"], "at": r["at"], "text": r["text"], "side": r["side"]} for r in rows]
 
+    def serialize(self) -> bytes:
+        """The whole database as a SQLite file image (for backups); consistent under the store lock."""
+        with self._lock:
+            if hasattr(self._conn, "serialize"):          # Python ≥ 3.11
+                return self._conn.serialize()
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:    # older Pythons: online backup to a file
+                p = Path(tmp) / "snapshot.db"
+                dst = sqlite3.connect(str(p))
+                try:
+                    self._conn.backup(dst)
+                finally:
+                    dst.close()
+                return p.read_bytes()
+
     def close(self) -> None:
         self._conn.close()
 

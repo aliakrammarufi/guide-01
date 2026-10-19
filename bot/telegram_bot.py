@@ -62,6 +62,8 @@ class SentinelBot:
             "unsubscribe": self.cmd_unsubscribe,
             "alerts": self.cmd_alerts,
             "risk": self.cmd_risk,
+            "backtest": self.cmd_backtest,
+            "selfcheck": self.cmd_backtest,
             "status": self.cmd_status,
         }
         for name, func in handlers.items():
@@ -89,6 +91,7 @@ class SentinelBot:
                 BotCommand("unsubscribe", "Stop scheduled reports"),
                 BotCommand("alerts", "Alerts on|off"),
                 BotCommand("risk", "Account size & % risk → lot size per call"),
+                BotCommand("backtest", "How the rules did on recent real bars"),
                 BotCommand("status", "Bot status"),
                 BotCommand("help", "Commands"),
             ]
@@ -425,6 +428,10 @@ class SentinelBot:
             state = "on" if self.store.alerts_enabled(chat_id) else "off"
             await self._send(chat_id, f"🔔 Alerts are <b>{state}</b>. Use <code>/alerts on</code> or <code>/alerts off</code>.")
 
+    async def cmd_backtest(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        bt = await asyncio.to_thread(self.store.get_state, "backtest")
+        await self._send(update.effective_chat.id, fmt.format_backtest(bt, on_start=self.settings.backtest_on_start))
+
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         rep = self.cache.report
         s = self.settings
@@ -446,6 +453,7 @@ class SentinelBot:
             ("Closed calls", str(tr.stats()["count"])),
             ("AI", ai),
             ("Subscribers", f"{len(self.store.subscribers())} · alerts on {len(self.store.subscribers(alerts_only=True))}"),
+            ("State backup", self.cache.backup.describe() if self.cache.backup else "off"),
         ]
         text = "🛰 <b>STATUS</b>\n" + fmt._pre(rows, right=())
         if rep and rep.session:

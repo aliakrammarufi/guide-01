@@ -27,6 +27,7 @@ class ReportCache:
         self._lock = threading.Lock()
         self._history: list[dict] = []   # recent signals (for the dashboard sparkline)
         self.last_error: str | None = None
+        self.backup = None               # StateBackup when REDIS_URL is set (see backup.py)
 
     @property
     def report(self) -> Report | None:

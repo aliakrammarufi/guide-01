@@ -210,6 +210,17 @@ class Settings:
     # --- Storage ------------------------------------------------------------
     db_path: Path = field(default_factory=lambda: Path(_env("DB_PATH", str(BASE_DIR / "data" / "sentinel.db"))))
     log_level: str = field(default_factory=lambda: _env("LOG_LEVEL", "INFO"))
+    # Redis-compatible store (Render Key Value, Upstash…) that keeps a copy of the database so that
+    # calls, history, subscribers and /risk settings survive a redeploy on a host without a disk.
+    redis_url: str = field(default_factory=lambda: _env("REDIS_URL") or _env("KEY_VALUE_URL"))
+    backup_interval_sec: int = field(default_factory=lambda: _env_int("BACKUP_INTERVAL_SEC", 120))
+
+    # --- Self-check (historical replay of the signal rules) -----------------
+    # Replays the last ~60 days of 15-minute bars through the engine on start-up (when the last
+    # run is older than BACKTEST_MAX_AGE_DAYS) so /backtest and the terminal can show how the
+    # rules would have done. Technical-only: news history is not available.
+    backtest_on_start: bool = field(default_factory=lambda: _env_bool("BACKTEST_ON_START", False))
+    backtest_max_age_days: float = field(default_factory=lambda: _env_float("BACKTEST_MAX_AGE_DAYS", 7.0))
 
     @property
     def ai_enabled(self) -> bool:

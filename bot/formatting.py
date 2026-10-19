@@ -516,6 +516,61 @@ def format_alert_price(tech: TechSnapshot, move_pct: float, window_label: str) -
 
 
 # ---------------------------------------------------------------------------
+# self-check (historical replay)
+# ---------------------------------------------------------------------------
+def _bt_block(name: str, b: dict) -> tuple:
+    wr = f"{b['win_rate']:.0f}%" if b.get("win_rate") is not None else "–"
+    avg = _r(b["avg_r"]) if b.get("avg_r") is not None else "–"
+    return (name, str(b.get("count", 0)), wr, avg)
+
+
+def format_backtest(bt: dict | None, on_start: bool = True) -> str:
+    title = "🧪 <b>SELF-CHECK</b> — how these rules did on real bars"
+    if not bt or not isinstance(bt, dict) or "summary" not in bt:
+        why = ("It runs automatically a few minutes after the bot starts and takes about ten minutes; check back soon."
+               if on_start else "It is switched off (BACKTEST_ON_START).")
+        return f"{title}\n\nNo replay has been recorded yet. {why}\n\n{DISCLAIMER}"
+    s, per = bt["summary"], bt.get("period") or {}
+    try:
+        f = datetime.fromisoformat(per["from"]).strftime("%d %b")
+        t = datetime.fromisoformat(per["to"]).strftime("%d %b")
+        when = f"{f} → {t} ({per.get('days', 0):.0f} days)"
+    except (KeyError, ValueError, TypeError):
+        when = "n/a"
+    wr = f"{s['win_rate']:.1f}%" if s.get("win_rate") is not None else "–"
+    pf = "–" if s.get("profit_factor") is None else f"{s['profit_factor']:.2f}"
+    rows = [
+        ("Period", when),
+        ("Setups", f"{s.get('setups', 0)} · traded {s.get('count', 0)} · no trade {s.get('no_trade', 0)}"),
+        ("Win rate", f"{wr}  ({s.get('wins', 0)} W · {s.get('losses', 0)} L · {s.get('breakeven', 0)} BE)"),
+        ("Average", f"{_r(s['avg_r']) if s.get('avg_r') is not None else '–'} per trade · total {_r(s.get('total_r', 0.0), 1)}"),
+        ("Profit factor", f"{pf} · max drawdown {s.get('max_drawdown_r', 0):.1f}R"),
+        ("TP1 reached", f"{s['tp1_rate']:.0f}% of trades · avg hold {s.get('avg_hold_h') or 0:.1f} h" if s.get("tp1_rate") is not None else "–"),
+    ]
+    parts = [title, _pre(rows, right=())]
+    for label, key in (("BY CONFIDENCE", "by_confidence"), ("BY SESSION", "by_session"), ("BY CONFIRMATION", "by_trigger")):
+        grp = bt.get(key) or {}
+        if grp:
+            trows = [("", "Trades", "Win", "Avg")] + [_bt_block(k.replace("15m ", ""), v) for k, v in grp.items()]
+            parts.append(f"<b>{label}</b>\n{_pre(trows, right=(1, 2, 3))}")
+    th = bt.get("thresholds") or {}
+    if th:
+        trows = [("Min conf", "Trades", "Win", "Avg")] + [_bt_block(f"≥ {k}%", v) for k, v in th.items() if v.get("count")]
+        if len(trows) > 1:
+            parts.append(f"<b>IF THE BAR WERE HIGHER</b>\n{_pre(trows, right=(1, 2, 3))}")
+    gen = bt.get("generated_at")
+    try:
+        gen_s = datetime.fromisoformat(gen).strftime("%d %b %H:%M UTC")
+    except (TypeError, ValueError):
+        gen_s = "n/a"
+    parts.append(f"<i>Technical-only replay on {escape(str(bt.get('symbol', 'gold')))} bars — news, calendar blackouts and spreads are not included; "
+                 f"entries at the confirming 15-minute close, stop checked before targets inside a bar. "
+                 f"Past replay results never predict future results. Run {gen_s}.</i>")
+    parts.append(DISCLAIMER)
+    return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # help
 # ---------------------------------------------------------------------------
 HELP = """📖 <b>COMMANDS</b>
@@ -530,6 +585,7 @@ HELP = """📖 <b>COMMANDS</b>
 /signal — current bias, confidence and the entry plan
 /signals — setup or live BUY / SELL call with stop, targets and results
 /analyze — full report with chart, AI briefing, technicals and news
+/backtest — how these rules did on the last two months of real bars
 
 <b>Settings</b>
 /risk 5000 1 — account size and % risk per trade → lot size on every call

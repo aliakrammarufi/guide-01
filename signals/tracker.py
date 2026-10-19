@@ -176,6 +176,7 @@ class SignalTracker:
         self.last_trigger: dict | None = None      # last trigger evaluation (for the UI)
         self._lock = threading.RLock()             # on_price (tick thread) and on_analysis (pipeline thread) never interleave
         self.listeners: list[Callable[[SignalEvent], None]] = []   # notified on every event, immediately
+        self.quiet = False                         # True for replays: events are not logged at INFO
 
     # ---- reads --------------------------------------------------------------
     def active(self) -> TradeSignal | None:
@@ -217,7 +218,7 @@ class SignalTracker:
         ev = SignalEvent(kind, replace(sig), price)      # snapshot: later state changes must not rewrite this message
         self.store.add_signal_event(sig.id, kind, price, ev.text)
         self._pending.append(ev)
-        log.info("Signal %s #%d: %s", kind, sig.id, ev.text)
+        (log.debug if self.quiet else log.info)("Signal %s #%d: %s", kind, sig.id, ev.text)
         for fn in list(self.listeners):
             try:
                 fn(ev)

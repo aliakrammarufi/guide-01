@@ -75,6 +75,7 @@ Other ways to run:
 | `/calendar` | upcoming USD releases (CPI, FOMC, payrolls, PCE, Fed speakers) with forecast / previous and a countdown |
 | `/subscribe` / `/unsubscribe` | scheduled report every `ANALYSIS_INTERVAL_MIN` minutes |
 | `/alerts on|off` | bias-change, big-move and breaking-news alerts |
+| `/backtest` | how the signal rules did on the last ~60 days of real 15-minute bars (technical-only replay) |
 | `/status` | what the bot is doing and with which settings |
 
 ### Trade signals – when to buy, when to sell
@@ -146,10 +147,18 @@ still works – you just get rule-based scores and no written briefing.
 
 ## Hosting notes
 
-* **Render free tier has no persistent disk**: every deploy or restart starts with an empty database — open
-  calls, signal history and `/risk` settings set in chat are lost. The allow-listed chats are re-subscribed
-  automatically and `ACCOUNT_SIZE` / `RISK_PCT` / `FIXED_LOTS` env defaults survive. The Starter plan with the
-  1 GB disk in `render.yaml` keeps everything.
+* **Render free tier has no persistent disk**: every deploy or restart would start with an empty database.
+  Set `REDIS_URL` to a Redis-compatible store (a free Render Key Value instance works, internal URL
+  `redis://red-xxxx:6379`) and the bot snapshots the whole database there every 2 minutes and on shutdown,
+  then restores it on the next start — open calls, history, subscribers, `/risk` settings and the self-check
+  all survive a redeploy. (A free Key Value instance keeps data in memory only; Render may restart it, which
+  loses the copy — rare, and the bot simply starts fresh.) The allow-listed chats are re-subscribed on every
+  start anyway, and `ACCOUNT_SIZE` / `RISK_PCT` / `FIXED_LOTS` env defaults always survive. The Starter plan
+  with the 1 GB disk in `render.yaml` needs none of this.
+* On SIGTERM (a redeploy) the bot takes a last snapshot, stops Telegram polling and exits within seconds, so
+  the old and the new instance barely overlap.
+* News feeds are fetched with conditional requests (`ETag` / `If-Modified-Since`): publishers that support
+  them answer "304 Not Modified" instead of resending the whole feed every scan.
 * Tick-driven events (setup confirmed, TP1, TP2, stop) reach Telegram within a second of the tick; the
   scheduled report and the news scan are separate.
 
@@ -251,6 +260,20 @@ tests/                 offline unit tests (synthetic data)
 The look is a cyberpunk holographic HUD: indigo night, electric cyan and magenta, angled panels with neon edges, a holographic multi-ring gauge for the bias (the arc fills clockwise for bullish, counter-clockwise for bearish; orbiting satellites ping on every tick), LED segment meters, a trade monitor and an event stream. Two alternative skins ship alongside – `web/static/index_gold.html` (dark + gold) and `web/static/index_matrix.html` (green phosphor terminal); copy either over `index.html` to switch.
 
 Everything animated respects the operating-system "reduce motion" setting.
+
+## Self-check (historical replay)
+
+With `BACKTEST_ON_START=true` the bot replays the last ~60 days of real 15-minute bars through the exact
+production path a few minutes after start-up (and again when the stored result is older than
+`BACKTEST_MAX_AGE_DAYS` or the rules changed): technical analysis → setup zone → 15-minute confirmation →
+stop / TP1 / TP2, on a private in-memory tracker. `/backtest` on Telegram, the Signals panel of the terminal and
+`GET /api/backtest` show the result: trades, win rate, average and total R, profit factor, max drawdown, TP1
+rate, and breakdowns by confidence, session and confirmation type, plus "what if the confidence bar were
+higher". `python tools/backtest.py --min-conf 55` does the same from the command line.
+
+It is technical-only (no news history, no calendar blackouts, no spreads), fills at the confirming
+15-minute close and checks the stop before the targets inside a bar — a way to judge the rules on numbers,
+not a forecast.
 
 ## Tuning tips
 

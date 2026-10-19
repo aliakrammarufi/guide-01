@@ -132,6 +132,17 @@ def sizing_defaults() -> dict:
             "fixed_lots": st.fixed_lots, "fx": fx, "fx_source": src, "contract_oz": st.contract_oz}
 
 
+def selfcheck_summary(store) -> dict | None:
+    """Compact headline numbers of the last historical replay (see signals/backtest.py)."""
+    bt = store.get_state("backtest")
+    if not bt or not isinstance(bt, dict) or "summary" not in bt:
+        return None
+    s = bt["summary"]
+    return {"generated_at": bt.get("generated_at"), "period": bt.get("period"), "count": s.get("count"), "setups": s.get("setups"),
+            "win_rate": s.get("win_rate"), "avg_r": s.get("avg_r"), "total_r": s.get("total_r"),
+            "profit_factor": s.get("profit_factor"), "max_drawdown_r": s.get("max_drawdown_r"), "tp1_rate": s.get("tp1_rate")}
+
+
 def signals_json(tracker, session=None) -> dict:
     live = tracker.live()
     return {
@@ -142,6 +153,7 @@ def signals_json(tracker, session=None) -> dict:
         "events": tracker.events(limit=20),
         "trigger": tracker.last_trigger,
         "session": session.to_dict() if session is not None else None,
+        "selfcheck": selfcheck_summary(tracker.store),
     }
 
 
@@ -257,6 +269,14 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
         rep = cache.report
         return JSONResponse(await asyncio.to_thread(signals_json, cache.tracker, rep.session if rep else None) | {"demo": demo})
 
+    @app.get("/api/backtest")
+    async def backtest():
+        """The last historical replay of the signal rules (technical-only self-check)."""
+        bt = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest")
+        if not bt:
+            raise HTTPException(status_code=404, detail="no self-check has run yet")
+        return JSONResponse(bt)
+
     @app.get("/api/tape")
     async def tape():
         t = await asyncio.to_thread(quotes.get_tape)
@@ -281,6 +301,7 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
             "last_run": rep.generated_at.isoformat() if rep else None,
             "stale": cache.is_stale(),
             "error": cache.last_error,
+            "backup": cache.backup.status() if getattr(cache, "backup", None) else {"enabled": False},
             "now": datetime.now(timezone.utc).isoformat(),
         }
 

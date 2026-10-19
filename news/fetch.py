@@ -9,6 +9,8 @@ import hashlib
 import html
 import logging
 import re
+import threading
+from dataclasses import replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from calendar import timegm
@@ -119,18 +121,47 @@ def parse_feed(content: bytes | str, feed_url: str) -> list[Article]:
     return out
 
 
-def fetch_feed(url: str, timeout: float = 15.0) -> list[Article]:
+# Conditional requests: publishers that send ETag / Last-Modified answer "304 Not Modified"
+# (a few hundred bytes) when nothing changed, instead of the whole feed every 3 minutes.
+_COND: dict[str, tuple[str | None, str | None, list[Article]]] = {}   # url → (etag, last-modified, parsed)
+_COND_LOCK = threading.Lock()
+_STATS = {"not_modified": 0}
+
+
+def _fetch_feed_ex(url: str, timeout: float = 15.0) -> tuple[list[Article], bool]:
+    """Fetch one feed. Returns (articles, not_modified)."""
+    headers = {"User-Agent": USER_AGENT}
+    with _COND_LOCK:
+        cached = _COND.get(url)
+    if cached:
+        if cached[0]:
+            headers["If-None-Match"] = cached[0]
+        if cached[1]:
+            headers["If-Modified-Since"] = cached[1]
     try:
-        resp = httpx.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout, follow_redirects=True)
+        resp = httpx.get(url, headers=headers, timeout=timeout, follow_redirects=True)
+        if resp.status_code == 304 and cached:
+            with _COND_LOCK:
+                _STATS["not_modified"] += 1
+            return [replace(a) for a in cached[2]], True
         resp.raise_for_status()
     except Exception as exc:  # noqa: BLE001
         log.warning("Feed failed %s: %s", url, exc)
-        return []
+        return [], False
     try:
-        return parse_feed(resp.content, url)
+        articles = parse_feed(resp.content, url)
     except Exception as exc:  # noqa: BLE001
         log.warning("Feed parse failed %s: %s", url, exc)
-        return []
+        return [], False
+    etag, last_mod = resp.headers.get("etag"), resp.headers.get("last-modified")
+    if etag or last_mod:
+        with _COND_LOCK:
+            _COND[url] = (etag, last_mod, [replace(a) for a in articles])
+    return articles, False
+
+
+def fetch_feed(url: str, timeout: float = 15.0) -> list[Article]:
+    return _fetch_feed_ex(url, timeout)[0]
 
 
 def fetch_all(feeds: list[str], max_age_hours: float = 72.0, workers: int = 16, timeout: float = 8.0) -> list[Article]:
@@ -144,11 +175,14 @@ def fetch_all(feeds: list[str], max_age_hours: float = 72.0, workers: int = 16, 
     seen: dict[str, Article] = {}
     now = datetime.now(timezone.utc)
     started = now
+    with _COND_LOCK:
+        nm_before = _STATS["not_modified"]
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(feeds) or 1))) as pool:
-        results = pool.map(lambda u: fetch_feed(u, timeout=timeout), feeds)
-    ok = 0
+        results = list(pool.map(lambda u: fetch_feed(u, timeout=timeout), feeds))
+    with _COND_LOCK:
+        unchanged = _STATS["not_modified"] - nm_before
+    ok = sum(bool(arts) for arts in results)
     for arts in results:
-        ok += bool(arts)
         for art in arts:
             age_h = (now - art.published_at).total_seconds() / 3600.0
             if age_h > max_age_hours or age_h < -6:  # ignore stale or badly-dated items
@@ -157,5 +191,5 @@ def fetch_all(feeds: list[str], max_age_hours: float = 72.0, workers: int = 16, 
                 seen[art.id] = art
     articles = sorted(seen.values(), key=lambda a: a.published_at, reverse=True)
     took = (datetime.now(timezone.utc) - started).total_seconds()
-    log.info("Fetched %d relevant unique articles from %d/%d feeds in %.1fs", len(articles), ok, len(feeds), took)
+    log.info("Fetched %d relevant unique articles from %d/%d feeds in %.1fs (%d unchanged)", len(articles), ok, len(feeds), took, unchanged)
     return articles
