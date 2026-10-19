@@ -134,11 +134,21 @@ def fetch_nasdaq_events(currencies: list[str], days: int = 7, timeout: float = 1
     out: list[Event] = []
     today = datetime.now(timezone.utc).date()
     logged = False
+    ok_days = 0
+    last_exc: Exception | None = None
     for i in range(days):
         day = today + timedelta(days=i)
-        r = httpx.get(NASDAQ_URL.format(date=day.isoformat()), headers=NASDAQ_HEADERS, timeout=timeout)
-        r.raise_for_status()
-        body = r.json() or {}
+        try:
+            r = httpx.get(NASDAQ_URL.format(date=day.isoformat()), headers=NASDAQ_HEADERS, timeout=timeout)
+            if r.status_code == 404:        # no events that day (weekends, holidays)
+                ok_days += 1
+                continue
+            r.raise_for_status()
+            body = r.json() or {}
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            continue
+        ok_days += 1
         rows = ((body.get("data") or {}).get("rows") or []) if isinstance(body, dict) else []
         if rows and not logged:
             log.info("Nasdaq calendar sample row: %s", {k: rows[0].get(k) for k in list(rows[0])[:8]})
@@ -161,6 +171,8 @@ def fetch_nasdaq_events(currencies: list[str], days: int = 7, timeout: float = 1
                              forecast=str(row.get("consensus") or "").strip(),
                              previous=str(row.get("previous") or "").strip(),
                              actual=str(row.get("actual") or "").strip()))
+    if ok_days == 0 and last_exc is not None:
+        raise last_exc
     return sorted(out, key=lambda e: e.when)
 
 
