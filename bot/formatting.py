@@ -17,6 +17,7 @@ from market.analysis import TechSnapshot
 from news.sentiment import NewsScore
 from news.store import Article
 from signals.engine import Signal
+from signals.sizing import Sizing
 
 DISCLAIMER = "<i>ℹ️ Decision support only — this bot never places orders.</i>"
 RULE = "──────────────"
@@ -123,6 +124,36 @@ def headline_line(a: Article, with_link: bool = True) -> str:
     return f"{_impact_icon(a)} {title}\n      <i>{meta}</i>{reason}"
 
 
+def session_line(session: dict | None) -> str:
+    """One line: which session we are in and whether new entries are allowed."""
+    if not session:
+        return ""
+    label = escape(session.get("label", ""))
+    if session.get("blackout"):
+        return f"🕑 Session: <b>{label}</b> — no new entries"
+    ok = session.get("allow_entries", True)
+    return f"🕑 Session: <b>{label}</b>" + ("" if ok else " — no new entries right now")
+
+
+def sizing_lines(sz: Sizing | None, entry: float, tp1: float, tp2: float) -> list[str]:
+    if sz is None:
+        return []
+    return [
+        f"💼 Position: <b>{sz.lots:.2f} lots</b>   (risk ${sz.actual_risk:,.0f} ≈ {sz.risk_pct:g}% of ${sz.account:,.0f})",
+        f"      TP1 ≈ <b>+${sz.profit_at(tp1 - entry):,.0f}</b>   ·   TP2 ≈ <b>+${sz.profit_at(tp2 - entry):,.0f}</b>",
+    ]
+
+
+def format_risk_settings(account: float | None, risk_pct: float | None) -> str:
+    if not account:
+        return ("💼 <b>Position sizing is off.</b>\n"
+                "Tell me your account size and the % you risk per trade, e.g.\n"
+                "<code>/risk 5000 1</code>  →  $5,000 account, 1% ($50) per trade.\n"
+                "Every BUY / SELL call will then include the lot size for your stop.")
+    return (f"💼 <b>Position sizing</b>\nAccount <b>${account:,.0f}</b> · risk <b>{risk_pct:g}%</b> = <b>${account * risk_pct / 100:,.0f}</b> per trade\n"
+            f"Lots are sized so that hitting the stop loses about that amount (1 lot = 100 oz).\n<code>/risk off</code> turns it off.")
+
+
 # ---------------------------------------------------------------------------
 # price
 # ---------------------------------------------------------------------------
@@ -161,19 +192,24 @@ def format_signal(sig: Signal, compact: bool = False) -> str:
              "one-sided": "➖ one-sided — only one of them has a view"}.get(sig.agreement, escape(sig.agreement))
     lines.append(f"Agreement: {agree}")
 
-    if sig.direction != "flat" and sig.stop is not None:
-        side = "long" if sig.direction == "long" else "short"
+    if sig.direction != "flat" and sig.stop is not None and sig.zone_lo is not None:
+        side = "BUY" if sig.direction == "long" else "SELL"
+        mid = sig.zone_mid
+        headline = ("Price is in the zone – wait for a 15-minute confirmation" if sig.entry_mode == "in-zone"
+                    else f"Wait for a pullback – don't chase beyond <b>{_num(sig.chase_limit)}</b>")
         lines += [
             "",
-            f"🎯 <b>Reference levels</b> ({side})",
-            f"Entry        ~<b>{sig.price:,.1f}</b>",
-            f"Stop          <b>{_num(sig.stop)}</b>   ({_diff(sig.stop - sig.price)})",
-            f"Target 1    <b>{_num(sig.target1)}</b>   ({_diff(sig.target1 - sig.price)})",
-            f"Target 2    <b>{_num(sig.target2)}</b>   ({_diff(sig.target2 - sig.price)})",
+            f"🎯 <b>{side} plan</b>",
+            f"Entry zone   <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b>",
+            f"Stop            <b>{_num(sig.stop)}</b>   ({_diff(sig.stop - mid)} from mid)",
+            f"Target 1      <b>{_num(sig.target1)}</b>   ({_diff(sig.target1 - mid)})",
+            f"Target 2      <b>{_num(sig.target2)}</b>   ({_diff(sig.target2 - mid)})",
+            f"Reward : risk   <b>1 : {sig.planned_rr or 0:.1f}</b>",
+            f"<i>{headline}</i>",
         ]
-        risk = abs(sig.price - sig.stop)
-        if risk:
-            lines.append(f"Reward : risk   <b>1 : {abs(sig.target2 - sig.price) / risk:.1f}</b>")
+    sl = session_line(sig.session)
+    if sl:
+        lines += ["", sl]
     lines += ["", f"🧭 Support <b>{_num(sig.nearest_support)}</b>   ·   Resistance <b>{_num(sig.nearest_resistance)}</b>"]
     if not compact and sig.notes:
         lines += ["", "\n".join(f"💡 {escape(n)}" for n in sig.notes)]
@@ -294,21 +330,44 @@ def format_alert_event(e) -> str:
 # ---------------------------------------------------------------------------
 # trade signals
 # ---------------------------------------------------------------------------
-def format_trade_signal(t, price: float | None = None) -> str:
-    """One BUY/SELL call as a clean block."""
+def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = None) -> str:
+    """One BUY/SELL call as a clean block – a *setup* (waiting) or a *live* call."""
     side = "🟢 <b>BUY</b>" if t.side == "BUY" else "🔴 <b>SELL</b>"
-    status = {"active": "ACTIVE", "tp1": "TP1 HIT · stop moved to break-even", "tp2": "TP2 HIT ✅",
-              "stopped": "STOPPED OUT ❌", "flipped": "CLOSED · bias flipped", "expired": "CLOSED · max hold reached"}.get(t.status, t.status.upper())
     sgn = t.sign
-    rr = abs(t.tp2 - t.entry) / t.risk if t.risk else 0
+    if t.status == "pending":
+        mid = t.entry
+        waiting = ("price is in the zone – waiting for a 15-minute confirmation" if (t.setup_mode == "in-zone" or t.touched)
+                   else "waiting for a pullback into the zone")
+        lines = [
+            f"{side} XAU/USD   —   <b>SETUP · {escape(waiting.upper().split(' – ')[0] if t.touched else 'WAITING')}</b>",
+            f"Entry zone   <b>{_num(t.zone_lo)} – {_num(t.zone_hi)}</b>",
+            f"Stop loss      <b>{t.sl:,.1f}</b>   ({_diff(t.sl - mid)} from zone mid)",
+            f"Take profit 1  <b>{t.tp1:,.1f}</b>   ({_diff(t.tp1 - mid)} · {abs(t.tp1 - mid) / t.risk:.1f}R)",
+            f"Take profit 2  <b>{t.tp2:,.1f}</b>   ({_diff(t.tp2 - mid)} · {t.rr:.1f}R)",
+            f"Don't chase beyond <b>{_num(t.chase)}</b>   ·   confidence <b>{t.confidence}%</b>",
+            f"<i>{waiting[0].upper() + waiting[1:]}. A live call is posted the moment it confirms.</i>",
+        ]
+        lines += sizing_lines(sizing, mid, t.tp1, t.tp2)
+        if price is not None:
+            lines.append(f"📍 Now <b>{price:,.1f}</b>   ({_diff(price - mid)} from zone mid)")
+        lines.append(f"<i>Setup posted {t.opened_at.strftime('%d %b %H:%M UTC')}</i>")
+        return "\n".join(lines)
+
+    status = {"active": "LIVE", "tp1": "TP1 HIT · stop moved to break-even", "tp2": "TP2 HIT ✅",
+              "stopped": "STOPPED OUT ❌", "flipped": "CLOSED · bias flipped", "expired": "CLOSED · max hold reached",
+              "missed": "MISSED · ran without a pullback", "invalidated": "INVALIDATED · no trade",
+              "cancelled": "CANCELLED · no trade", "stale": "EXPIRED · no trade"}.get(t.status, t.status.upper())
+    rr = t.rr
     lines = [
         f"{side} XAU/USD   —   <b>{escape(status)}</b>",
-        f"Entry            <b>{t.entry:,.1f}</b>",
-        f"Stop loss      <b>{t.effective_sl:,.1f}</b>   ({_diff((t.effective_sl - t.entry))} · {_r((t.effective_sl - t.entry) * sgn / t.risk, 1)})" if t.risk else f"Stop loss      <b>{t.effective_sl:,.1f}</b>",
-        f"Take profit 1  <b>{t.tp1:,.1f}</b>   ({_diff(t.tp1 - t.entry)} · {abs(t.tp1 - t.entry) / t.risk:.1f}R)" if t.risk else f"Take profit 1  <b>{t.tp1:,.1f}</b>",
+        f"Entry            <b>{t.entry:,.1f}</b>" + (f"   <i>({escape(t.trigger_note)})</i>" if t.trigger_note else ""),
+        f"Stop loss      <b>{t.effective_sl:,.1f}</b>   ({_diff(t.effective_sl - t.entry)} · {_r((t.effective_sl - t.entry) * sgn / t.risk, 1)})",
+        f"Take profit 1  <b>{t.tp1:,.1f}</b>   ({_diff(t.tp1 - t.entry)} · {abs(t.tp1 - t.entry) / t.risk:.1f}R)",
         f"Take profit 2  <b>{t.tp2:,.1f}</b>   ({_diff(t.tp2 - t.entry)} · {rr:.1f}R)",
         f"Reward : risk   <b>1 : {rr:.1f}</b>   ·   confidence <b>{t.confidence}%</b>",
     ]
+    if t.is_open:
+        lines += sizing_lines(sizing, t.entry, t.tp1, t.tp2)
     if t.is_open and price is not None:
         pnl = (price - t.entry) * sgn
         lines.append(f"📍 Now <b>{price:,.1f}</b> → open <b>{_diff(pnl)}</b> ({_r(t.r_at(price))})")
@@ -317,17 +376,22 @@ def format_trade_signal(t, price: float | None = None) -> str:
         lines.append(f"{mark} Result <b>{_r(t.result_r)}</b> at {t.exit_price:,.1f}")
     if t.reason:
         lines.append(f"<i>{escape(t.reason)}</i>")
-    lines.append(f"<i>Opened {t.opened_at.strftime('%d %b %H:%M UTC')}</i>")
+    when = t.triggered_at or t.opened_at
+    lines.append(f"<i>{'Entered' if t.traded else 'Posted'} {when.strftime('%d %b %H:%M UTC')}</i>")
     return "\n".join(lines)
 
 
-def format_signals_overview(active, history: list, stats: dict, price: float | None) -> str:
+def format_signals_overview(active, history: list, stats: dict, price: float | None, sizing_for=None, session: dict | None = None) -> str:
     parts = ["📡 <b>Trade signals</b>"]
     if active:
-        parts.append(format_trade_signal(active, price))
+        sz = sizing_for(active.entry, active.sl) if sizing_for else None
+        parts.append(format_trade_signal(active, price, sz))
     else:
-        parts.append("⚪ <b>No open call right now.</b>\nA BUY or SELL is posted here the moment technicals and news line up with enough confidence.")
-    closed = [h for h in history if not h.is_open][:8]
+        parts.append("⚪ <b>No call right now.</b>\nA setup is posted the moment technicals and news line up with enough confidence; it goes live after a 15-minute confirmation in the entry zone.")
+    sl = session_line(session)
+    if sl:
+        parts.append(sl)
+    closed = [h for h in history if h.traded and not h.is_open][:8]
     if closed:
         rows = []
         for h in closed:
@@ -336,22 +400,29 @@ def format_signals_overview(active, history: list, stats: dict, price: float | N
             rows.append(f"{mark} {h.side} {h.entry:,.0f} → {h.exit_price:,.0f}   <b>{res}</b>   <i>{h.opened_at.strftime('%d %b')}</i>")
         parts.append("<b>Recent calls</b>\n" + "\n".join(rows))
     if stats.get("count"):
-        parts.append(f"📊 Closed <b>{stats['count']}</b> · win rate <b>{stats['win_rate']}%</b> · total <b>{_r(stats['total_r'])}</b> · average <b>{_r(stats['avg_r'])}</b>")
+        extra = f" · setups skipped <b>{stats['no_trade']}</b>" if stats.get("no_trade") else ""
+        parts.append(f"📊 Closed <b>{stats['count']}</b> · win rate <b>{stats['win_rate']}%</b> · total <b>{_r(stats['total_r'])}</b> · average <b>{_r(stats['avg_r'])}</b>{extra}")
     parts.append(DISCLAIMER)
     return "\n\n".join(parts)
 
 
-def format_signal_event(e) -> str:
+def format_signal_event(e, sizing: Sizing | None = None) -> str:
     s = e.signal
     head = {
-        "opened": f"📡 <b>NEW {s.side} SIGNAL</b>",
+        "setup": f"📐 <b>NEW {s.side} SETUP</b> — wait for the zone",
+        "triggered": f"📡 <b>{s.side} CONFIRMED — LIVE CALL</b>",
         "tp1": "🎯 <b>TAKE PROFIT 1 HIT</b>",
         "tp2": "🏁 <b>TAKE PROFIT 2 HIT — closed</b>",
         "stopped": "🛑 <b>STOPPED OUT — closed</b>",
         "flipped": "🔁 <b>CLOSED — bias flipped</b>",
         "expired": "⌛ <b>CLOSED — max hold reached</b>",
+        "missed": "🏃 <b>SETUP MISSED</b> — price ran without a pullback, no trade",
+        "invalidated": "🚫 <b>SETUP INVALIDATED</b> — no trade",
+        "cancelled": "↩️ <b>SETUP CANCELLED</b> — bias changed, no trade",
+        "stale": "⌛ <b>SETUP EXPIRED</b> — no confirmation in time, no trade",
     }.get(e.kind, e.kind)
-    return f"{head}\n{escape(e.text)}\n\n{format_trade_signal(s, e.price if s.is_open else None)}\n\n{DISCLAIMER}"
+    body = format_trade_signal(s, e.price if s.is_live else None, sizing)
+    return f"{head}\n\n{body}\n\n{DISCLAIMER}"
 
 
 # ---------------------------------------------------------------------------
@@ -359,10 +430,10 @@ def format_signal_event(e) -> str:
 # ---------------------------------------------------------------------------
 def format_full_report(tech: TechSnapshot, news: NewsScore, sig: Signal, briefing: str | None,
                        source: str, as_of: datetime, max_headlines: int = 6, hours: int = 36,
-                       events: list | None = None, trade=None) -> str:
+                       events: list | None = None, trade=None, sizing: Sizing | None = None) -> str:
     sections = [price_header(tech), format_signal(sig)]
     if trade is not None:
-        sections.append(format_trade_signal(trade, tech.price))
+        sections.append(format_trade_signal(trade, tech.price, sizing))
     nxt = next((e for e in (events or []) if e.impact == "High" and e.minutes_away > -15), None)
     if nxt is not None:
         sections.append(format_next_event(nxt))
@@ -420,6 +491,7 @@ HELP = """📖 <b>Commands</b>
 /analyze — the full report with chart, AI briefing, technicals and news
 
 <b>Settings</b>
+/risk 5000 1 — your account size and % risk per trade → lot size on every call
 /subscribe · /unsubscribe — scheduled reports in this chat
 /alerts on · /alerts off — bias changes, big moves, breaking news, pre-release warnings
 /status — bot status

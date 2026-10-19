@@ -34,6 +34,7 @@ class MarketData:
     source: str
     fetched_at: datetime
     basis: float = 1.0   # multiplier applied to put the bars on the spot basis (1.0 = untouched)
+    m15: pd.DataFrame | None = None   # 15-minute bars (last few days) for entry timing; None if unavailable
 
     @property
     def last_price(self) -> float:
@@ -102,11 +103,17 @@ def _fetch_yfinance_one(symbol: str) -> MarketData:
     ticker = yf.Ticker(symbol)
     hourly = ticker.history(period="60d", interval="1h", auto_adjust=False)
     daily = ticker.history(period="1y", interval="1d", auto_adjust=False)
+    m15 = None
+    try:
+        m15 = _normalize(ticker.history(period="7d", interval="15m", auto_adjust=False))
+    except Exception as exc:  # noqa: BLE001 – entry timing degrades gracefully without M15
+        log.warning("15m bars unavailable for %s: %s", symbol, exc)
     return MarketData(
         hourly=_normalize(hourly),
         daily=_normalize(daily),
         source=f"yfinance:{symbol}",
         fetched_at=datetime.now(timezone.utc),
+        m15=m15,
     )
 
 
@@ -157,7 +164,9 @@ def to_spot_basis(data: MarketData, spot: float | None) -> MarketData:
     if not (0.05 < ratio < 20.0):          # not a plausible instrument of gold at all
         log.warning("spot basis ratio %.4f looks wrong; leaving bars untouched", ratio)
         return data
-    for df in (data.hourly, data.daily):
+    for df in (data.hourly, data.daily, data.m15):
+        if df is None:
+            continue
         for col in ("open", "high", "low", "close"):
             df[col] = df[col] * ratio
     data.basis = ratio
@@ -197,9 +206,15 @@ def _fetch_twelvedata(symbol: str, api_key: str) -> MarketData:
         df["volume"] = pd.to_numeric(df.get("volume", 0), errors="coerce").fillna(0)
         return df
 
+    m15 = None
+    try:
+        m15 = _normalize(pull("15min", 500))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Twelve Data 15min bars unavailable: %s", exc)
     return MarketData(
         hourly=_normalize(pull("1h", 1000)),
         daily=_normalize(pull("1day", 400)),
+        m15=m15,
         source=f"twelvedata:{symbol}",
         fetched_at=datetime.now(timezone.utc),
     )

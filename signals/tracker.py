@@ -1,19 +1,27 @@
 """
-Signal tracker: turns the analysis bias into explicit BUY / SELL calls with a
-stop-loss and two take-profit levels, then follows the live price to report
-TP1 hit, TP2 hit, stopped out, or closed because the bias flipped.
+Signal tracker: turns the analysis bias into explicit BUY / SELL calls and
+follows them through their life.
 
-Rules (all configurable in Settings):
-* A call opens when the bias is BUY/STRONG_BUY (or SELL/STRONG_SELL) with
-  confidence >= SIGNAL_MIN_CONF and no call is currently open.
-* Entry = price at the time of the call. SL / TP1 / TP2 come from the signal
-  engine (ATR-based, tucked behind structure).
-* When TP1 is hit the stop moves to break-even (SIGNAL_BREAKEVEN_AFTER_TP1).
-* The call closes on SL, TP2, an opposite bias, or after SIGNAL_MAX_HOURS.
-* Results are measured in R (multiples of the initial risk).
+Life of a call
+--------------
+1. **pending** – the bias qualifies (confidence ≥ SIGNAL_MIN_CONF, session allows
+   entries). The call is published as a *setup*: an entry zone to wait for, a
+   stop beyond it, two targets and a "don't chase beyond" level. Nothing is
+   "entered" yet.
+2. **active** – price pulled back into the zone and the 15-minute chart confirmed
+   (EMA reclaim, engulfing, rejection wick or micro structure break). The entry is
+   the close of the confirming bar. From here the old rules apply:
+3. **tp1** – stop moves to break-even;  **tp2 / stopped / flipped / expired** – closed,
+   result measured in R (multiples of the initial risk).
+
+A pending setup ends without a trade when price runs past the chase level
+(**missed**), trades through the stop before confirming (**invalidated**), the
+bias flips or confidence collapses (**cancelled**), or it waits too long
+(**stale**).  While price has not yet touched the zone, the zone follows the
+latest analysis (the EMAs drift), so the setup stays realistic.
 
 Every state change is recorded as an event; the Telegram bot and the
-terminal both read those events to notify you.
+terminal read those events to notify you.  The bot never places orders.
 """
 from __future__ import annotations
 
@@ -23,33 +31,56 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from news.store import Store
+from signals import trigger as trig
 
 log = logging.getLogger(__name__)
 
 OPEN_STATUSES = {"active", "tp1"}
+PENDING_STATUSES = {"pending"}
+NO_TRADE_STATUSES = {"missed", "invalidated", "cancelled", "stale"}
 
 
 @dataclass
 class TradeSignal:
     id: int
     side: str                 # BUY | SELL
-    entry: float
+    entry: float              # planned entry (zone middle) while pending; actual fill once active
     sl: float
     tp1: float
     tp2: float
     confidence: int
-    opened_at: datetime
-    status: str = "active"    # active | tp1 | tp2 | stopped | flipped | expired
+    opened_at: datetime       # when the setup was published
+    status: str = "pending"   # pending | active | tp1 | tp2 | stopped | flipped | expired | missed | invalidated | cancelled | stale
     closed_at: datetime | None = None
     exit_price: float | None = None
     result_r: float | None = None
     tp1_hit_at: datetime | None = None
     reason: str = ""
     sl_current: float | None = None   # after break-even move
+    zone_lo: float | None = None
+    zone_hi: float | None = None
+    chase: float | None = None        # don't chase beyond this
+    triggered_at: datetime | None = None
+    trigger_note: str = ""
+    setup_mode: str = ""              # pullback | in-zone | market (legacy)
+    touched: bool = False             # transient: price has visited the zone (not persisted)
 
+    # ---- state ---------------------------------------------------------------
     @property
     def is_open(self) -> bool:
         return self.status in OPEN_STATUSES
+
+    @property
+    def is_pending(self) -> bool:
+        return self.status in PENDING_STATUSES
+
+    @property
+    def is_live(self) -> bool:
+        return self.is_open or self.is_pending
+
+    @property
+    def traded(self) -> bool:
+        return self.status not in PENDING_STATUSES | NO_TRADE_STATUSES
 
     @property
     def sign(self) -> int:
@@ -66,6 +97,10 @@ class TradeSignal:
     def effective_sl(self) -> float:
         return self.sl_current if self.sl_current is not None else self.sl
 
+    @property
+    def rr(self) -> float:
+        return abs(self.tp2 - self.entry) / self.risk
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id, "side": self.side, "entry": round(self.entry, 2), "sl": round(self.sl, 2),
@@ -75,14 +110,17 @@ class TradeSignal:
             "exit_price": round(self.exit_price, 2) if self.exit_price is not None else None,
             "result_r": round(self.result_r, 2) if self.result_r is not None else None,
             "tp1_hit_at": self.tp1_hit_at.isoformat() if self.tp1_hit_at else None,
-            "reason": self.reason, "risk": round(self.risk, 2),
-            "rr": round(abs(self.tp2 - self.entry) / self.risk, 2),
+            "reason": self.reason, "risk": round(self.risk, 2), "rr": round(self.rr, 2),
+            "zone_lo": self.zone_lo, "zone_hi": self.zone_hi, "chase": self.chase,
+            "triggered_at": self.triggered_at.isoformat() if self.triggered_at else None,
+            "trigger_note": self.trigger_note, "setup_mode": self.setup_mode,
+            "is_open": self.is_open, "is_pending": self.is_pending, "touched": self.touched,
         }
 
 
 @dataclass
 class SignalEvent:
-    kind: str                 # opened | tp1 | tp2 | stopped | flipped | expired
+    kind: str                 # setup | triggered | tp1 | tp2 | stopped | flipped | expired | missed | invalidated | cancelled | stale
     signal: TradeSignal
     price: float
     at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -90,19 +128,34 @@ class SignalEvent:
     @property
     def text(self) -> str:
         s = self.signal
-        if self.kind == "opened":
-            return f"{s.side} XAU/USD @ {s.entry:,.1f} · SL {s.sl:,.1f} · TP1 {s.tp1:,.1f} · TP2 {s.tp2:,.1f} · conf {s.confidence}%"
-        if self.kind == "tp1":
+        k = self.kind
+        if k == "setup":
+            if s.setup_mode == "in-zone":
+                return (f"{s.side} setup · price is in the zone {s.zone_lo:,.1f}–{s.zone_hi:,.1f} · waiting for a 15-minute confirmation · "
+                        f"SL {s.sl:,.1f} · TP1 {s.tp1:,.1f} · TP2 {s.tp2:,.1f} · conf {s.confidence}%")
+            return (f"{s.side} setup · wait for a pullback into {s.zone_lo:,.1f}–{s.zone_hi:,.1f} · don't chase beyond {s.chase:,.1f} · "
+                    f"SL {s.sl:,.1f} · TP1 {s.tp1:,.1f} · TP2 {s.tp2:,.1f} · conf {s.confidence}%")
+        if k == "triggered":
+            return f"{s.side} XAU/USD @ {s.entry:,.1f} · {s.trigger_note} · SL {s.sl:,.1f} · TP1 {s.tp1:,.1f} · TP2 {s.tp2:,.1f}"
+        if k == "tp1":
             return f"TP1 hit @ {self.price:,.1f} ({s.r_at(self.price):+.2f}R) · stop moved to break-even {s.effective_sl:,.1f}"
-        if self.kind == "tp2":
+        if k == "tp2":
             return f"TP2 hit @ {self.price:,.1f} · closed {s.result_r:+.2f}R"
-        if self.kind == "stopped":
+        if k == "stopped":
             return f"Stopped out @ {self.price:,.1f} · closed {s.result_r:+.2f}R"
-        if self.kind == "flipped":
+        if k == "flipped":
             return f"Bias flipped · closed @ {self.price:,.1f} ({s.result_r:+.2f}R)"
-        if self.kind == "expired":
+        if k == "expired":
             return f"Expired after max hold · closed @ {self.price:,.1f} ({s.result_r:+.2f}R)"
-        return self.kind
+        if k == "missed":
+            return f"Setup missed · price ran to {self.price:,.1f} without a pullback into the zone (no trade)"
+        if k == "invalidated":
+            return f"Setup invalidated · price traded through {s.sl:,.1f} before confirming (no trade)"
+        if k == "cancelled":
+            return "Setup cancelled · bias changed before an entry (no trade)"
+        if k == "stale":
+            return "Setup expired · no pullback and confirmation in time (no trade)"
+        return k
 
     def to_dict(self) -> dict[str, Any]:
         return {"kind": self.kind, "signal_id": self.signal.id, "side": self.signal.side, "price": round(self.price, 2),
@@ -110,16 +163,31 @@ class SignalEvent:
 
 
 class SignalTracker:
-    def __init__(self, store: Store, min_conf: int = 45, max_hours: float = 48.0, breakeven_after_tp1: bool = True):
+    def __init__(self, store: Store, min_conf: int = 45, max_hours: float = 48.0, breakeven_after_tp1: bool = True,
+                 pending_max_hours: float = 12.0, require_trigger: bool = True):
         self.store = store
         self.min_conf = min_conf
         self.max_hours = max_hours
         self.breakeven_after_tp1 = breakeven_after_tp1
+        self.pending_max_hours = pending_max_hours
+        self.require_trigger = require_trigger
         self._pending: list[SignalEvent] = []
+        self._touched: dict[int, bool] = {}
+        self.last_trigger: dict | None = None      # last trigger evaluation (for the UI)
 
     # ---- reads --------------------------------------------------------------
     def active(self) -> TradeSignal | None:
         return self.store.active_signal()
+
+    def pending(self) -> TradeSignal | None:
+        s = self.store.pending_signal()
+        if s is not None:
+            s.touched = self._touched.get(s.id, False)
+        return s
+
+    def live(self) -> TradeSignal | None:
+        """The call to show: an open trade, else a pending setup."""
+        return self.active() or self.pending()
 
     def history(self, limit: int = 20) -> list[TradeSignal]:
         return self.store.signals(limit=limit)
@@ -132,15 +200,17 @@ class SignalTracker:
         return out
 
     def stats(self) -> dict[str, Any]:
-        closed = [s for s in self.store.signals(limit=500) if not s.is_open and s.result_r is not None]
+        closed = [s for s in self.store.signals(limit=500) if s.traded and not s.is_open and s.result_r is not None]
         wins = [s for s in closed if s.result_r > 0.05]
         losses = [s for s in closed if s.result_r < -0.05]
         total_r = sum(s.result_r for s in closed)
+        no_trade = [s for s in self.store.signals(limit=500) if s.status in NO_TRADE_STATUSES]
         return {
             "count": len(closed), "wins": len(wins), "losses": len(losses),
             "breakeven": len(closed) - len(wins) - len(losses),
             "win_rate": round(100.0 * len(wins) / len(closed), 1) if closed else None,
             "total_r": round(total_r, 2), "avg_r": round(total_r / len(closed), 2) if closed else None,
+            "no_trade": len(no_trade),
         }
 
     # ---- writes -------------------------------------------------------------
@@ -155,65 +225,146 @@ class SignalTracker:
         sig.status = status
         sig.closed_at = now
         sig.exit_price = price
-        sig.result_r = sig.r_at(price)
+        sig.result_r = sig.r_at(price) if status not in NO_TRADE_STATUSES else None
         self.store.update_signal(sig)
+        self._touched.pop(sig.id, None)
         return self._emit(status, sig, price)
 
-    def on_analysis(self, report, now: datetime | None = None) -> list[SignalEvent]:
-        """Called after every analysis: may open a call or close one on a bias flip."""
-        now = now or datetime.now(timezone.utc)
-        sig_engine = report.signal
-        price = report.tech.price
-        events: list[SignalEvent] = []
-        active = self.active()
-        direction = sig_engine.direction  # long | short | flat
+    @staticmethod
+    def _plan_from_signal(engine_sig) -> dict | None:
+        if engine_sig.zone_lo is None or engine_sig.stop is None or engine_sig.target1 is None or engine_sig.target2 is None:
+            return None
+        return {"zone_lo": engine_sig.zone_lo, "zone_hi": engine_sig.zone_hi, "chase": engine_sig.chase_limit,
+                "sl": engine_sig.stop, "tp1": engine_sig.target1, "tp2": engine_sig.target2,
+                "entry": engine_sig.zone_mid, "mode": engine_sig.entry_mode or "pullback"}
 
+    def on_analysis(self, report, now: datetime | None = None) -> list[SignalEvent]:
+        """Called after every analysis. May publish a setup, trigger it, cancel it, or close an open call."""
+        now = now or datetime.now(timezone.utc)
+        eng = report.signal
+        tech = report.tech
+        price = tech.price
+        direction = eng.direction                    # long | short | flat
+        session = getattr(report, "session", None)
+        m15 = getattr(getattr(report, "data", None), "m15", None)
+        events: list[SignalEvent] = []
+
+        # ---- open trade: flip (then fall through to publish the opposite setup) or follow price
+        active = self.active()
         if active is not None:
-            # opposite bias → close at market
             if (active.side == "BUY" and direction == "short") or (active.side == "SELL" and direction == "long"):
                 events.append(self._close(active, "flipped", price, now))
-                active = None
             else:
                 events.extend(self.on_price(price, now))
-                active = self.active()
+                return events
 
-        if active is None and direction in ("long", "short") and sig_engine.confidence >= self.min_conf \
-                and sig_engine.stop is not None and sig_engine.target1 is not None and sig_engine.target2 is not None:
-            side = "BUY" if direction == "long" else "SELL"
-            reason = "; ".join(report.tech.reasons[:2]) + (f" · news {sig_engine.news_score:+d}" if abs(sig_engine.news_score) >= 15 else "")
-            sig = TradeSignal(
-                id=0, side=side, entry=price, sl=sig_engine.stop, tp1=sig_engine.target1, tp2=sig_engine.target2,
-                confidence=sig_engine.confidence, opened_at=now, reason=reason[:200],
-            )
-            sig.id = self.store.insert_signal(sig)
-            events.append(self._emit("opened", sig, price))
+        # ---- pending setup: cancel (then maybe publish the opposite), refresh, or trigger
+        pend = self.pending()
+        if pend is not None:
+            opposite = (pend.side == "BUY" and direction == "short") or (pend.side == "SELL" and direction == "long")
+            weak = direction == "flat" or eng.confidence < max(0, self.min_conf - 15)
+            if opposite or weak:
+                events.append(self._close(pend, "cancelled", price, now))
+                pend = None
+            elif now - pend.opened_at > timedelta(hours=self.pending_max_hours):
+                events.append(self._close(pend, "stale", price, now))
+                return events
+        if pend is not None:
+            events.extend(self.on_price(price, now))
+            pend = self.pending()
+            if pend is None:
+                return events
+            # let the zone follow the analysis until price has visited it
+            plan = self._plan_from_signal(eng)
+            if plan and not pend.touched and eng.direction == ("long" if pend.side == "BUY" else "short"):
+                pend.zone_lo, pend.zone_hi, pend.chase = plan["zone_lo"], plan["zone_hi"], plan["chase"]
+                pend.sl, pend.tp1, pend.tp2, pend.entry = plan["sl"], plan["tp1"], plan["tp2"], plan["entry"]
+                pend.setup_mode, pend.confidence = plan["mode"], eng.confidence
+                self.store.update_signal(pend)
+            events.extend(self._try_trigger(pend, tech, m15, now))
+            return events
+
+        # ---- no call: publish a setup? -----------------------------------------
+        if direction not in ("long", "short") or eng.confidence < self.min_conf:
+            return events
+        if session is not None and not session.allow_entries:
+            return events
+        plan = self._plan_from_signal(eng)
+        if plan is None:
+            return events
+        side = "BUY" if direction == "long" else "SELL"
+        reason = "; ".join(tech.reasons[:2]) + (f" · news {eng.news_score:+d}" if abs(eng.news_score) >= 15 else "")
+        sig = TradeSignal(
+            id=0, side=side, entry=plan["entry"], sl=plan["sl"], tp1=plan["tp1"], tp2=plan["tp2"],
+            confidence=eng.confidence, opened_at=now, reason=reason[:200], status="pending",
+            zone_lo=plan["zone_lo"], zone_hi=plan["zone_hi"], chase=plan["chase"], setup_mode=plan["mode"],
+        )
+        sig.id = self.store.insert_signal(sig)
+        events.append(self._emit("setup", sig, price))
+        if not self.require_trigger:
+            events.extend(self._activate(sig, price, now, "entered at market (trigger disabled)"))
+        else:
+            events.extend(self._try_trigger(sig, tech, m15, now))
         return events
 
+    def _try_trigger(self, sig: TradeSignal, tech, m15, now: datetime) -> list[SignalEvent]:
+        res = trig.evaluate(sig.side, sig.zone_lo, sig.zone_hi, tech.atr, m15, now)
+        self.last_trigger = res.to_dict() | {"signal_id": sig.id}
+        if res.touched:
+            self._touched[sig.id] = True
+            sig.touched = True
+        if not res.fired:
+            return []
+        return self._activate(sig, res.entry or tech.price, now, res.note)
+
+    def _activate(self, sig: TradeSignal, entry: float, now: datetime, note: str) -> list[SignalEvent]:
+        sig.entry = float(entry)
+        sig.status = "active"
+        sig.triggered_at = now
+        sig.trigger_note = note
+        # keep the stop sane relative to the actual fill
+        if (sig.side == "BUY" and sig.sl >= sig.entry) or (sig.side == "SELL" and sig.sl <= sig.entry):
+            return [self._close(sig, "invalidated", entry, now)]
+        self.store.update_signal(sig)
+        self._touched.pop(sig.id, None)
+        return [self._emit("triggered", sig, entry)]
+
     def on_price(self, price: float, now: datetime | None = None) -> list[SignalEvent]:
-        """Called on every quote: checks SL / TP1 / TP2 / expiry for the open call."""
+        """Called on every quote: SL / TP1 / TP2 / expiry for an open call; missed / invalidated for a pending one."""
         now = now or datetime.now(timezone.utc)
-        sig = self.active()
-        if sig is None or price is None:
+        if price is None:
             return []
         events: list[SignalEvent] = []
-        hit = lambda level, above: (price >= level) if above else (price <= level)  # noqa: E731
-        long = sig.side == "BUY"
+        sig = self.active()
+        if sig is not None:
+            hit = lambda level, above: (price >= level) if above else (price <= level)  # noqa: E731
+            long = sig.side == "BUY"
+            if hit(sig.effective_sl, above=not long):
+                events.append(self._close(sig, "stopped", price, now))
+                return events
+            if hit(sig.tp2, above=long):
+                events.append(self._close(sig, "tp2", price, now))
+                return events
+            if sig.status == "active" and hit(sig.tp1, above=long):
+                sig.status = "tp1"
+                sig.tp1_hit_at = now
+                if self.breakeven_after_tp1:
+                    sig.sl_current = sig.entry
+                self.store.update_signal(sig)
+                events.append(self._emit("tp1", sig, price))
+            if now - (sig.triggered_at or sig.opened_at) > timedelta(hours=self.max_hours):
+                events.append(self._close(sig, "expired", price, now))
+            return events
 
-        if hit(sig.effective_sl, above=not long):
-            events.append(self._close(sig, "stopped", price, now))
-            return events
-        if hit(sig.tp2, above=long):
-            events.append(self._close(sig, "tp2", price, now))
-            return events
-        if sig.status == "active" and hit(sig.tp1, above=long):
-            sig.status = "tp1"
-            sig.tp1_hit_at = now
-            if self.breakeven_after_tp1:
-                sig.sl_current = sig.entry
-            self.store.update_signal(sig)
-            events.append(self._emit("tp1", sig, price))
-        if now - sig.opened_at > timedelta(hours=self.max_hours):
-            events.append(self._close(sig, "expired", price, now))
+        pend = self.pending()
+        if pend is not None and pend.zone_lo is not None:
+            long = pend.side == "BUY"
+            if (long and price <= pend.sl) or (not long and price >= pend.sl):
+                events.append(self._close(pend, "invalidated", price, now))
+            elif pend.chase is not None and not pend.touched and ((long and price >= pend.chase) or (not long and price <= pend.chase)):
+                events.append(self._close(pend, "missed", price, now))
+            elif pend.zone_lo <= price <= pend.zone_hi:
+                self._touched[pend.id] = True
         return events
 
     # ---- demo ---------------------------------------------------------------
@@ -230,7 +381,9 @@ class SignalTracker:
         ]
         for side, entry, sl, tp1, tp2, conf, days_ago, status, exit_price in rows:
             opened = now - timedelta(days=days_ago)
-            sig = TradeSignal(id=0, side=side, entry=entry, sl=sl, tp1=tp1, tp2=tp2, confidence=conf, opened_at=opened, reason="demo")
+            sig = TradeSignal(id=0, side=side, entry=entry, sl=sl, tp1=tp1, tp2=tp2, confidence=conf, opened_at=opened, reason="demo",
+                              status="active", zone_lo=entry - 4, zone_hi=entry + 2, chase=entry + 12 if side == "BUY" else entry - 12,
+                              triggered_at=opened + timedelta(minutes=45), trigger_note="15m engulfing candle at the zone", setup_mode="pullback")
             sig.id = self.store.insert_signal(sig)
             if status == "tp1":
                 sig.tp1_hit_at = opened + timedelta(hours=5)
@@ -244,5 +397,6 @@ class SignalTracker:
                 sig.exit_price = exit_price
             sig.result_r = sig.r_at(sig.exit_price)
             self.store.update_signal(sig)
-            self.store.add_signal_event(sig.id, "opened", entry, f"{side} XAU/USD @ {entry:,.1f}", at=opened)
+            self.store.add_signal_event(sig.id, "setup", entry - 2, f"{side} setup · zone {sig.zone_lo:,.1f}–{sig.zone_hi:,.1f}", at=opened)
+            self.store.add_signal_event(sig.id, "triggered", entry, f"{side} XAU/USD @ {entry:,.1f} · {sig.trigger_note}", at=sig.triggered_at)
             self.store.add_signal_event(sig.id, sig.status, sig.exit_price, f"{sig.status} @ {sig.exit_price:,.1f} ({sig.result_r:+.2f}R)", at=sig.closed_at)

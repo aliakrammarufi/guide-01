@@ -18,6 +18,7 @@ from news.fetch import fetch_all
 from news.sentiment import ClaudeClassifier, NewsScore, aggregate, apply_lexicon, is_high_impact
 from news.store import Article, Store
 from signals.engine import Signal, build_signal
+from signals.session import SessionInfo, session_info
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class Report:
     briefing: str | None
     generated_at: datetime
     events: list[Event] = field(default_factory=list)   # upcoming calendar events (48h)
+    session: SessionInfo | None = None                  # trading-session verdict at generation time
 
     @property
     def next_event(self) -> Event | None:
@@ -97,6 +99,16 @@ class Pipeline:
             except Exception as exc:  # noqa: BLE001
                 log.warning("News scan failed: %s", exc)
         news = self.news_score()
+        try:
+            events = self.calendar.upcoming(hours=48)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Calendar failed: %s", exc)
+            events = []
+        session = None
+        if self.settings.session_filter:
+            session = session_info(events=events, asia_entries=self.settings.asia_entries,
+                                   blackout_before_min=self.settings.news_blackout_before_min,
+                                   blackout_after_min=self.settings.news_blackout_after_min)
         signal = build_signal(
             tech,
             news,
@@ -104,12 +116,8 @@ class Pipeline:
             news_weight=self.settings.news_weight,
             atr_stop_mult=self.settings.atr_stop_mult,
             atr_target_mult=self.settings.atr_target_mult,
+            session=session,
         )
-        try:
-            events = self.calendar.upcoming(hours=48)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("Calendar failed: %s", exc)
-            events = []
         briefing = None
         if with_briefing and self.settings.ai_enabled:
             briefing = write_briefing(self.settings.anthropic_api_key, self.settings.analyst_model, tech, news, events)
@@ -121,4 +129,5 @@ class Pipeline:
             briefing=briefing,
             generated_at=datetime.now(timezone.utc),
             events=events,
+            session=session,
         )

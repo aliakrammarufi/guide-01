@@ -37,4 +37,8 @@ def make_market(drift_h: float = 0.01, vol: float = 0.15, seed: int = 7, bars: i
     daily = hourly.resample("1D").agg(
         {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
     ).dropna()
-    return MarketData(hourly=hourly, daily=daily, source="synthetic-demo", fetched_at=datetime.now(timezone.utc))
+    # 15-minute bars for the last 7 days, scaled so they finish exactly on the hourly close
+    last_close = float(hourly["close"].iloc[-1])
+    m15 = make_ohlc(7 * 96, last_close, 0.0, vol / 2.0, "15min", seed + 1, end=hourly.index[-1])
+    m15[["open", "high", "low", "close"]] *= last_close / float(m15["close"].iloc[-1])
+    return MarketData(hourly=hourly, daily=daily, source="synthetic-demo", fetched_at=datetime.now(timezone.utc), m15=m15)

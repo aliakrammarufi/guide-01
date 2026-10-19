@@ -21,7 +21,8 @@ class ReportCache:
         self.max_age_sec = max_age_sec
         st = pipeline.settings
         self.tracker = SignalTracker(pipeline.store, min_conf=st.signal_min_conf, max_hours=st.signal_max_hours,
-                                     breakeven_after_tp1=st.signal_breakeven_after_tp1)
+                                     breakeven_after_tp1=st.signal_breakeven_after_tp1,
+                                     pending_max_hours=st.signal_pending_max_hours, require_trigger=st.signal_require_trigger)
         self._report: Report | None = None
         self._lock = threading.Lock()
         self._history: list[dict] = []   # recent signals (for the dashboard sparkline)

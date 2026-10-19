@@ -185,6 +185,18 @@ class Settings:
     signal_min_conf: int = field(default_factory=lambda: _env_int("SIGNAL_MIN_CONF", 45))
     signal_max_hours: float = field(default_factory=lambda: _env_float("SIGNAL_MAX_HOURS", 48.0))
     signal_breakeven_after_tp1: bool = field(default_factory=lambda: _env_bool("SIGNAL_BREAKEVEN_AFTER_TP1", True))
+    # Entry timing: a call is a *setup* (zone) first and goes live only on a 15-minute confirmation
+    signal_require_trigger: bool = field(default_factory=lambda: _env_bool("SIGNAL_REQUIRE_TRIGGER", True))
+    signal_pending_max_hours: float = field(default_factory=lambda: _env_float("SIGNAL_PENDING_MAX_HOURS", 12.0))
+    # Session filter: no new entries in the dead zone / weekend / Friday evening / Sunday open, and around high-impact news
+    session_filter: bool = field(default_factory=lambda: _env_bool("SESSION_FILTER", True))
+    asia_entries: bool = field(default_factory=lambda: _env_bool("ASIA_ENTRIES", True))
+    news_blackout_before_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_BEFORE_MIN", 30))
+    news_blackout_after_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_AFTER_MIN", 15))
+    # Position sizing defaults for the terminal (Telegram users set their own with /risk)
+    account_size: float = field(default_factory=lambda: _env_float("ACCOUNT_SIZE", 0.0))
+    risk_pct: float = field(default_factory=lambda: _env_float("RISK_PCT", 1.0))
+    contract_oz: float = field(default_factory=lambda: _env_float("CONTRACT_OZ", 100.0))   # 1 lot of XAU/USD = 100 oz
 
     # --- Scheduler ----------------------------------------------------------
     analysis_interval_min: int = field(default_factory=lambda: _env_int("ANALYSIS_INTERVAL_MIN", 15))

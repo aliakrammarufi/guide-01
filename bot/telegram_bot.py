@@ -25,6 +25,7 @@ from bot.chart import render_chart
 from config import Settings
 from news.store import Store
 from signals.engine import bias_changed
+from signals.sizing import size_for
 from state import ReportCache
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class SentinelBot:
             "subscribe": self.cmd_subscribe,
             "unsubscribe": self.cmd_unsubscribe,
             "alerts": self.cmd_alerts,
+            "risk": self.cmd_risk,
             "status": self.cmd_status,
         }
         for name, func in handlers.items():
@@ -79,6 +81,7 @@ class SentinelBot:
                 BotCommand("subscribe", "Get scheduled reports here"),
                 BotCommand("unsubscribe", "Stop scheduled reports"),
                 BotCommand("alerts", "Alerts on|off"),
+                BotCommand("risk", "Account size & % risk → lot size per call"),
                 BotCommand("status", "Bot status"),
                 BotCommand("help", "Commands"),
             ]
@@ -153,6 +156,40 @@ class SentinelBot:
         except TelegramError:
             pass
 
+    # --------------------------------------------------------------- sizing
+    def _risk_settings(self, chat_id: int) -> tuple[float | None, float | None]:
+        d = self.store.get_state(f"risk:{chat_id}") or {}
+        acct, pct = d.get("account"), d.get("risk_pct")
+        if not acct and self.settings.account_size:
+            return self.settings.account_size, self.settings.risk_pct
+        return (float(acct) if acct else None, float(pct) if pct else None)
+
+    def _sizing(self, chat_id: int, entry: float, stop: float):
+        acct, pct = self._risk_settings(chat_id)
+        return size_for(acct or 0, pct or 0, entry, stop, self.settings.contract_oz)
+
+    async def cmd_risk(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        args = [a.replace(",", "").replace("$", "").replace("%", "") for a in (context.args or [])]
+        if args and args[0].lower() == "off":
+            self.store.set_state(f"risk:{chat_id}", {})
+            await self._send(chat_id, "💼 Position sizing turned <b>off</b>.")
+            return
+        if len(args) >= 1:
+            try:
+                account = float(args[0])
+                pct = float(args[1]) if len(args) > 1 else 1.0
+                if account <= 0 or not (0 < pct <= 10):
+                    raise ValueError
+            except ValueError:
+                await self._send(chat_id, "Usage: <code>/risk 5000 1</code> (account size, % risk per trade – max 10%) or <code>/risk off</code>")
+                return
+            self.store.set_state(f"risk:{chat_id}", {"account": account, "risk_pct": pct})
+            await self._send(chat_id, "✅ Saved.\n" + fmt.format_risk_settings(account, pct))
+            return
+        acct, pct = self._risk_settings(chat_id)
+        await self._send(chat_id, fmt.format_risk_settings(acct, pct))
+
     # -------------------------------------------------------------- commands
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
@@ -190,21 +227,26 @@ class SentinelBot:
         await self._send(chat_id, "⏳ Crunching price data and scanning the news…")
         rep = await self.cache.get(with_briefing=True)
         await self._send_chart(chat_id, rep)
-        await self._send(chat_id, self._full_report(rep))
+        await self._send(chat_id, self._full_report(rep, chat_id))
 
-    def _full_report(self, rep) -> str:
+    def _full_report(self, rep, chat_id: int | None = None) -> str:
+        trade = self.cache.tracker.live()
+        sizing = self._sizing(chat_id, trade.entry, trade.sl) if (trade is not None and chat_id is not None) else None
         return fmt.format_full_report(
             rep.tech, rep.news, rep.signal, rep.briefing, rep.data.source, rep.data.last_bar_time,
             max_headlines=self.settings.max_headlines_in_report, hours=self.settings.news_lookback_hours,
-            events=rep.events, trade=self.cache.tracker.active(),
+            events=rep.events, trade=trade, sizing=sizing,
         )
 
     async def cmd_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
         rep = await self.cache.get(with_briefing=False)
         tr = self.cache.tracker
-        text = fmt.format_signals_overview(tr.active(), tr.history(limit=12), tr.stats(), rep.tech.price)
-        await self._send(update.effective_chat.id, text)
+        chat_id = update.effective_chat.id
+        text = fmt.format_signals_overview(tr.live(), tr.history(limit=12), tr.stats(), rep.tech.price,
+                                           sizing_for=lambda entry, stop: self._sizing(chat_id, entry, stop),
+                                           session=rep.session.to_dict() if rep.session else None)
+        await self._send(chat_id, text)
 
     async def _flush_signal_events(self) -> None:
         events = self.cache.tracker.drain_events()
@@ -212,7 +254,9 @@ class SentinelBot:
             return
         subs = self.store.subscribers()          # signal calls go to every subscriber, alerts on or off
         for e in events:
-            await self._broadcast(subs, fmt.format_signal_event(e))
+            for chat_id in subs:
+                sz = self._sizing(chat_id, e.signal.entry, e.signal.sl)
+                await self._broadcast([chat_id], fmt.format_signal_event(e, sz))
 
     async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
@@ -285,7 +329,8 @@ class SentinelBot:
         await self._flush_signal_events()
         if not subs:
             return
-        await self._broadcast(subs, self._full_report(rep), report=rep, with_chart=True)
+        for chat_id in subs:
+            await self._broadcast([chat_id], self._full_report(rep, chat_id), report=rep, with_chart=True)
 
     async def job_monitor(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         alert_subs = self.store.subscribers(alerts_only=True)

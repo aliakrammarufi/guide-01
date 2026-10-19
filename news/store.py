@@ -59,7 +59,13 @@ CREATE TABLE IF NOT EXISTS signals (
     exit_price  REAL,
     result_r    REAL,
     tp1_hit_at  TEXT,
-    reason      TEXT
+    reason      TEXT,
+    zone_lo     REAL,
+    zone_hi     REAL,
+    chase       REAL,
+    triggered_at TEXT,
+    trigger_note TEXT,
+    setup_mode  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS signal_events (
@@ -119,6 +125,7 @@ class Store:
         self._conn.row_factory = sqlite3.Row
         with self._conn:
             self._conn.executescript(SCHEMA)
+            self._migrate()
 
     # ---- articles ----------------------------------------------------------
     def has_article(self, article_id: str) -> bool:
@@ -242,22 +249,37 @@ class Store:
                 (key, json.dumps(value, default=str)),
             )
 
+    def _migrate(self) -> None:
+        """Add columns introduced after the first release (SQLite has no IF NOT EXISTS for columns)."""
+        have = {r[1] for r in self._conn.execute("PRAGMA table_info(signals)").fetchall()}
+        for col, typ in (("zone_lo", "REAL"), ("zone_hi", "REAL"), ("chase", "REAL"), ("triggered_at", "TEXT"),
+                         ("trigger_note", "TEXT"), ("setup_mode", "TEXT")):
+            if col not in have:
+                with self._conn:
+                    self._conn.execute(f"ALTER TABLE signals ADD COLUMN {col} {typ}")
+
     # ---- trade signals -----------------------------------------------------
     def insert_signal(self, sig) -> int:
         with self._lock, self._conn:
             cur = self._conn.execute(
-                """INSERT INTO signals (side, entry, sl, sl_current, tp1, tp2, confidence, opened_at, status, reason)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (sig.side, sig.entry, sig.sl, sig.sl_current, sig.tp1, sig.tp2, sig.confidence, _iso(sig.opened_at), sig.status, sig.reason),
+                """INSERT INTO signals (side, entry, sl, sl_current, tp1, tp2, confidence, opened_at, status, reason,
+                                        zone_lo, zone_hi, chase, triggered_at, trigger_note, setup_mode)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (sig.side, sig.entry, sig.sl, sig.sl_current, sig.tp1, sig.tp2, sig.confidence, _iso(sig.opened_at), sig.status, sig.reason,
+                 sig.zone_lo, sig.zone_hi, sig.chase, _iso(sig.triggered_at) if sig.triggered_at else None, sig.trigger_note, sig.setup_mode),
             )
             return int(cur.lastrowid)
 
     def update_signal(self, sig) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                """UPDATE signals SET status=?, closed_at=?, exit_price=?, result_r=?, tp1_hit_at=?, sl_current=? WHERE id=?""",
+                """UPDATE signals SET status=?, closed_at=?, exit_price=?, result_r=?, tp1_hit_at=?, sl_current=?,
+                                      entry=?, sl=?, tp1=?, tp2=?, zone_lo=?, zone_hi=?, chase=?, triggered_at=?, trigger_note=?, setup_mode=?, confidence=?
+                   WHERE id=?""",
                 (sig.status, _iso(sig.closed_at) if sig.closed_at else None, sig.exit_price, sig.result_r,
-                 _iso(sig.tp1_hit_at) if sig.tp1_hit_at else None, sig.sl_current, sig.id),
+                 _iso(sig.tp1_hit_at) if sig.tp1_hit_at else None, sig.sl_current,
+                 sig.entry, sig.sl, sig.tp1, sig.tp2, sig.zone_lo, sig.zone_hi, sig.chase,
+                 _iso(sig.triggered_at) if sig.triggered_at else None, sig.trigger_note, sig.setup_mode, sig.confidence, sig.id),
             )
 
     def _row_to_signal(self, r: sqlite3.Row):
@@ -268,10 +290,17 @@ class Store:
             confidence=int(r["confidence"] or 0), opened_at=_parse(r["opened_at"]), status=r["status"],
             closed_at=_parse(r["closed_at"]) if r["closed_at"] else None, exit_price=r["exit_price"], result_r=r["result_r"],
             tp1_hit_at=_parse(r["tp1_hit_at"]) if r["tp1_hit_at"] else None, reason=r["reason"] or "", sl_current=r["sl_current"],
+            zone_lo=r["zone_lo"], zone_hi=r["zone_hi"], chase=r["chase"],
+            triggered_at=_parse(r["triggered_at"]) if r["triggered_at"] else None,
+            trigger_note=r["trigger_note"] or "", setup_mode=r["setup_mode"] or "",
         )
 
     def active_signal(self):
         row = self._conn.execute("SELECT * FROM signals WHERE status IN ('active','tp1') ORDER BY id DESC LIMIT 1").fetchone()
+        return self._row_to_signal(row) if row else None
+
+    def pending_signal(self):
+        row = self._conn.execute("SELECT * FROM signals WHERE status = 'pending' ORDER BY id DESC LIMIT 1").fetchone()
         return self._row_to_signal(row) if row else None
 
     def signals(self, limit: int = 20) -> list:

@@ -79,22 +79,30 @@ Other ways to run:
 
 ### Trade signals – when to buy, when to sell
 
-The bot turns its analysis into explicit calls and follows them for you:
+A call has two stages, like a trader's own plan:
 
-* A **BUY** (or **SELL**) call opens when the bias is bullish (bearish) with
-  confidence ≥ `SIGNAL_MIN_CONF` (default 45 %) and no call is already open.
-  Entry = price at that moment; **SL**, **TP1**, **TP2** come from the ATR/structure
-  levels. Every subscriber gets a `📡 NEW BUY SIGNAL` message.
-* The live price is watched: `🎯 TP1 HIT` (stop moves to break-even),
-  `🏁 TP2 HIT – closed`, `🛑 STOPPED OUT – closed`. A call also closes when the
-  engine's bias flips to the other side (`🔁`) or after `SIGNAL_MAX_HOURS` (`⌛`).
-* Results are measured in **R** (multiples of the initial risk), so a +1.7R call
-  made 1.7× what it risked. `/signals` and the terminal show win rate, total R
-  and average R over closed calls.
+1. **Setup** – posted when the bias is BUY/SELL with confidence ≥ `SIGNAL_MIN_CONF` (45%) *and* the session
+   allows new entries. It gives an **entry zone** (a pullback between the H1 EMA20 and the nearest
+   support/EMA50 – or a shallow pullback when price is extended), a **stop** beyond the zone and under
+   structure, **TP1 / TP2** measured from the middle of the zone (TP1 pulled in front of a nearby wall),
+   and a **don't-chase level**: if price runs there without a pullback, the setup is *missed* and no trade
+   is taken.
+2. **Live call** – the setup confirms when price is in the zone and the 15-minute chart prints an
+   **EMA20 reclaim**, a **bullish/bearish engulfing candle**, a **rejection wick** or a **break of the
+   pullback high/low**. Entry = close of the confirming bar. From there: TP1 → stop to break-even,
+   TP2 / stop / bias flip / 48 h max hold closes it, results in R.
 
-Suggested handling of a call: take half off at TP1, move the stop to break-even,
-let the rest run to TP2. These are calls, not orders – you place the trade on
-your own platform, and you decide the size.
+Setups that never confirm end as *missed*, *invalidated* (price went through the stop first), *cancelled*
+(bias changed) or *expired* (12 h) – all "no trade", and they are counted separately from the win rate.
+
+**Sessions.** The London open and the London/New York overlap get full confidence; the Asian session is
+allowed with lower confidence; the NY-close dead zone (21–23 UTC), Friday evening, the weekend, the Sunday
+open and ±30/15 min around high-impact USD releases block new entries (`SESSION_FILTER`, `ASIA_ENTRIES`,
+`NEWS_BLACKOUT_*`).
+
+**Position size.** Send `/risk 5000 1` (account size, % risk per trade) and every call includes the lot
+size for its stop: `lots = account × risk% ÷ (stop distance × 100 oz)`, rounded down to 0.01. The terminal
+has the same calculator (Account / Risk inputs in the Signals panel, kept in your browser).
 
 ### Alerts (sent to subscribed chats with alerts on)
 

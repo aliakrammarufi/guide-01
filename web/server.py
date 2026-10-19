@@ -103,6 +103,8 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
             "stop": round(sig.stop, 2) if sig.stop else None,
             "target1": round(sig.target1, 2) if sig.target1 else None,
             "target2": round(sig.target2, 2) if sig.target2 else None,
+            "zone_lo": sig.zone_lo, "zone_hi": sig.zone_hi, "zone_mid": sig.zone_mid, "chase_limit": sig.chase_limit,
+            "entry_mode": sig.entry_mode, "planned_rr": sig.planned_rr, "raw_confidence": sig.raw_confidence,
             "nearest_support": round(sig.nearest_support, 2) if sig.nearest_support else None,
             "nearest_resistance": round(sig.nearest_resistance, 2) if sig.nearest_resistance else None,
             "notes": sig.notes,
@@ -113,13 +115,15 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
     }
 
 
-def signals_json(tracker) -> dict:
-    active = tracker.active()
+def signals_json(tracker, session=None) -> dict:
+    live = tracker.live()
     return {
-        "active": active.to_dict() if active else None,
-        "history": [t.to_dict() for t in tracker.history(limit=20) if not t.is_open],
+        "active": live.to_dict() if live else None,        # open trade or pending setup (see .status)
+        "history": [t.to_dict() for t in tracker.history(limit=20) if not t.is_live],
         "stats": tracker.stats(),
         "events": tracker.events(limit=20),
+        "trigger": tracker.last_trigger,
+        "session": session.to_dict() if session is not None else None,
     }
 
 
@@ -246,7 +250,8 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
 
     @app.get("/api/signals")
     async def signals():
-        return JSONResponse(await asyncio.to_thread(signals_json, cache.tracker) | {"demo": demo})
+        rep = cache.report
+        return JSONResponse(await asyncio.to_thread(signals_json, cache.tracker, rep.session if rep else None) | {"demo": demo})
 
     @app.get("/api/tape")
     async def tape():
@@ -281,7 +286,7 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
             rep = await cache.get(with_briefing=True)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=503, detail=f"analysis unavailable: {exc}") from exc
-        return JSONResponse(report_to_json(rep, cache.history) | {"demo": demo, "signals": signals_json(cache.tracker)})
+        return JSONResponse(report_to_json(rep, cache.history) | {"demo": demo, "signals": signals_json(cache.tracker, rep.session)})
 
     @app.post("/api/refresh")
     async def refresh():
@@ -289,6 +294,6 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
             rep = await cache.refresh(with_briefing=True)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=503, detail=f"refresh failed: {exc}") from exc
-        return JSONResponse(report_to_json(rep, cache.history) | {"demo": demo, "signals": signals_json(cache.tracker)})
+        return JSONResponse(report_to_json(rep, cache.history) | {"demo": demo, "signals": signals_json(cache.tracker, rep.session)})
 
     return app

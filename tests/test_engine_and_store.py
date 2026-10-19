@@ -22,12 +22,15 @@ def test_signal_levels_follow_direction(bull_market):
     news = _news([2.0, 2.0, 1.5, 1.0])
     sig = build_signal(tech, news, tech_weight=0.0, news_weight=1.0)
     assert sig.direction == "long"
-    assert sig.stop < sig.price < sig.target1 < sig.target2
+    # levels are planned around the entry zone (a pullback), not the current price
+    assert sig.stop < sig.zone_lo < sig.zone_hi <= sig.price + 0.05 * sig.atr + 0.02
+    assert sig.zone_mid < sig.target1 < sig.target2 and sig.chase_limit > sig.price
 
     news = _news([-2.0, -2.0, -1.5, -1.0])
     sig = build_signal(tech, news, tech_weight=0.0, news_weight=1.0)
     assert sig.direction == "short"
-    assert sig.target2 < sig.target1 < sig.price < sig.stop
+    assert sig.price - 0.05 * sig.atr - 0.02 <= sig.zone_lo < sig.zone_hi < sig.stop
+    assert sig.target2 < sig.target1 < sig.zone_mid and sig.chase_limit < sig.price
 
 
 def test_signal_neutral_has_no_levels(flat_market):
@@ -85,3 +88,25 @@ def test_formatting_is_valid_html(bull_market):
     assert "&lt;b&gt;" in text               # user/AI text is escaped
     assert text.count("<b>") == text.count("</b>")
     assert len(text) < 4096 * 3
+
+
+def test_entry_plan_invariants_across_markets():
+    """Zone on the right side of price, stop beyond the zone, targets beyond the zone middle, chase level beyond price."""
+    from market.synthetic import make_market
+    from signals.engine import plan_entry
+
+    for seed in range(1, 13):
+        for drift in (-0.02, 0.0, 0.02):
+            t = analyze_technicals(make_market(drift_h=drift, seed=seed, bars=1200, start=4000.0))
+            atr, p = t.atr, t.price
+            for direction in ("long", "short"):
+                pl = plan_entry(direction, t)
+                lo, hi, st, t1, t2, ch = pl["zone_lo"], pl["zone_hi"], pl["stop"], pl["target1"], pl["target2"], pl["chase_limit"]
+                mid = (lo + hi) / 2
+                assert lo < hi and 0.25 * atr - 0.02 <= hi - lo <= 1.6 * atr + 0.02
+                if direction == "long":
+                    assert hi <= p + 0.05 * atr + 0.02 and st < lo and t1 > mid and t2 > t1 and ch > hi and ch > p
+                    assert mid - st <= 1.5 * atr + 0.02
+                else:
+                    assert lo >= p - 0.05 * atr - 0.02 and st > hi and t1 < mid and t2 < t1 and ch < lo and ch < p
+                    assert st - mid <= 1.5 * atr + 0.02
