@@ -89,6 +89,24 @@ class Pipeline:
         recent = self.store.recent_articles(self.settings.news_lookback_hours)
         return aggregate(recent, half_life_hours=self.settings.news_half_life_hours)
 
+    _last_read: str = ""
+
+    def _log_read(self, tech, signal) -> None:
+        """One line per *change* of the chart read, so the log shows what the engine sees without spamming."""
+        pa = tech.pa
+        if pa is None:
+            line = f"Read: tech {tech.score:+d} · {signal.bias} {signal.confidence}% · no price-action read"
+        else:
+            zone = (f" · zone {signal.zone_lo:,.1f}–{signal.zone_hi:,.1f} [{' · '.join(signal.confluence) or 'no confluence'}]"
+                    if signal.zone_lo is not None else "")
+            line = (f"Read: {tech.price:,.1f} · tech {tech.score:+d} · {signal.bias} {signal.confidence}% · H4 {pa.h4.trend} ({pa.h4.label}) · "
+                    f"H1 {pa.h1.trend} ({pa.h1.label}){' · BOS ' + pa.h1.bos if pa.h1.bos else ''}{' · CHoCH ' + pa.h1.choch if pa.h1.choch else ''} · "
+                    f"{pa.regime} ADX {pa.adx:.0f} · ATR {pa.atr_pct:.0f}pct{' · ' + pa.divergence + ' div' if pa.divergence else ''}"
+                    f"{' · ' + pa.candle if pa.candle else ''}{zone}")
+        if line != self._last_read:
+            log.info(line)
+            self._last_read = line
+
     # ---- full report -------------------------------------------------------
     def run(self, with_briefing: bool = True, refresh_news: bool = True) -> Report:
         if self.settings.account_size and self.settings.account_currency != "USD":
@@ -124,6 +142,7 @@ class Pipeline:
             atr_target_mult=self.settings.atr_target_mult,
             session=session,
         )
+        self._log_read(tech, signal)
         briefing = None
         if with_briefing and self.settings.ai_enabled:
             briefing = write_briefing(self.settings.anthropic_api_key, self.settings.analyst_model, tech, news, events)
