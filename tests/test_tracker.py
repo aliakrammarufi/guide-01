@@ -139,3 +139,20 @@ def test_events_persist_and_drain(tmp_path):
     assert kinds == ["setup", "triggered", "tp1"] and tr.drain_events() == []
     stored = tr.events()
     assert [e["kind"] for e in stored] == ["tp1", "triggered", "setup"] and "break-even" in stored[0]["text"]
+
+
+def test_pending_does_not_trigger_during_blackout(tmp_path):
+    now = datetime(2026, 10, 19, 12, 10, tzinfo=timezone.utc)
+    quiet = _m15([4505 - i * 0.2 for i in range(30)], now)
+    tr = SignalTracker(Store(tmp_path / "s.db"), min_conf=45)
+    tr.on_analysis(_report(price=4500.0, m15=quiet), now=now)
+    assert tr.pending() is not None
+    closes = [4505 - i * 0.4 for i in range(30)] + [4493.0, 4491.0, 4490.5, 4489.8, 4494.5, 4496.0]
+    df = _m15(closes, now)
+    df.loc[df.index[-2], ["open", "close", "low", "high"]] = [4489.9, 4494.5, 4489.0, 4494.8]
+    df.loc[df.index[-3], ["open", "close", "low", "high"]] = [4490.6, 4489.8, 4489.5, 4490.8]
+    blackout = SimpleNamespace(allow_entries=False)
+    assert tr.on_analysis(_report(price=4494.5, m15=df, session=blackout), now=now) == []   # confirmation ignored
+    assert tr.pending() is not None and tr.active() is None
+    ev = tr.on_analysis(_report(price=4494.5, m15=df), now=now)                             # window over → triggers
+    assert [e.kind for e in ev] == ["triggered"]

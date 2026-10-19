@@ -69,8 +69,9 @@ class SentinelBot:
         self.app.add_error_handler(self._on_error)
 
         jq = self.app.job_queue
-        jq.run_repeating(self.job_report, interval=timedelta(minutes=self.settings.analysis_interval_min), first=timedelta(seconds=20), name="report")
-        jq.run_repeating(self.job_monitor, interval=timedelta(minutes=self.settings.news_scan_interval_min), first=timedelta(seconds=90), name="monitor")
+        grace = {"misfire_grace_time": 120}   # a run that starts late (busy startup) still runs instead of being skipped
+        jq.run_repeating(self.job_report, interval=timedelta(minutes=self.settings.analysis_interval_min), first=timedelta(seconds=20), name="report", job_kwargs=grace)
+        jq.run_repeating(self.job_monitor, interval=timedelta(minutes=self.settings.news_scan_interval_min), first=timedelta(seconds=90), name="monitor", job_kwargs=grace)
 
     async def _post_init(self, app: Application) -> None:
         await app.bot.set_my_commands(

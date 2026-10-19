@@ -78,6 +78,9 @@ DEFAULT_FEEDS: list[str] = [
     _GN + "site:kitco.com",
     _GN + "site:cnbc.com+gold+OR+Fed+OR+inflation",
     _GN + "site:marketwatch.com+gold+OR+Fed",
+    _GN + "site:fxstreet.com+gold",
+    _GN + "site:dailyfx.com+gold",
+    _GN + "site:bls.gov",
     _GN + "site:ft.com+gold+OR+%22Federal+Reserve%22",
     # --- Direct publisher feeds -------------------------------------------
     "https://feeds.bloomberg.com/markets/news.rss",
@@ -94,10 +97,7 @@ DEFAULT_FEEDS: list[str] = [
     "https://www.theguardian.com/uk/business/rss",
     "https://www.aljazeera.com/xml/rss/all.xml",                  # geopolitics
     "https://www.federalreserve.gov/feeds/press_all.xml",         # Fed statements, first-hand
-    "https://www.bls.gov/feed/bls_latest.rss",                    # CPI / jobs releases, first-hand
-    "https://www.fxstreet.com/rss/news",
     "https://www.forexlive.com/feed/news",
-    "https://www.dailyfx.com/feeds/market-news",
     "https://www.investing.com/rss/news_11.rss",                  # commodities
     "https://www.investing.com/rss/news_95.rss",                  # economic indicators
     "https://www.mining.com/feed/",

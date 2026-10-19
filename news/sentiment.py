@@ -230,18 +230,36 @@ class NewsScore:
         return "Mixed / quiet news flow"
 
 
-def aggregate(articles: list[Article], half_life_hours: float = 10.0, scale: float = 3.0) -> NewsScore:
+_STOP = {"the", "a", "an", "of", "to", "in", "on", "as", "and", "for", "at", "by", "with", "from", "is", "are", "after",
+         "amid", "over", "says", "say", "could", "may", "will", "its", "it", "this", "that", "be", "has", "have"}
+
+
+def _dupe_key(title: str) -> str:
+    """Syndicated copies of one story share their first few meaningful words."""
+    words = [w for w in re.sub(r"[^a-z0-9 ]", " ", (title or "").lower()).split() if w not in _STOP]
+    return " ".join(words[:8]) if len(words) >= 5 else ""
+
+
+def aggregate(articles: list[Article], half_life_hours: float = 10.0, scale: float = 0.9) -> NewsScore:
     """Combine article impacts into one score with exponential time decay.
 
-    ``scale`` controls saturation: a weighted sum of +scale maps to ≈ +76.
+    Near-duplicate headlines (the same story republished by several outlets) count once.
+    The score is a *shrunk average* of the weighted impacts, so 150 mildly bullish
+    headlines read as "bullish", not "+100": score = 100·tanh(Σw / (scale·(n_directional+5))).
+    With few articles the n+5 term keeps a single headline from looking like a trend.
     """
     total = 0.0
     bull = bear = neutral = 0
     themes: dict[str, float] = {}
     weighted: list[tuple[float, Article]] = []
-    for a in articles:
+    seen: set[str] = set()
+    for a in sorted(articles, key=lambda x: x.published_at, reverse=True):
         if a.impact is None:
             continue
+        key = _dupe_key(a.title)
+        if key and key in seen:
+            continue
+        seen.add(key)
         decay = 0.5 ** (a.age_hours / half_life_hours) if half_life_hours > 0 else 1.0
         w = a.impact * (a.confidence if a.confidence is not None else 0.5) * decay
         total += w
@@ -254,12 +272,14 @@ def aggregate(articles: list[Article], half_life_hours: float = 10.0, scale: flo
             neutral += 1
         if a.theme and a.direction != "neutral":
             themes[a.theme] = themes.get(a.theme, 0.0) + w
-    score = int(round(100.0 * math.tanh(total / scale))) if scale > 0 else 0
+    n = len(weighted)
+    n_dir = bull + bear                      # neutral items carry no direction, so they don't dilute the score
+    score = int(round(100.0 * math.tanh(total / (scale * (n_dir + 5))))) if (scale > 0 and n_dir) else 0
     top_themes = sorted(themes.items(), key=lambda kv: abs(kv[1]), reverse=True)[:4]
     drivers = [a for _, a in sorted(weighted, key=lambda t: abs(t[0]), reverse=True)]
     return NewsScore(
         score=score,
-        n_articles=len(weighted),
+        n_articles=n,
         n_bullish=bull,
         n_bearish=bear,
         n_neutral=neutral,

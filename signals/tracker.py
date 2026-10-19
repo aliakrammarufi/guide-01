@@ -274,6 +274,8 @@ class SignalTracker:
             pend = self.pending()
             if pend is None:
                 return events
+            if session is not None and not session.allow_entries:
+                return events            # keep waiting: no new entries during a blackout / dead zone / weekend
             # let the zone follow the analysis until price has visited it
             plan = self._plan_from_signal(eng)
             if plan and not pend.touched and eng.direction == ("long" if pend.side == "BUY" else "short"):
