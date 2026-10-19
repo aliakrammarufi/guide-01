@@ -147,9 +147,12 @@ def fetch_nasdaq_events(currencies: list[str], days: int = 7, timeout: float = 1
             body = r.json() or {}
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
+            log.info("Nasdaq calendar %s: %s", day, exc)
             continue
         ok_days += 1
         rows = ((body.get("data") or {}).get("rows") or []) if isinstance(body, dict) else []
+        if not rows:
+            log.info("Nasdaq calendar %s: no rows (%s)", day, str(body)[:160])
         if rows and not logged:
             log.info("Nasdaq calendar sample row: %s", {k: rows[0].get(k) for k in list(rows[0])[:8]})
             logged = True
@@ -176,6 +179,56 @@ def fetch_nasdaq_events(currencies: list[str], days: int = 7, timeout: float = 1
     return sorted(out, key=lambda e: e.when)
 
 
+# ---------------------------------------------------------------------------
+# Fallback source: TradingView's economic-calendar feed (public, no key, has impact)
+# importance: 1 = high, 0 = medium, -1 = low
+# ---------------------------------------------------------------------------
+TV_URL = "https://economic-calendar.tradingview.com/events"
+TV_HEADERS = {
+    "User-Agent": NASDAQ_HEADERS["User-Agent"], "Accept": "application/json",
+    "Origin": "https://www.tradingview.com", "Referer": "https://www.tradingview.com/",
+}
+CCY_TO_COUNTRY = {"USD": "US", "EUR": "EU", "GBP": "GB", "JPY": "JP", "CNY": "CN", "CAD": "CA", "AUD": "AU", "CHF": "CH", "NZD": "NZ"}
+
+
+def fetch_tradingview_events(currencies: list[str], days: int = 7, timeout: float = 15.0) -> list[Event]:
+    wanted = {c.upper() for c in currencies}
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    end = (now + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    countries = ",".join(CCY_TO_COUNTRY[c] for c in wanted if c in CCY_TO_COUNTRY) or "US"
+    r = httpx.get(TV_URL, params={"from": start, "to": end, "countries": countries}, headers=TV_HEADERS, timeout=timeout)
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:120]!r}")
+    body = r.json()
+    rows = body.get("result") if isinstance(body, dict) else body
+    if not isinstance(rows, list):
+        raise RuntimeError(f"unexpected payload: {str(body)[:160]!r}")
+    out: list[Event] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        cur = str(row.get("currency") or "").upper()
+        if wanted and cur not in wanted:
+            continue
+        imp = row.get("importance")
+        impact = {1: "High", 0: "Medium"}.get(imp if isinstance(imp, int) else -1)
+        if impact is None:
+            continue
+        when = _parse_when(str(row.get("date") or ""))
+        if when is None:
+            continue
+        title = str(row.get("title") or row.get("indicator") or "").strip()
+        period = str(row.get("period") or "").strip()
+        if period and period.lower() not in title.lower():
+            title = f"{title} ({period})"
+        out.append(Event(title=title[:80], currency=cur, when=when, impact=impact,
+                         forecast="" if row.get("forecast") is None else str(row.get("forecast")),
+                         previous="" if row.get("previous") is None else str(row.get("previous")),
+                         actual="" if row.get("actual") is None else str(row.get("actual"))))
+    return sorted(out, key=lambda e: e.when)
+
+
 class CalendarService:
     def __init__(self, url: str, currencies: list[str], ttl_sec: int = 1800):
         self.url = url
@@ -199,14 +252,17 @@ class CalendarService:
             return parse_events(r.json(), self.currencies)
 
         errors: list[str] = []
-        for name, source in (("forexfactory", forexfactory), ("nasdaq", lambda: fetch_nasdaq_events(self.currencies))):
+        sources = (("forexfactory", forexfactory),
+                   ("tradingview", lambda: fetch_tradingview_events(self.currencies)),
+                   ("nasdaq", lambda: fetch_nasdaq_events(self.currencies)))
+        for name, source in sources:
             try:
                 events = source()
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{name}: {exc}")
                 continue
-            if not events and name == "forexfactory":
-                errors.append("forexfactory: no events")
+            if not events and name != "nasdaq":        # try the next source before accepting "nothing"
+                errors.append(f"{name}: no events")
                 continue
             with self._lock:
                 self._events, self._ts = events, time.time()
