@@ -118,21 +118,54 @@ class SentinelBot:
         log.error("Telegram error: %s", context.error)
 
     # --------------------------------------------------------------- helpers
+    @staticmethod
+    def _units(text: str) -> list[str]:
+        """Break a message into pieces that are each valid HTML on their own:
+        paragraphs; an oversized paragraph into lines, keeping <pre> blocks whole."""
+        units: list[str] = []
+        for para in text.split("\n\n"):
+            if len(para) <= TG_LIMIT:
+                units.append(para)
+                continue
+            buf: list[str] = []
+            in_pre = False
+            for line in para.split("\n"):
+                buf.append(line)
+                if "<pre>" in line and "</pre>" not in line:
+                    in_pre = True
+                if "</pre>" in line:
+                    in_pre = False
+                if not in_pre:
+                    units.append("\n".join(buf))
+                    buf = []
+            if buf:
+                units.append("\n".join(buf))
+        return units
+
     async def _send(self, chat_id: int, text: str, **kwargs) -> None:
-        """Send HTML text, splitting on paragraph breaks if too long."""
+        """Send HTML text; long messages are split only at paragraph / line boundaries so
+        every chunk keeps its tags balanced (Telegram rejects a chunk cut inside a tag)."""
         chunks: list[str] = []
         current = ""
-        for para in text.split("\n\n"):
-            candidate = f"{current}\n\n{para}" if current else para
+        for unit in self._units(text):
+            sep = "\n\n" if (current and not current.endswith("</pre>") and unit.strip()) else "\n"
+            candidate = f"{current}{sep}{unit}" if current else unit
             if len(candidate) > TG_LIMIT and current:
                 chunks.append(current)
-                current = para
+                current = unit
             else:
                 current = candidate
         if current:
             chunks.append(current)
         for chunk in chunks:
-            await self.app.bot.send_message(chat_id, chunk[:4096], parse_mode=ParseMode.HTML, disable_web_page_preview=True, **kwargs)
+            try:
+                await self.app.bot.send_message(chat_id, chunk[:4096], parse_mode=ParseMode.HTML, disable_web_page_preview=True, **kwargs)
+            except TelegramError as exc:
+                if "parse entities" in str(exc).lower():
+                    log.warning("HTML rejected, sending plain text: %s", exc)
+                    await self.app.bot.send_message(chat_id, re.sub(r"<[^>]+>", "", chunk)[:4096], disable_web_page_preview=True, **kwargs)
+                else:
+                    raise
 
     async def _send_chart(self, chat_id: int, report) -> None:
         if not self.settings.send_charts:

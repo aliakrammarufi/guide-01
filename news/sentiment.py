@@ -268,8 +268,24 @@ def aggregate(articles: list[Article], half_life_hours: float = 10.0, scale: flo
     )
 
 
+CORE_TITLE_TERMS = (
+    "gold", "xau", "bullion", "precious metal",
+    "fed ", "fed'", "fed,", "fomc", "powell", "rate cut", "rate hike", "rate decision", "interest rate",
+    "cpi", "inflation", "payroll", "nonfarm", "non-farm", "nfp", "jobs report", "gdp", "pce",
+    "treasury", "yield", "dollar", "dxy", "greenback",
+    "tariff", "trade war", "sanction", "war", "missile", "ceasefire", "invasion", "airstrike",
+    "central bank", "shutdown", "default", "jackson hole", "recession", "safe haven", "safe-haven",
+)
+
+
 def is_high_impact(article: Article, terms: list[str]) -> bool:
-    t = f"{article.title} {article.summary}".lower()
-    if any(term.lower() in t for term in terms):
+    """High-impact = the headline itself is about a gold driver AND it carries a market-moving term
+    (or the classifier scored it strongly). The summary alone never qualifies a story – too many
+    unrelated items mention 'war' or 'central bank' in passing."""
+    title = f" {article.title.lower()} "
+    if not any(k in title for k in CORE_TITLE_TERMS):
+        return False
+    text = f"{article.title} {article.summary[:160]}".lower()
+    if any(term.lower() in text for term in terms):
         return True
     return article.impact is not None and abs(article.impact) >= 1.5 and (article.confidence or 0) >= 0.6
