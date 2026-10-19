@@ -10,6 +10,7 @@ unreachable the bot simply has no events to show.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -93,6 +94,76 @@ def parse_events(payload: list[dict], currencies: list[str]) -> list[Event]:
     return sorted(out, key=lambda e: e.when)
 
 
+# ---------------------------------------------------------------------------
+# Fallback source: Nasdaq's public economic-calendar JSON (per day, no key).
+# It carries no impact rating, so we classify by event name.
+# ---------------------------------------------------------------------------
+NASDAQ_URL = "https://api.nasdaq.com/api/calendar/economic?date={date}"
+NASDAQ_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*", "Accept-Language": "en-US,en;q=0.9",
+    "Origin": "https://www.nasdaq.com", "Referer": "https://www.nasdaq.com/",
+}
+COUNTRY_TO_CCY = {"united states": "USD", "us": "USD", "usa": "USD", "euro area": "EUR", "eurozone": "EUR",
+                  "united kingdom": "GBP", "japan": "JPY", "china": "CNY", "canada": "CAD", "australia": "AUD",
+                  "switzerland": "CHF", "new zealand": "NZD", "germany": "EUR"}
+HIGH_IMPACT = ["fomc", "fed interest rate", "federal funds", "rate decision", "interest rate decision", "cpi",
+               "consumer price", "nonfarm", "non-farm", "payroll", "pce", "gdp", "unemployment rate",
+               "ism manufacturing", "ism services", "ism non-manufacturing", "retail sales", "jobless claims",
+               "ppi", "producer price", "powell", "fed chair", "jolts", "michigan", "consumer confidence",
+               "durable goods", "fomc minutes", "adp", "average hourly earnings", "core inflation"]
+MEDIUM_IMPACT = ["pmi", "trade balance", "factory orders", "existing home", "new home", "pending home",
+                 "housing starts", "building permits", "philadelphia fed", "philly fed", "empire state",
+                 "chicago", "richmond", "dallas fed", "kansas", "crude oil", "capacity utilization",
+                 "industrial production", "personal income", "personal spending", "wholesale", "business inventories",
+                 "import price", "export price", "current account", "fed ", "fed's", "treasury", "auction",
+                 "budget", "cb leading", "construction spending", "nahb", "case-shiller", "beige book"]
+
+
+def classify_impact(title: str) -> str:
+    t = title.lower()
+    if any(k in t for k in HIGH_IMPACT):
+        return "High"
+    if any(k in t for k in MEDIUM_IMPACT):
+        return "Medium"
+    return "Low"
+
+
+def fetch_nasdaq_events(currencies: list[str], days: int = 7, timeout: float = 15.0) -> list[Event]:
+    wanted = {c.upper() for c in currencies}
+    out: list[Event] = []
+    today = datetime.now(timezone.utc).date()
+    logged = False
+    for i in range(days):
+        day = today + timedelta(days=i)
+        r = httpx.get(NASDAQ_URL.format(date=day.isoformat()), headers=NASDAQ_HEADERS, timeout=timeout)
+        r.raise_for_status()
+        body = r.json() or {}
+        rows = ((body.get("data") or {}).get("rows") or []) if isinstance(body, dict) else []
+        if rows and not logged:
+            log.info("Nasdaq calendar sample row: %s", {k: rows[0].get(k) for k in list(rows[0])[:8]})
+            logged = True
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            cur = COUNTRY_TO_CCY.get(str(row.get("country") or "").strip().lower(), "")
+            if wanted and cur not in wanted:
+                continue
+            name = str(row.get("eventName") or row.get("event") or row.get("name") or "").strip()
+            m = re.match(r"^\s*(\d{1,2}):(\d{2})", str(row.get("gmt") or row.get("time") or ""))
+            if not name or not m:
+                continue
+            impact = classify_impact(name)
+            if impact == "Low":
+                continue
+            when = datetime(day.year, day.month, day.day, int(m.group(1)), int(m.group(2)), tzinfo=timezone.utc)
+            out.append(Event(title=name[:80], currency=cur, when=when, impact=impact,
+                             forecast=str(row.get("consensus") or "").strip(),
+                             previous=str(row.get("previous") or "").strip(),
+                             actual=str(row.get("actual") or "").strip()))
+    return sorted(out, key=lambda e: e.when)
+
+
 class CalendarService:
     def __init__(self, url: str, currencies: list[str], ttl_sec: int = 1800):
         self.url = url
@@ -102,10 +173,6 @@ class CalendarService:
         self._ts = 0.0
         self._lock = threading.Lock()
 
-    FALLBACK_URLS = (
-        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-        "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
-    )
     HEADERS = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
         "Accept": "application/json,text/plain,*/*",
@@ -114,20 +181,26 @@ class CalendarService:
     def refresh(self) -> list[Event]:
         if not self.url:
             return []
-        urls = [self.url] + [u for u in self.FALLBACK_URLS if u != self.url]
-        last_exc: Exception | None = None
-        for url in urls:
+        def forexfactory() -> list[Event]:
+            r = httpx.get(self.url, timeout=15, headers=self.HEADERS, follow_redirects=True)
+            r.raise_for_status()
+            return parse_events(r.json(), self.currencies)
+
+        errors: list[str] = []
+        for name, source in (("forexfactory", forexfactory), ("nasdaq", lambda: fetch_nasdaq_events(self.currencies))):
             try:
-                r = httpx.get(url, timeout=15, headers=self.HEADERS, follow_redirects=True)
-                r.raise_for_status()
-                events = parse_events(r.json(), self.currencies)
-                with self._lock:
-                    self._events, self._ts = events, time.time()
-                log.info("Calendar: %d %s events this week", len(events), "/".join(self.currencies))
-                return self.events()
+                events = source()
             except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-        log.warning("Calendar fetch failed: %s", last_exc)
+                errors.append(f"{name}: {exc}")
+                continue
+            if not events and name == "forexfactory":
+                errors.append("forexfactory: no events")
+                continue
+            with self._lock:
+                self._events, self._ts = events, time.time()
+            log.info("Calendar (%s): %d %s events in the next days", name, len(events), "/".join(self.currencies))
+            return self.events()
+        log.warning("Calendar fetch failed: %s", " | ".join(errors))
         with self._lock:
             # retry in 5 min (rate limits are short-lived), but keep whatever we had
             self._ts = time.time() - self.ttl + 300
