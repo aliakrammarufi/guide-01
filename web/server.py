@@ -90,6 +90,7 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
             "resistances": [_r(r, 2) for r in t.resistances],
             "pivots": {k: _r(v, 2) for k, v in t.pivots.items()},
             "price_action": t.pa.to_dict() if t.pa is not None else None,
+            "macro": t.macro,
         },
         "news": {
             "score": rep.news.score,

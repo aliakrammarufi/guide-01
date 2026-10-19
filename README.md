@@ -154,6 +154,11 @@ beyond it pulls the far edge out (bounded at 1.5 ATR), and everything coinciding
 `by_confluence` table. `/analyze` has a PRICE ACTION section; `/levels` adds session levels and fibs; the
 chart draws PDH / PDL / VWAP and shades the zone.
 
+**Macro context** (`market/macro.py`): the dollar index, the US 10-year yield and the S&P 500 (daily, Yahoo,
+cached an hour) each add or remove a few points depending on whether they sit above or below their 20-day
+average — a weaker dollar and lower yields help gold, risk-off adds a little — capped at ±8, shown as a MACRO
+block in `/analyze`, in the terminal and in the replay (`no macro context` is one of the compared variants).
+
 **Keyword rules** understand the real gold drivers and are subject-aware:
 "dollar slides" is bullish, "gold slides" is bearish, "rate-cut hopes dented" is
 bearish even though it contains "rate cut".

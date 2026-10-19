@@ -256,7 +256,9 @@ def price_action_line(tech: TechSnapshot) -> str:
     def st(x, tf):
         return f"{_STRUCT_ICON.get(x.trend, '⚪')} {tf} {x.trend}" + (f" ({escape(x.label)})" if x.label else "")
     adx = f" · ADX {pa.adx:.0f}" if pa.adx == pa.adx else ""
-    return f"🧱 {st(pa.h4, 'H4')} · {st(pa.h1, 'H1')} · {escape(pa.regime)}{adx}"
+    m = getattr(tech, "macro", None)
+    macro = f" · 🌍 macro {escape(m.get('label', ''))} ({_m(f'{m.get('score', 0):+d}')})" if m else ""
+    return f"🧱 {st(pa.h4, 'H4')} · {st(pa.h1, 'H1')} · {escape(pa.regime)}{adx}{macro}"
 
 
 def format_signal_message(tech: TechSnapshot, sig: Signal, source: str, as_of: datetime) -> str:
@@ -328,6 +330,30 @@ def format_price_action(tech: TechSnapshot) -> str:
         out += "\n<b>Key levels</b>\n" + _pre(rows, right=(1, 2))
     if zones:
         out += "\n<b>Unfilled zones</b>\n" + "\n".join(f"• {escape(z)}" for z in zones)
+    mt = macro_text(tech)
+    if mt:
+        out += "\n\n" + mt
+    return out
+
+
+def macro_text(tech: TechSnapshot) -> str:
+    m = getattr(tech, "macro", None)
+    if not m or not isinstance(m, dict):
+        return ""
+    icon = "🟢" if m.get("score", 0) >= 4 else "🔴" if m.get("score", 0) <= -4 else "⚪"
+    rows = []
+    for key, label in (("dxy", "Dollar index"), ("us10y", "US 10y yield"), ("spx", "S&P 500")):
+        pt = (m.get("parts") or {}).get(key)
+        if not pt:
+            continue
+        arrow = "▲" if pt["trend"] == "up" else "▼"
+        tone = "+" if pt["score"] > 0 else "−" if pt["score"] < 0 else "·"
+        rows.append((label, f"{pt['last']:,.2f}", f"{arrow} {_m(f'{pt['chg5_pct']:+.1f}')}% 5d", f"{tone}gold"))
+    out = f"🌍 <b>MACRO</b> — {icon} {escape(m.get('label', 'mixed'))} for gold ({_m(f'{m.get('score', 0):+d}')})"
+    if rows:
+        out += "\n" + _pre(rows, right=(1, 2))
+    for f in m.get("flags") or []:
+        out += f"\n⚠️ {escape(f)}"
     return out
 
 

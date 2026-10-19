@@ -47,6 +47,7 @@ class TechSnapshot:
     reasons: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
     pa: PriceAction | None = None        # price-action read (structure, key levels, regime…)
+    macro: dict | None = None            # dollar / yields / equities context (market.macro)
 
     # ---- price-action shortcuts --------------------------------------------
     @property
@@ -160,6 +161,7 @@ def analyze_technicals(data: MarketData) -> TechSnapshot:
         snap.pa = analyze_price_action(h, d, data.m15, snap.atr if snap.atr == snap.atr else 1.0, atr_series=atr, rsi_series=rsi)
     except Exception:  # noqa: BLE001 – the read is descriptive; the score must never depend on it crashing
         snap.pa = None
+    snap.macro = getattr(data, "macro", None)
     _score(snap, ema20_slope=ind.slope_pct(ema20, 12))
     return snap
 
@@ -315,6 +317,13 @@ def _score(s: TechSnapshot, ema20_slope: float) -> None:
             flags.append(f"{_level_name(name)} {lvl:,.1f} is right above – resistance until it breaks")
         for name, lvl in below[:1]:
             flags.append(f"{_level_name(name)} {lvl:,.1f} is right below – support until it breaks")
+
+    # 11) Macro context (±8): dollar, yields, equities
+    m = s.macro
+    if m and isinstance(m, dict) and m.get("score") is not None:
+        score += max(-8, min(8, int(m["score"])))
+        reasons.extend(m.get("reasons") or [])
+        flags.extend(m.get("flags") or [])
 
     s.score = int(round(_clamp(score)))
     s.reasons = reasons

@@ -85,3 +85,18 @@ def test_price_action_feeds_the_snapshot_and_zone_confluence():
     assert plan["zone_lo"] < plan["zone_hi"] and plan["stop"] < plan["zone_lo"]
     assert isinstance(plan["confluence"], list)
     assert plan["zone_hi"] - plan["zone_lo"] <= 1.6 * tech.atr + 1e-6        # the refinement never makes the zone absurdly deep
+
+
+def test_macro_state_scores_direction():
+    from market.macro import macro_state
+
+    idx = pd.date_range("2026-01-01", periods=60, freq="1D", tz="UTC")
+    falling = pd.Series(np.linspace(106, 100, 60), index=idx)
+    rising = pd.Series(np.linspace(4.0, 4.6, 60), index=idx)
+    flat = pd.Series(np.full(60, 6000.0), index=idx)
+    st = macro_state({"dxy": falling, "us10y": rising, "spx": flat})
+    assert st["parts"]["dxy"]["score"] == 4 and st["parts"]["us10y"]["score"] == -3 and st["parts"]["spx"]["score"] == 0
+    assert st["score"] == 1 and st["label"] == "mixed" and len(st["reasons"]) == 3
+    st2 = macro_state({"dxy": falling, "us10y": -rising + 9})
+    assert st2["score"] == 7 and st2["label"] == "supportive" and st2["flags"]
+    assert macro_state({}) is None

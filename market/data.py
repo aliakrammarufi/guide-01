@@ -36,6 +36,7 @@ class MarketData:
     basis: float = 1.0   # multiplier applied to put the bars on the spot basis (1.0 = untouched)
     m15: pd.DataFrame | None = None   # 15-minute bars (last few days) for entry timing; None if unavailable
     basis_known: bool = True          # False when a rescale was wanted but no spot reference was available
+    macro: dict | None = None         # dollar / yields / equities context (market.macro), None if unavailable
 
     @property
     def last_price(self) -> float:
@@ -261,4 +262,8 @@ def fetch_market_data() -> MarketData:
     # Put the bars on the same basis as the live tick (spot XAU/USD) when they differ
     if settings.spot_basis:
         data = to_spot_basis(data, spot_reference())
+    if settings.macro_context:
+        from market.macro import current_macro
+
+        data.macro = current_macro()
     return data

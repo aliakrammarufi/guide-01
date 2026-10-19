@@ -60,9 +60,10 @@ class ReplayParams:
     asia_entries: bool = True
     spread_usd: float = 0.30              # round-trip spread charged to every trade ($/oz)
     slippage_usd: float = 0.10            # extra cost on a stop fill ($/oz)
+    macro: bool = True                    # dollar / yields / equities context in the score (needs their daily history)
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
-    method: int = 4                       # replay/accounting/engine version: a change invalidates stored results
+    method: int = 5                       # replay/accounting/engine version: a change invalidates stored results
 
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
@@ -149,6 +150,13 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
     if first_ok is None or len(m15) - first_ok < 100:
         raise ValueError("not enough history for a replay (need ~11 days of hourly bars before the 15-minute data)")
 
+    macro_tbl = None
+    if p.macro:
+        try:
+            from market.macro import macro_table
+            macro_tbl = macro_table(m15.index[first_ok], m15.index[-1])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("replay: macro context unavailable (%s) – running without it", exc)
     meta: dict[int, dict] = {}          # signal id → session / trigger info
     last_tech = None
     total = len(m15) - first_ok
@@ -184,6 +192,10 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
                 daily = pd.concat([daily, part])
             m15_slice = m15.iloc[max(0, i + 1 - M15_WINDOW):i + 1]
             data = MarketData(hourly=hourly, daily=daily, source="replay", fetched_at=tnow, m15=m15_slice)
+            if macro_tbl is not None:
+                day = t.normalize()
+                if day in macro_tbl.index:
+                    data.macro = macro_tbl.at[day, "state"]
             try:
                 tech = analyze_technicals(data)
             except Exception as exc:  # noqa: BLE001
@@ -346,7 +358,7 @@ def params_from_settings(settings) -> ReplayParams:
         require_trigger=settings.signal_require_trigger, atr_stop_mult=settings.atr_stop_mult,
         atr_target_mult=settings.atr_target_mult, tech_weight=settings.tech_weight, news_weight=settings.news_weight,
         session_filter=settings.session_filter, asia_entries=settings.asia_entries,
-        spread_usd=settings.spread_usd, slippage_usd=settings.slippage_usd,
+        spread_usd=settings.spread_usd, slippage_usd=settings.slippage_usd, macro=settings.macro_context,
     )
 
 
@@ -358,6 +370,7 @@ VARIANTS: list[tuple[str, dict]] = [
     ("further targets (TP1 1.5 · TP2 3.0 ATR)", {"atr_target_mult": 3.0}),
     ("wider stop (2.0 ATR)", {"atr_stop_mult": 2.0}),
     ("no Asian-session entries", {"asia_entries": False}),
+    ("no macro context", {"macro": False}),
 ]
 VARIANTS_KEY = "backtest_variants"
 

@@ -54,6 +54,9 @@ def build_context(tech: TechSnapshot, news: NewsScore, events: list | None = Non
         ]
         if pa.impulse:
             lines.append(f"Last impulse {pa.impulse['direction']} {pa.impulse['from']:,.1f}→{pa.impulse['to']:,.1f}; fib 50 {pa.impulse['levels']['50']:,.1f}, 61.8 {pa.impulse['levels']['61.8']:,.1f}")
+    m = getattr(tech, "macro", None)
+    if m:
+        lines.append(f"Macro context ({m.get('label')}, {m.get('score'):+d}): " + "; ".join(m.get("reasons") or []))
     lines += [
         f"News score: {news.score:+d}/100 ({news.label}); {news.n_bullish} bullish / {news.n_bearish} bearish / {news.n_neutral} neutral headlines",
         "Top themes: " + ", ".join(f"{t} ({v:+.1f})" for t, v in news.top_themes),

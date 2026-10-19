@@ -177,6 +177,9 @@ class Settings:
     # minutes before a high-impact release to send the heads-up alert
     event_warn_min: int = field(default_factory=lambda: _env_int("EVENT_WARN_MIN", 30))
 
+    # Dollar index / US 10-year yield / S&P 500 context in the technical score (±8 at most)
+    macro_context: bool = field(default_factory=lambda: _env_bool("MACRO_CONTEXT", True))
+
     # --- Signal engine ------------------------------------------------------
     tech_weight: float = field(default_factory=lambda: _env_float("TECH_WEIGHT", 0.6))
     news_weight: float = field(default_factory=lambda: _env_float("NEWS_WEIGHT", 0.4))
