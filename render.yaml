@@ -1,0 +1,25 @@
+# One-click deploy on Render (https://render.com) – runs the Telegram bot and the
+# live terminal 24/7 with a public URL. Create a Blueprint from this repo, then set
+# TELEGRAM_BOT_TOKEN (and optionally ANTHROPIC_API_KEY) when Render asks.
+services:
+  - type: web
+    name: xau-sentinel
+    runtime: docker
+    plan: starter            # free instances sleep when idle, which stops the bot; starter stays on
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ALLOWED_CHAT_IDS
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DB_PATH
+        value: /app/data/sentinel.db
+      - key: LOG_LEVEL
+        value: INFO
+    disk:
+      name: sentinel-data
+      mountPath: /app/data
+      sizeGB: 1
