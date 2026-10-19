@@ -115,9 +115,18 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
     }
 
 
+def sizing_defaults() -> dict:
+    from config import settings as st
+    from market.fx import usd_rate
+    fx, src = usd_rate(st.account_currency) if st.account_size else (1.0, "fixed")
+    return {"account": st.account_size, "currency": st.account_currency, "risk_pct": st.risk_pct,
+            "fixed_lots": st.fixed_lots, "fx": fx, "fx_source": src, "contract_oz": st.contract_oz}
+
+
 def signals_json(tracker, session=None) -> dict:
     live = tracker.live()
     return {
+        "sizing": sizing_defaults(),
         "active": live.to_dict() if live else None,        # open trade or pending setup (see .status)
         "history": [t.to_dict() for t in tracker.history(limit=20) if not t.is_live],
         "stats": tracker.stats(),

@@ -195,7 +195,9 @@ class Settings:
     news_blackout_after_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_AFTER_MIN", 15))
     # Position sizing defaults for the terminal (Telegram users set their own with /risk)
     account_size: float = field(default_factory=lambda: _env_float("ACCOUNT_SIZE", 0.0))
+    account_currency: str = field(default_factory=lambda: _env("ACCOUNT_CURRENCY", "USD").upper())
     risk_pct: float = field(default_factory=lambda: _env_float("RISK_PCT", 1.0))
+    fixed_lots: float = field(default_factory=lambda: _env_float("FIXED_LOTS", 0.0))        # 0 = size by risk %
     contract_oz: float = field(default_factory=lambda: _env_float("CONTRACT_OZ", 100.0))   # 1 lot of XAU/USD = 100 oz
 
     # --- Scheduler ----------------------------------------------------------

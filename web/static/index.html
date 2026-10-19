@@ -1080,24 +1080,34 @@
   let sigState = null, sigSeenEvents = new Set(), sigFirst = true;
   const STATUS_TXT = { pending: 'SETUP · WAITING FOR THE ZONE', active: 'LIVE', tp1: 'TP1 HIT · STOP AT BREAK-EVEN', tp2: 'TP2 HIT', stopped: 'STOPPED OUT', flipped: 'CLOSED · BIAS FLIPPED', expired: 'CLOSED · EXPIRED', missed: 'MISSED · NO TRADE', invalidated: 'INVALIDATED · NO TRADE', cancelled: 'CANCELLED · NO TRADE', stale: 'EXPIRED · NO TRADE' };
   // ---- position sizing (kept in this browser only)
-  function riskSettings() { try { return { acct: +(localStorage.getItem('xs_acct') || 0), pct: +(localStorage.getItem('xs_pct') || 0) }; } catch (_) { return { acct: 0, pct: 0 }; } }
+  const CCY_SYM = { USD: '$', CAD: 'C$', EUR: '€', GBP: '£', AUD: 'A$', NZD: 'NZ$', CHF: 'CHF ', JPY: '¥', SGD: 'S$' };
+  function riskSettings() {
+    const d = (sigState && sigState.sizing) || {};
+    let acct = 0, pct = 0;
+    try { acct = +(localStorage.getItem('xs_acct') || 0); pct = +(localStorage.getItem('xs_pct') || 0); } catch (_) {}
+    return { acct: acct || d.account || 0, pct: pct || d.risk_pct || 0, ccy: d.currency || 'USD', fx: d.fx || 1, fixed: d.fixed_lots || 0, mine: !!acct };
+  }
   function lotsFor(entry, sl) {
     const r = riskSettings(); if (!r.acct || !r.pct) return null;
     const dist = Math.abs(entry - sl); if (!dist) return null;
-    const lots = Math.max(0.01, Math.floor(r.acct * r.pct / 100 / (dist * 100) * 100) / 100);
-    return { lots, risk: lots * dist * 100, pctRisk: r.pct, acct: r.acct, perDollar: lots * 100 };
+    const byRisk = Math.max(0.01, Math.floor((r.acct * r.pct / 100 / r.fx) / (dist * 100) * 100) / 100);
+    const lots = r.fixed > 0 ? r.fixed : byRisk;
+    const risk = lots * dist * 100 * r.fx, pctRisk = 100 * risk / r.acct;
+    return { lots, byRisk, risk, pctRisk, guide: r.pct, acct: r.acct, sym: CCY_SYM[r.ccy] || (r.ccy + ' '), perDollar: lots * 100 * r.fx, fixed: r.fixed > 0, over: r.fixed > 0 && pctRisk > r.pct * 1.25 };
   }
   function renderLots() {
     const a = sigState && sigState.active, el = $('sig-lots'); if (!el) return;
+    const r = riskSettings();
     const z = a ? lotsFor(a.entry, a.sl) : null;
-    if (!a) { el.innerHTML = riskSettings().acct ? 'lot size appears with the next call' : 'set account & risk → lot size per call'; return; }
+    if (!a) { el.innerHTML = r.acct ? `${r.sym || ''}${r.acct ? CCY_SYM[r.ccy] || '' : ''}${r.acct ? r.acct.toLocaleString() : ''} · ${r.fixed ? r.fixed.toFixed(2) + ' lots fixed' : r.pct + '% risk'} · size shows with the next call` : 'set account & risk → lot size per call'; return; }
     if (!z) { el.innerHTML = 'enter account & risk % for lot size'; return; }
     const tp2 = Math.abs(a.tp2 - a.entry) * z.perDollar;
-    el.innerHTML = `<b>${z.lots.toFixed(2)} lots</b> · risk $${z.risk.toFixed(0)} (${z.pctRisk}%) · TP2 ≈ +$${tp2.toFixed(0)}`;
+    el.innerHTML = `<b>${z.lots.toFixed(2)} lots</b>${z.fixed ? ' (fixed)' : ''} · risk ${z.sym}${z.risk.toFixed(0)} (${z.pctRisk.toFixed(1)}%) · TP2 ≈ +${z.sym}${tp2.toFixed(0)}` +
+      (z.over ? ` <span class="down">· wide stop — ${z.byRisk.toFixed(2)} lots keeps ${z.guide}%</span>` : '');
   }
   function initRiskInputs() {
     const r = riskSettings(), a = $('risk-acct'), p = $('risk-pct'); if (!a || !p) return;
-    if (r.acct) a.value = r.acct; if (r.pct) p.value = r.pct;
+    if (r.mine) { a.value = r.acct; p.value = r.pct; }
     const save = () => { try { localStorage.setItem('xs_acct', a.value || ''); localStorage.setItem('xs_pct', p.value || ''); } catch (_) {} renderLots(); };
     a.addEventListener('input', save); p.addEventListener('input', save);
   }
@@ -1128,6 +1138,7 @@
     const st = sg.stats || {};
     $('sig-stats').innerHTML = st.count ? `<span>closed <b>${st.count}</b></span><span>win rate <b class="${st.win_rate >= 50 ? 'up' : 'down'}">${st.win_rate}%</b></span><span>total <b class="${st.total_r >= 0 ? 'up' : 'down'}">${signed(st.total_r.toFixed(2))}R</b></span><span>avg <b>${signed(st.avg_r.toFixed(2))}R</b></span>` : '<span>no closed calls yet</span>';
     renderSession(sg.session); renderTrigger(sg);
+    if (sg.sizing && sg.sizing.account) { const ai = $('risk-acct'), pi = $('risk-pct'); if (ai && !ai.value) ai.placeholder = `${sg.sizing.account} ${sg.sizing.currency}`; if (pi && !pi.value) pi.placeholder = sg.sizing.risk_pct; }
     if (a) {
       const buy = a.side === 'BUY', pending = a.status === 'pending';
       box.className = 'sig-active ' + (buy ? 'buy' : 'sell') + (pending ? ' setup' : '');

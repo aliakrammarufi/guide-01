@@ -169,9 +169,20 @@ class SentinelBot:
             return self.settings.account_size, self.settings.risk_pct
         return (float(acct) if acct else None, float(pct) if pct else None)
 
+    def _fixed_lots(self, chat_id: int) -> float:
+        d = self.store.get_state(f"risk:{chat_id}") or {}
+        if "fixed_lots" in d:
+            return float(d.get("fixed_lots") or 0.0)
+        return self.settings.fixed_lots
+
     def _sizing(self, chat_id: int, entry: float, stop: float):
         acct, pct = self._risk_settings(chat_id)
-        return size_for(acct or 0, pct or 0, entry, stop, self.settings.contract_oz)
+        if not acct:
+            return None
+        from market.fx import usd_rate
+        fx, _ = usd_rate(self.settings.account_currency)
+        return size_for(acct, pct or 1.0, entry, stop, self.settings.contract_oz,
+                        currency=self.settings.account_currency, fx=fx, fixed_lots=self._fixed_lots(chat_id))
 
     RISK_PROMPT = "Reply with your account size and the % you risk per trade"
 
@@ -190,16 +201,22 @@ class SentinelBot:
             return None
         return account, pct
 
+    def _risk_summary(self, chat_id: int) -> str:
+        acct, pct = self._risk_settings(chat_id)
+        return fmt.format_risk_settings(acct, pct, currency=self.settings.account_currency, fixed_lots=self._fixed_lots(chat_id))
+
     async def _save_risk(self, chat_id: int, account: float, pct: float) -> None:
-        self.store.set_state(f"risk:{chat_id}", {"account": account, "risk_pct": pct})
+        d = self.store.get_state(f"risk:{chat_id}") or {}
+        d.update({"account": account, "risk_pct": pct})
+        self.store.set_state(f"risk:{chat_id}", d)
         self._awaiting_risk.discard(chat_id)
-        await self._send(chat_id, "✅ <b>SAVED</b>\n\n" + fmt.format_risk_settings(account, pct))
+        await self._send(chat_id, "✅ <b>SAVED</b>\n\n" + self._risk_summary(chat_id))
 
     async def _ask_risk(self, update: Update) -> None:
         chat_id = update.effective_chat.id
         self._awaiting_risk.add(chat_id)
-        acct, pct = self._risk_settings(chat_id)
-        current = fmt.format_risk_settings(acct, pct) if acct else "💼 <b>POSITION SIZING</b> — not set yet"
+        acct, _ = self._risk_settings(chat_id)
+        current = self._risk_summary(chat_id) if acct else "💼 <b>POSITION SIZING</b> — not set yet"
         try:
             await update.effective_message.reply_text(
                 f"{current}\n\n✍️ {self.RISK_PROMPT}, for example <code>5000 1</code> "
@@ -218,12 +235,21 @@ class SentinelBot:
             self._awaiting_risk.discard(chat_id)
             await self._send(chat_id, "💼 <b>POSITION SIZING OFF</b>")
             return
+        if raw.lower().startswith("lots"):
+            m = re.search(r"\d+(?:\.\d+)?", raw)
+            lots = float(m.group(0)) if m else 0.0
+            d = self.store.get_state(f"risk:{chat_id}") or {}
+            d["fixed_lots"] = lots if 0 < lots <= 10 else 0.0
+            self.store.set_state(f"risk:{chat_id}", d)
+            await self._send(chat_id, ("✅ <b>SAVED</b> — fixed size " + f"<b>{lots:.2f} lots</b>" if d["fixed_lots"] else "✅ <b>SAVED</b> — sizing by risk % again") + "\n\n" + self._risk_summary(chat_id))
+            return
         if raw:
             parsed = self._parse_risk(raw)
             if parsed:
                 await self._save_risk(chat_id, *parsed)
             else:
-                await self._send(chat_id, "I couldn't read that. Send it as <code>/risk 5000 1</code> — account size, then % risk per trade (max 10%).")
+                await self._send(chat_id, "I couldn't read that. Send it as <code>/risk 5000 1</code> — account size, then % risk per trade (max 10%). "
+                                          "<code>/risk lots 0.05</code> fixes your lot size; <code>/risk lots 0</code> goes back to sizing by risk.")
             return
         await self._ask_risk(update)
 

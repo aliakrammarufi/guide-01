@@ -22,7 +22,7 @@ from market.analysis import TechSnapshot
 from news.sentiment import NewsScore
 from news.store import Article
 from signals.engine import Signal
-from signals.sizing import Sizing
+from signals.sizing import SYMBOLS, Sizing
 
 DISCLAIMER = "<i>Decision support only — this bot never places orders.</i>"
 RULE = "────────────────"
@@ -148,18 +148,38 @@ def session_line(session: dict | None) -> str:
 def _sizing_row(sz: Sizing | None) -> tuple | None:
     if sz is None:
         return None
-    return ("Size", f"{sz.lots:.2f} lots", f"risk ${sz.actual_risk:,.0f} ({sz.risk_pct:g}%)")
+    return ("Size", f"{sz.lots:.2f} lots", f"risk {sz.money(sz.actual_risk)} ({sz.pct_of_account:.1f}%)")
 
 
-def format_risk_settings(account: float | None, risk_pct: float | None) -> str:
+def sizing_note(sz: Sizing | None, entry: float, tp1: float, tp2: float) -> str:
+    """One line under the table: what the size means in money, plus a warning when a fixed size risks too much."""
+    if sz is None:
+        return ""
+    line = (f"At {sz.lots:.2f} lots: TP 1 ≈ <b>+{sz.money(sz.profit_at(tp1 - entry))}</b> · TP 2 ≈ <b>+{sz.money(sz.profit_at(tp2 - entry))}</b> · "
+            f"stop −{sz.money(sz.actual_risk)} ({sz.pct_of_account:.1f}% of {sz.money(sz.account)})")
+    if sz.over_guide:
+        line += f"\n⚠️ Wide stop: {sz.lots:.2f} lots risks {sz.pct_of_account:.1f}% here — <b>{sz.lots_by_risk:.2f} lots</b> keeps it at {sz.risk_pct:g}%."
+    return line
+
+
+def format_risk_settings(account: float | None, risk_pct: float | None, currency: str = "USD", fixed_lots: float = 0.0) -> str:
+    sym = SYMBOLS.get((currency or "USD").upper(), currency + " ")
     if not account:
         return ("💼 <b>POSITION SIZING — OFF</b>\n"
                 "Send /risk and answer with your account size and the % you risk per trade "
                 "(for example <code>5000 1</code>), or type it in one go: <code>/risk 5000 1</code>.\n"
                 "Every setup and live call will then include the lot size for its stop.")
-    return ("💼 <b>POSITION SIZING</b>\n"
-            + _pre([("Account", f"${account:,.0f}"), ("Risk per trade", f"{risk_pct:g}%  =  ${account * risk_pct / 100:,.0f}"), ("Contract", "1 lot = 100 oz")], right=())
-            + "\nLots are sized so hitting the stop loses about that amount.\nSend /risk again to change it, or <code>/risk off</code>.")
+    rows = [("Account", f"{sym}{account:,.0f}"), ("Risk guide", f"{risk_pct:g}% = {sym}{account * risk_pct / 100:,.0f} per trade")]
+    if fixed_lots:
+        rows.append(("Size", f"fixed {fixed_lots:.2f} lots"))
+    else:
+        rows.append(("Size", f"by risk ({risk_pct:g}% of account)"))
+    rows.append(("Contract", "1 lot = 100 oz"))
+    how = (f"Every call shows what {fixed_lots:.2f} lots risks on its stop, in {currency.upper()} and as a % of your account, "
+           f"and warns when a wide stop pushes it past your {risk_pct:g}% guide."
+           if fixed_lots else "Lots are sized so hitting the stop loses about the risk guide.")
+    return ("💼 <b>POSITION SIZING</b>\n" + _pre(rows, right=()) + "\n" + how +
+            "\nChange: <code>/risk 10000 1</code> · <code>/risk lots 0.05</code> · <code>/risk lots 0</code> (back to risk-based) · <code>/risk off</code>")
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +386,10 @@ def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = N
             rows.append(("Now", f"{price:,.1f}", f"{_diff(price - mid)} vs mid"))
         waiting = ("Price is in the zone — waiting for a 15-minute confirmation."
                    if (t.setup_mode == "in-zone" or t.touched) else "Waiting for a pullback into the zone.")
-        return (f"{title}\nEntry zone <b>{_num(t.zone_lo)} – {_num(t.zone_hi)}</b>\n{_pre(rows)}\n{waiting} A live call is posted the moment it confirms.\n"
+        note = sizing_note(sizing, mid, t.tp1, t.tp2)
+        return (f"{title}\nEntry zone <b>{_num(t.zone_lo)} – {_num(t.zone_hi)}</b>\n{_pre(rows)}\n"
+                + (note + "\n" if note else "") +
+                f"{waiting} A live call is posted the moment it confirms.\n"
                 f"<i>Setup posted {t.opened_at.strftime('%d %b %H:%M UTC')}</i>")
 
     rows = [
@@ -389,6 +412,10 @@ def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = N
         rows.append(("Result", f"{t.exit_price:,.1f}", f"{_r(t.result_r)} {mark}"))
     when = t.triggered_at or t.opened_at
     tail = []
+    if t.is_open:
+        note = sizing_note(sizing, t.entry, t.tp1, t.tp2)
+        if note:
+            tail.append(note)
     if t.trigger_note:
         tail.append(f"Confirmed by: <b>{escape(t.trigger_note)}</b>")
     if t.reason:
