@@ -64,6 +64,9 @@ class SentinelBot:
             "risk": self.cmd_risk,
             "backtest": self.cmd_backtest,
             "selfcheck": self.cmd_backtest,
+            "took": self.cmd_took,
+            "skipped": self.cmd_skipped,
+            "scorecard": self.cmd_scorecard,
             "status": self.cmd_status,
         }
         for name, func in handlers.items():
@@ -76,6 +79,9 @@ class SentinelBot:
         grace = {"misfire_grace_time": 120}   # a run that starts late (busy startup) still runs instead of being skipped
         jq.run_repeating(self.job_report, interval=timedelta(minutes=self.settings.analysis_interval_min), first=timedelta(seconds=20), name="report", job_kwargs=grace)
         jq.run_repeating(self.job_monitor, interval=timedelta(minutes=self.settings.news_scan_interval_min), first=timedelta(seconds=90), name="monitor", job_kwargs=grace)
+        # weekly scorecard: Monday 06:30 UTC (before London), to every subscriber
+        from datetime import time as _time
+        jq.run_daily(self.job_scorecard, time=_time(6, 30, tzinfo=timezone.utc), days=(0,), name="scorecard", job_kwargs=grace)
 
     async def _post_init(self, app: Application) -> None:
         await app.bot.set_my_commands(
@@ -92,6 +98,9 @@ class SentinelBot:
                 BotCommand("alerts", "Alerts on|off"),
                 BotCommand("risk", "Account size & % risk → lot size per call"),
                 BotCommand("backtest", "How the rules did on recent real bars"),
+                BotCommand("took", "Mark the latest call as taken"),
+                BotCommand("skipped", "Mark the latest call as skipped"),
+                BotCommand("scorecard", "This week's results"),
                 BotCommand("status", "Bot status"),
                 BotCommand("help", "Commands"),
             ]
@@ -372,10 +381,79 @@ class SentinelBot:
         rep = await self.cache.get(with_briefing=False)
         tr = self.cache.tracker
         chat_id = update.effective_chat.id
+        marks = self.store.marks(chat_id)
+        mine = tr.stats(only_ids={i for i, m in marks.items() if m == "took"}) if marks else None
         text = fmt.format_signals_overview(tr.live(), tr.history(limit=12), tr.stats(), rep.tech.price,
                                            sizing_for=lambda entry, stop: self._sizing(chat_id, entry, stop),
-                                           session=rep.session.to_dict() if rep.session else None)
+                                           session=rep.session.to_dict() if rep.session else None, mine=mine)
         await self._send(chat_id, text)
+
+    # ---- /took /skipped /scorecard -------------------------------------------
+    def _mark_target(self, args: list[str]):
+        """The call to mark: an explicit #id, else the live call, else the most recent traded call of the last 48 h."""
+        tr = self.cache.tracker
+        if args:
+            try:
+                wanted = int(args[0].lstrip("#"))
+                return next((s for s in tr.history(limit=200) if s.id == wanted), None)
+            except ValueError:
+                return None
+        live = tr.live()
+        if live is not None:
+            return live
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        for s in tr.history(limit=50):
+            if s.traded and (s.closed_at or s.opened_at) >= cutoff:
+                return s
+        return None
+
+    async def _mark(self, update: Update, context: ContextTypes.DEFAULT_TYPE, mark: str) -> None:
+        chat_id = update.effective_chat.id
+        sig = self._mark_target(list(context.args or []))
+        if sig is None:
+            await self._send(chat_id, "No recent call to mark. Use <code>/took 12</code> with the call number from /signals.")
+            return
+        user = update.effective_user.id if update.effective_user else None
+        self.store.mark_trade(sig.id, chat_id, user, mark)
+        await self._send(chat_id, fmt.format_mark(sig, mark))
+
+    async def cmd_took(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._mark(update, context, "took")
+
+    async def cmd_skipped(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._mark(update, context, "skipped")
+
+    def _scorecard_text(self, chat_id: int) -> str:
+        tr = self.cache.tracker
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        week_rows = self.store.signals_since(since)
+        week = tr.stats(signals=week_rows)
+        allt = tr.stats()
+        marks = self.store.marks(chat_id)
+        mine = tr.stats(only_ids={i for i, m in marks.items() if m == "took"}) if marks else None
+        bt = self.store.get_state("backtest") or {}
+        sc = None
+        if isinstance(bt, dict) and bt.get("summary"):
+            sc = dict(bt["summary"]) | {"days": (bt.get("period") or {}).get("days", 60)}
+        rows = []
+        for s in [x for x in week_rows if x.traded and not x.is_open][-8:]:
+            res = fmt._r(s.result_r) if s.result_r is not None else "–"
+            mk = "✅" if (s.result_r or 0) > 0.05 else ("❌" if (s.result_r or 0) < -0.05 else "➖")
+            tag = {"took": " ·you", "skipped": " ·skip"}.get(marks.get(s.id, ""), "")
+            rows.append((s.opened_at.strftime("%a %d"), s.side, f"{s.entry:,.0f} → {(s.exit_price or s.entry):,.0f}", f"{res} {mk}{tag}"))
+        label = f"{since.strftime('%d %b')} → {datetime.now(timezone.utc).strftime('%d %b')}"
+        return fmt.format_scorecard(week, allt, mine, sc, rows, label)
+
+    async def cmd_scorecard(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        await self._send(chat_id, await asyncio.to_thread(self._scorecard_text, chat_id))
+
+    async def job_scorecard(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        for chat_id in self.store.subscribers():
+            try:
+                await self._send(chat_id, await asyncio.to_thread(self._scorecard_text, chat_id))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("scorecard to %s failed: %s", chat_id, exc)
 
     async def _flush_signal_events(self) -> None:
         async with self._flush_lock:

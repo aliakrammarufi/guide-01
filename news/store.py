@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS signals (
     confluence  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS trade_marks (
+    signal_id INTEGER NOT NULL,
+    chat_id   INTEGER NOT NULL,
+    user_id   INTEGER,
+    mark      TEXT NOT NULL,            -- took | skipped
+    at        TEXT NOT NULL,
+    PRIMARY KEY (signal_id, chat_id)
+);
+
 CREATE TABLE IF NOT EXISTS signal_events (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     signal_id INTEGER NOT NULL,
@@ -353,6 +362,26 @@ class Store:
                 finally:
                     dst.close()
                 return p.read_bytes()
+
+    # ---- trade marks (/took, /skipped) -------------------------------------
+    def mark_trade(self, signal_id: int, chat_id: int, user_id: int | None, mark: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                """INSERT INTO trade_marks (signal_id, chat_id, user_id, mark, at) VALUES (?,?,?,?,?)
+                   ON CONFLICT(signal_id, chat_id) DO UPDATE SET mark=excluded.mark, user_id=excluded.user_id, at=excluded.at""",
+                (signal_id, chat_id, user_id, mark, _iso(datetime.now(timezone.utc))),
+            )
+
+    def marks(self, chat_id: int) -> dict[int, str]:
+        """signal id → 'took' | 'skipped' for one chat."""
+        with self._lock:
+            rows = self._conn.execute("SELECT signal_id, mark FROM trade_marks WHERE chat_id=?", (chat_id,)).fetchall()
+            return {int(r["signal_id"]): r["mark"] for r in rows}
+
+    def signals_since(self, since: datetime) -> list:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM signals WHERE opened_at >= ? ORDER BY id ASC", (_iso(since),)).fetchall()
+            return [self._row_to_signal(r) for r in rows]
 
     def close(self) -> None:
         self._conn.close()

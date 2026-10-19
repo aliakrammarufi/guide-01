@@ -157,6 +157,8 @@ class Settings:
     classifier_model: str = field(default_factory=lambda: _env("CLASSIFIER_MODEL", "claude-haiku-5-5"))
     # Stronger model for the written market briefing
     analyst_model: str = field(default_factory=lambda: _env("ANALYST_MODEL", "claude-sonnet-5-5"))
+    # A new briefing is written at most this often (or when the bias changes) – keeps the API bill small
+    briefing_interval_min: int = field(default_factory=lambda: _env_int("BRIEFING_INTERVAL_MIN", 60))
 
     # --- News ---------------------------------------------------------------
     feeds: list[str] = field(default_factory=lambda: _env_list("NEWS_FEEDS", DEFAULT_FEEDS))
@@ -193,6 +195,10 @@ class Settings:
     asia_entries: bool = field(default_factory=lambda: _env_bool("ASIA_ENTRIES", True))
     news_blackout_before_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_BEFORE_MIN", 30))
     news_blackout_after_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_AFTER_MIN", 15))
+    # Trading costs charged to every result (replay and live stats): round-trip spread and the slippage
+    # paid on a stop fill, in $ per oz. Axi XAU/USD spread is typically 0.2–0.4.
+    spread_usd: float = field(default_factory=lambda: _env_float("SPREAD_USD", 0.30))
+    slippage_usd: float = field(default_factory=lambda: _env_float("SLIPPAGE_USD", 0.10))
     # Position sizing defaults for the terminal (Telegram users set their own with /risk)
     account_size: float = field(default_factory=lambda: _env_float("ACCOUNT_SIZE", 0.0))
     account_currency: str = field(default_factory=lambda: _env("ACCOUNT_CURRENCY", "USD").upper())

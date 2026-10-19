@@ -168,9 +168,11 @@ class SignalEvent:
 
 class SignalTracker:
     def __init__(self, store: Store, min_conf: int = 45, max_hours: float = 48.0, breakeven_after_tp1: bool = True,
-                 pending_max_hours: float = 12.0, require_trigger: bool = True):
+                 pending_max_hours: float = 12.0, require_trigger: bool = True, spread_usd: float = 0.0, slippage_usd: float = 0.0):
         self.store = store
         self.min_conf = min_conf
+        self.spread_usd = spread_usd          # round-trip spread charged to every closed trade ($/oz)
+        self.slippage_usd = slippage_usd      # extra cost when a stop fills ($/oz)
         self.max_hours = max_hours
         self.breakeven_after_tp1 = breakeven_after_tp1
         self.pending_max_hours = pending_max_hours
@@ -202,18 +204,25 @@ class SignalTracker:
         out, self._pending = self._pending, []
         return out
 
-    def stats(self) -> dict[str, Any]:
-        closed = [s for s in self.store.signals(limit=500) if s.traded and not s.is_open and s.result_r is not None]
+    def stats(self, signals: list | None = None, only_ids: set[int] | None = None) -> dict[str, Any]:
+        """Results over ``signals`` (default: the last 500), optionally restricted to ``only_ids`` (e.g. the calls a chat /took)."""
+        rows = self.store.signals(limit=500) if signals is None else signals
+        if only_ids is not None:
+            rows = [s for s in rows if s.id in only_ids]
+        closed = [s for s in rows if s.traded and not s.is_open and s.result_r is not None]
         wins = [s for s in closed if s.result_r > 0.05]
         losses = [s for s in closed if s.result_r < -0.05]
         total_r = sum(s.result_r for s in closed)
-        no_trade = [s for s in self.store.signals(limit=500) if s.status in NO_TRADE_STATUSES]
+        no_trade = [s for s in rows if s.status in NO_TRADE_STATUSES]
+        best = max(closed, key=lambda s: s.result_r) if closed else None
+        worst = min(closed, key=lambda s: s.result_r) if closed else None
         return {
             "count": len(closed), "wins": len(wins), "losses": len(losses),
             "breakeven": len(closed) - len(wins) - len(losses),
             "win_rate": round(100.0 * len(wins) / len(closed), 1) if closed else None,
             "total_r": round(total_r, 2), "avg_r": round(total_r / len(closed), 2) if closed else None,
-            "no_trade": len(no_trade),
+            "no_trade": len(no_trade), "setups": len(rows), "open": sum(1 for s in rows if s.is_live),
+            "best_r": round(best.result_r, 2) if best else None, "worst_r": round(worst.result_r, 2) if worst else None,
         }
 
     # ---- writes -------------------------------------------------------------
@@ -238,18 +247,21 @@ class SignalTracker:
         sig.status = status
         sig.closed_at = now
         sig.exit_price = price
-        sig.result_r = self.realized_r(sig, price) if status not in NO_TRADE_STATUSES else None
+        sig.result_r = self.realized_r(sig, price, status) if status not in NO_TRADE_STATUSES else None
         self.store.update_signal(sig)
         return self._emit(status, sig, price)
 
-    @staticmethod
-    def realized_r(sig: TradeSignal, exit_price: float) -> float:
-        """Result of following the call as advised: half the position booked at TP1 (at the TP1
-        level), the other half closed at ``exit_price``. Before TP1 the whole position exits there."""
+    def realized_r(self, sig: TradeSignal, exit_price: float, status: str = "") -> float:
+        """Result of following the call as advised – half booked at TP1 (at the TP1 level), the other
+        half closed at ``exit_price`` – net of costs: the round-trip spread on the whole position and
+        slippage on the part that was stopped out. Before TP1 the whole position exits at ``exit_price``."""
         full = sig.r_at(exit_price)
-        if sig.tp1_hit_at is None:
-            return full
-        return 0.5 * sig.r_at(sig.tp1) + 0.5 * full
+        gross = full if sig.tp1_hit_at is None else 0.5 * sig.r_at(sig.tp1) + 0.5 * full
+        risk = sig.risk
+        cost = self.spread_usd / risk
+        if status == "stopped":
+            cost += self.slippage_usd / risk * (0.5 if sig.tp1_hit_at is not None else 1.0)
+        return gross - cost
 
     @staticmethod
     def _plan_from_signal(engine_sig) -> dict | None:

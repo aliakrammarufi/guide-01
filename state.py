@@ -22,7 +22,8 @@ class ReportCache:
         st = pipeline.settings
         self.tracker = SignalTracker(pipeline.store, min_conf=st.signal_min_conf, max_hours=st.signal_max_hours,
                                      breakeven_after_tp1=st.signal_breakeven_after_tp1,
-                                     pending_max_hours=st.signal_pending_max_hours, require_trigger=st.signal_require_trigger)
+                                     pending_max_hours=st.signal_pending_max_hours, require_trigger=st.signal_require_trigger,
+                                     spread_usd=st.spread_usd, slippage_usd=st.slippage_usd)
         self._report: Report | None = None
         self._lock = threading.Lock()
         self._history: list[dict] = []   # recent signals (for the dashboard sparkline)
@@ -46,11 +47,18 @@ class ReportCache:
         """Run the pipeline (blocking). Only one refresh runs at a time; callers that queued up behind a
         refresh that just finished get that fresh report instead of running the pipeline again."""
         asked_at = datetime.now(timezone.utc)
+        st = self.pipeline.settings
         with self._lock:
             rep = self._report
             if rep is not None and rep.generated_at >= asked_at - timedelta(seconds=20) \
-                    and (not with_briefing or rep.briefing is not None or not self.pipeline.settings.ai_enabled):
+                    and (not with_briefing or rep.briefing is not None or not st.ai_enabled):
                 return rep
+            # A fresh briefing costs API tokens: write one at most every BRIEFING_INTERVAL_MIN unless the bias changed.
+            carry = None
+            if with_briefing and rep is not None and rep.briefing and rep.briefing_at is not None \
+                    and asked_at - rep.briefing_at < timedelta(minutes=max(1, st.briefing_interval_min)):
+                carry = rep
+                with_briefing = False
             try:
                 report = self.pipeline.run(with_briefing=with_briefing, refresh_news=refresh_news)
                 self.last_error = None
@@ -58,9 +66,16 @@ class ReportCache:
                 self.last_error = str(exc)
                 log.exception("Pipeline run failed")
                 raise
-            if report.briefing is None and rep is not None and rep.briefing and not with_briefing \
-                    and (report.generated_at - rep.generated_at) < timedelta(minutes=max(30, self.max_age_sec // 60)):
-                report.briefing = rep.briefing          # a light refresh keeps the last written briefing
+            if carry is not None and report.signal.bias != carry.signal.bias and st.ai_enabled:
+                try:                                    # the picture changed: a new briefing is worth its tokens
+                    from ai.analyst import write_briefing
+                    report.briefing = write_briefing(st.anthropic_api_key, st.analyst_model, report.tech, report.news, report.events)
+                    report.briefing_at = datetime.now(timezone.utc)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Briefing failed: %s", exc)
+            if report.briefing is None and rep is not None and rep.briefing \
+                    and (report.generated_at - rep.generated_at) < timedelta(hours=3):
+                report.briefing, report.briefing_at = rep.briefing, rep.briefing_at   # keep the last written briefing
             self._report = report
             try:
                 self.tracker.on_analysis(report)

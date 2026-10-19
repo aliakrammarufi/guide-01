@@ -521,7 +521,8 @@ def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = N
     return f"{title}\n{_pre(rows)}\n" + "\n".join(tail)
 
 
-def format_signals_overview(active, history: list, stats: dict, price: float | None, sizing_for=None, session: dict | None = None) -> str:
+def format_signals_overview(active, history: list, stats: dict, price: float | None, sizing_for=None, session: dict | None = None,
+                            mine: dict | None = None) -> str:
     parts = ["📡 <b>TRADE SIGNALS</b>"]
     if active:
         sz = sizing_for(active.entry, active.sl) if sizing_for else None
@@ -544,6 +545,43 @@ def format_signals_overview(active, history: list, stats: dict, price: float | N
         extra = f" · setups skipped {stats['no_trade']}" if stats.get("no_trade") else ""
         parts.append(f"📊 Closed <b>{stats['count']}</b> · win rate <b>{stats['win_rate']}%</b> · "
                      f"total <b>{_r(stats['total_r'])}</b> · average <b>{_r(stats['avg_r'])}</b>{extra}")
+    if mine and mine.get("count"):
+        parts.append(f"🧾 Calls you took: <b>{mine['count']}</b> · win rate <b>{mine['win_rate']}%</b> · total <b>{_r(mine['total_r'])}</b>"
+                     f" — mark calls with /took or /skipped")
+    parts.append(DISCLAIMER)
+    return "\n\n".join(parts)
+
+
+def format_mark(sig, mark: str) -> str:
+    verb = "Marked as taken" if mark == "took" else "Marked as skipped"
+    when = (sig.triggered_at or sig.opened_at).strftime("%d %b %H:%M UTC")
+    return (f"✅ <b>{verb}:</b> #{sig.id} {sig.side} @ {sig.entry:,.1f} ({when}) · {escape(STATUS_LABEL.get(sig.status, sig.status))}\n"
+            f"<i>/signals shows the results of the calls you took separately.</i>")
+
+
+def format_scorecard(week: dict, allt: dict, mine: dict | None, selfcheck: dict | None, best_rows: list, period_label: str) -> str:
+    """Weekly scorecard: the week's calls, the running record, your own taken calls, and the self-check line."""
+    parts = [f"🗓 <b>WEEKLY SCORECARD</b> — {escape(period_label)}"]
+    wr = f"{week['win_rate']:.0f}%" if week.get("win_rate") is not None else "–"
+    rows = [
+        ("Setups posted", str(week.get("setups", 0))),
+        ("Trades closed", f"{week.get('count', 0)} ({week.get('wins', 0)} W · {week.get('losses', 0)} L · {week.get('breakeven', 0)} BE)"),
+        ("Win rate", wr),
+        ("Total / average", f"{_r(week.get('total_r', 0.0), 1)} / {_r(week['avg_r']) if week.get('avg_r') is not None else '–'}"),
+        ("Best / worst", f"{_r(week['best_r']) if week.get('best_r') is not None else '–'} / {_r(week['worst_r']) if week.get('worst_r') is not None else '–'}"),
+        ("No-trade setups", str(week.get("no_trade", 0))),
+    ]
+    parts.append(_pre(rows, right=()))
+    if best_rows:
+        parts.append("<b>This week's calls</b>\n" + _pre(best_rows, right=(3,)))
+    if allt.get("count"):
+        parts.append(f"📈 Running record: <b>{allt['count']}</b> trades · win rate <b>{allt['win_rate']}%</b> · total <b>{_r(allt['total_r'], 1)}</b> · average <b>{_r(allt['avg_r'])}</b>")
+    if mine and mine.get("count"):
+        parts.append(f"🧾 Calls you took: <b>{mine['count']}</b> · win rate <b>{mine['win_rate']}%</b> · total <b>{_r(mine['total_r'], 1)}</b>")
+    if selfcheck and selfcheck.get("count"):
+        parts.append(f"🧪 Self-check (last {selfcheck.get('days', 60):.0f} days of real bars, technical-only): {selfcheck['count']} trades · "
+                     f"win rate {selfcheck['win_rate']}% · average {_r(selfcheck['avg_r'])} · total {_r(selfcheck['total_r'], 1)}")
+    parts.append("<i>Results count half booked at TP1 and are net of spread and stop slippage.</i>")
     parts.append(DISCLAIMER)
     return "\n\n".join(parts)
 
@@ -673,9 +711,12 @@ def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | Non
         gen_s = datetime.fromisoformat(gen).strftime("%d %b %H:%M UTC")
     except (TypeError, ValueError):
         gen_s = "n/a"
-    parts.append(f"<i>Technical-only replay on {escape(str(bt.get('symbol', 'gold')))} bars — news, calendar blackouts and spreads are not included; "
+    pr = bt.get("params") or {}
+    costs = (f"net of a ${pr['spread_usd']:.2f} spread and ${pr['slippage_usd']:.2f} slippage on stops"
+             if pr.get("spread_usd") is not None else "before spread")
+    parts.append(f"<i>Technical-only replay on {escape(str(bt.get('symbol', 'gold')))} bars — news and calendar blackouts are not included; "
                  f"entries at the confirming 15-minute close, stops and targets fill at their level, stop checked before targets inside a bar; "
-                 f"results count half the position booked at TP1. Past replay results never predict future results. Run {gen_s}.</i>")
+                 f"results count half the position booked at TP1 and are {costs}. Past replay results never predict future results. Run {gen_s}.</i>")
     parts.append(DISCLAIMER)
     return "\n\n".join(parts)
 
@@ -699,6 +740,7 @@ HELP = """📖 <b>COMMANDS</b>
 
 <b>Settings</b>
 /risk 5000 1 — account size and % risk per trade → lot size on every call
+/took · /skipped — mark the latest call as taken or skipped (your own record in /signals and the weekly scorecard)
 /subscribe · /unsubscribe — scheduled reports in this chat
 /alerts on · /alerts off — bias changes, big moves, breaking news, pre-release warnings
 /status — bot status

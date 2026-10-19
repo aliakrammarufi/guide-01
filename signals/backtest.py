@@ -57,9 +57,11 @@ class ReplayParams:
     news_weight: float = 0.4
     session_filter: bool = True
     asia_entries: bool = True
+    spread_usd: float = 0.30              # round-trip spread charged to every trade ($/oz)
+    slippage_usd: float = 0.10            # extra cost on a stop fill ($/oz)
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
-    method: int = 3                       # replay/accounting/engine version: a change invalidates stored results
+    method: int = 4                       # replay/accounting/engine version: a change invalidates stored results
 
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
@@ -127,7 +129,8 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
     h1, d1, m15 = _utc(h1), _utc(d1), _utc(m15)
     store = Store(":memory:")
     tracker = SignalTracker(store, min_conf=p.min_conf, max_hours=p.max_hours, breakeven_after_tp1=p.breakeven_after_tp1,
-                            pending_max_hours=p.pending_max_hours, require_trigger=p.require_trigger)
+                            pending_max_hours=p.pending_max_hours, require_trigger=p.require_trigger,
+                            spread_usd=p.spread_usd, slippage_usd=p.slippage_usd)
     tracker.quiet = True
     news = NewsScore(score=0, n_articles=0, n_bullish=0, n_bearish=0, n_neutral=0, top_themes=[], drivers=[])
     step = timedelta(minutes=15)
@@ -294,10 +297,11 @@ def summarize(signals: list, meta: dict[int, dict], p: ReplayParams) -> dict:
         "thresholds": thresholds,
         "equity": equity,
         "trades": trades,
-        "note": ("Technical-only replay of the production rules on real bars: news flow, calendar blackouts and spreads are not "
-                 "included; entries at the confirming 15-minute close, stops and targets fill at their level, within a bar the "
-                 "stop is checked before the targets; results book half the position at TP1 as the call advises. "
-                 "Past replay results do not predict future results."),
+        "note": (f"Technical-only replay of the production rules on real bars: news flow and calendar blackouts are not "
+                 f"included; entries at the confirming 15-minute close, stops and targets fill at their level, within a bar the "
+                 f"stop is checked before the targets; results book half the position at TP1 as the call advises and are net of a "
+                 f"${p.spread_usd:.2f} round-trip spread and ${p.slippage_usd:.2f} slippage on stop fills. "
+                 f"Past replay results do not predict future results."),
     }
 
 
@@ -331,6 +335,7 @@ def params_from_settings(settings) -> ReplayParams:
         require_trigger=settings.signal_require_trigger, atr_stop_mult=settings.atr_stop_mult,
         atr_target_mult=settings.atr_target_mult, tech_weight=settings.tech_weight, news_weight=settings.news_weight,
         session_filter=settings.session_filter, asia_entries=settings.asia_entries,
+        spread_usd=settings.spread_usd, slippage_usd=settings.slippage_usd,
     )
 
 

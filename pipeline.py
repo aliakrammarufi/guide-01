@@ -33,6 +33,7 @@ class Report:
     generated_at: datetime
     events: list[Event] = field(default_factory=list)   # upcoming calendar events (48h)
     session: SessionInfo | None = None                  # trading-session verdict at generation time
+    briefing_at: datetime | None = None                 # when the briefing text was written
 
     @property
     def next_event(self) -> Event | None:
@@ -144,8 +145,10 @@ class Pipeline:
         )
         self._log_read(tech, signal)
         briefing = None
+        briefing_at = None
         if with_briefing and self.settings.ai_enabled:
             briefing = write_briefing(self.settings.anthropic_api_key, self.settings.analyst_model, tech, news, events)
+            briefing_at = datetime.now(timezone.utc) if briefing else None
         return Report(
             data=data,
             tech=tech,
@@ -155,4 +158,5 @@ class Pipeline:
             generated_at=datetime.now(timezone.utc),
             events=events,
             session=session,
+            briefing_at=briefing_at,
         )
