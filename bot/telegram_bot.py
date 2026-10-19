@@ -10,6 +10,7 @@ Jobs:     scheduled full report (every ANALYSIS_INTERVAL_MIN)
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 import logging
 from datetime import datetime, timedelta, timezone
@@ -40,7 +41,8 @@ class SentinelBot:
         self.store = store
         self.cache = cache
         self.app: Application = ApplicationBuilder().token(settings.telegram_token).build()
-        self._awaiting_risk: set[int] = set()
+        self._awaiting_risk: set[tuple[int, int]] = set()     # (chat id, user id) waiting to answer /risk
+        self._flush_lock = asyncio.Lock()
         self._register()
 
     # ------------------------------------------------------------------ setup
@@ -112,7 +114,7 @@ class SentinelBot:
                 await func(update, context)
             except Exception as exc:  # noqa: BLE001
                 log.exception("Command failed")
-                await context.bot.send_message(chat.id, f"⚠️ Something went wrong: <code>{escape(str(exc))[:300]}</code>", parse_mode=ParseMode.HTML)
+                await context.bot.send_message(chat.id, f"⚠️ Something went wrong: <code>{escape(str(exc)[:300])}</code>", parse_mode=ParseMode.HTML)
         return wrapper
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -120,16 +122,17 @@ class SentinelBot:
 
     # --------------------------------------------------------------- helpers
     @staticmethod
-    def _units(text: str) -> list[str]:
-        """Break a message into pieces that are each valid HTML on their own:
-        paragraphs; an oversized paragraph into lines, keeping <pre> blocks whole."""
-        units: list[str] = []
+    def _units(text: str) -> list[tuple[str, str]]:
+        """Break a message into (piece, separator-before-it) pairs that are each valid HTML on their
+        own: paragraphs; an oversized paragraph into lines, keeping <pre> blocks whole."""
+        units: list[tuple[str, str]] = []
         for para in text.split("\n\n"):
             if len(para) <= TG_LIMIT:
-                units.append(para)
+                units.append((para, "\n\n"))
                 continue
             buf: list[str] = []
             in_pre = False
+            first = True
             for line in para.split("\n"):
                 buf.append(line)
                 if "<pre>" in line and "</pre>" not in line:
@@ -137,10 +140,11 @@ class SentinelBot:
                 if "</pre>" in line:
                     in_pre = False
                 if not in_pre:
-                    units.append("\n".join(buf))
+                    units.append(("\n".join(buf), "\n\n" if first else "\n"))
                     buf = []
+                    first = False
             if buf:
-                units.append("\n".join(buf))
+                units.append(("\n".join(buf), "\n"))
         return units
 
     async def _send(self, chat_id: int, text: str, **kwargs) -> None:
@@ -148,8 +152,7 @@ class SentinelBot:
         every chunk keeps its tags balanced (Telegram rejects a chunk cut inside a tag)."""
         chunks: list[str] = []
         current = ""
-        for unit in self._units(text):
-            sep = "\n\n" if (current and not current.endswith("</pre>") and unit.strip()) else "\n"
+        for unit, sep in self._units(text):
             candidate = f"{current}{sep}{unit}" if current else unit
             if len(candidate) > TG_LIMIT and current:
                 chunks.append(current)
@@ -164,7 +167,7 @@ class SentinelBot:
             except TelegramError as exc:
                 if "parse entities" in str(exc).lower():
                     log.warning("HTML rejected, sending plain text: %s", exc)
-                    await self.app.bot.send_message(chat_id, re.sub(r"<[^>]+>", "", chunk)[:4096], disable_web_page_preview=True, **kwargs)
+                    await self.app.bot.send_message(chat_id, html.unescape(re.sub(r"<[^>]+>", "", chunk))[:4096], disable_web_page_preview=True, **kwargs)
                 else:
                     raise
 
@@ -214,7 +217,7 @@ class SentinelBot:
         if not acct:
             return None
         from market.fx import usd_rate
-        fx, _ = usd_rate(self.settings.account_currency)
+        fx, _ = usd_rate(self.settings.account_currency, cached_only=True)
         return size_for(acct, pct or 1.0, entry, stop, self.settings.contract_oz,
                         currency=self.settings.account_currency, fx=fx, fixed_lots=self._fixed_lots(chat_id))
 
@@ -239,16 +242,17 @@ class SentinelBot:
         acct, pct = self._risk_settings(chat_id)
         return fmt.format_risk_settings(acct, pct, currency=self.settings.account_currency, fixed_lots=self._fixed_lots(chat_id))
 
-    async def _save_risk(self, chat_id: int, account: float, pct: float) -> None:
+    async def _save_risk(self, chat_id: int, account: float, pct: float, user_id: int | None = None) -> None:
         d = self.store.get_state(f"risk:{chat_id}") or {}
         d.update({"account": account, "risk_pct": pct})
         self.store.set_state(f"risk:{chat_id}", d)
-        self._awaiting_risk.discard(chat_id)
+        self._awaiting_risk.discard((chat_id, user_id))
         await self._send(chat_id, "✅ <b>SAVED</b>\n\n" + self._risk_summary(chat_id))
 
     async def _ask_risk(self, update: Update) -> None:
         chat_id = update.effective_chat.id
-        self._awaiting_risk.add(chat_id)
+        uid = update.effective_user.id if update.effective_user else None
+        self._awaiting_risk.add((chat_id, uid))
         acct, _ = self._risk_settings(chat_id)
         current = self._risk_summary(chat_id) if acct else "💼 <b>POSITION SIZING</b> — not set yet"
         try:
@@ -263,10 +267,11 @@ class SentinelBot:
 
     async def cmd_risk(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
+        uid = update.effective_user.id if update.effective_user else None
         raw = " ".join(context.args or []).strip()
         if raw.lower() in {"off", "stop", "none"}:
             self.store.set_state(f"risk:{chat_id}", {})
-            self._awaiting_risk.discard(chat_id)
+            self._awaiting_risk.discard((chat_id, uid))
             await self._send(chat_id, "💼 <b>POSITION SIZING OFF</b>")
             return
         if raw.lower().startswith("lots"):
@@ -280,7 +285,7 @@ class SentinelBot:
         if raw:
             parsed = self._parse_risk(raw)
             if parsed:
-                await self._save_risk(chat_id, *parsed)
+                await self._save_risk(chat_id, *parsed, user_id=uid)
             else:
                 await self._send(chat_id, "I couldn't read that. Send it as <code>/risk 5000 1</code> — account size, then % risk per trade (max 10%). "
                                           "<code>/risk lots 0.05</code> fixes your lot size; <code>/risk lots 0</code> goes back to sizing by risk.")
@@ -288,32 +293,27 @@ class SentinelBot:
         await self._ask_risk(update)
 
     async def on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Plain text: only used to answer the /risk question."""
+        """Plain text is only ever an answer to the /risk question (asked by this user, or a reply to the prompt)."""
         msg = update.effective_message
         if msg is None or not msg.text:
             return
         chat_id = update.effective_chat.id
+        uid = update.effective_user.id if update.effective_user else None
         replied = msg.reply_to_message
-        answering = chat_id in self._awaiting_risk or (
+        answering = (chat_id, uid) in self._awaiting_risk or (
             replied is not None and replied.from_user is not None and replied.from_user.id == context.bot.id
             and self.RISK_PROMPT.lower() in (replied.text or "").lower()
         )
         if not answering:
-            if update.effective_chat.type == "private":
-                parsed = self._parse_risk(msg.text)
-                if parsed:
-                    await self._save_risk(chat_id, *parsed)
-                else:
-                    await self._send(chat_id, "Use a command — /help lists them. To set position sizing, send /risk.")
-            return
+            return                      # never interpret ordinary chat ("what about 4150?") as account settings
         if msg.text.strip().lower() in {"off", "stop", "none"}:
             self.store.set_state(f"risk:{chat_id}", {})
-            self._awaiting_risk.discard(chat_id)
+            self._awaiting_risk.discard((chat_id, uid))
             await self._send(chat_id, "💼 <b>POSITION SIZING OFF</b>")
             return
         parsed = self._parse_risk(msg.text)
         if parsed:
-            await self._save_risk(chat_id, *parsed)
+            await self._save_risk(chat_id, *parsed, user_id=uid)
         else:
             await self._ask_risk(update)
 
@@ -375,6 +375,10 @@ class SentinelBot:
         await self._send(chat_id, text)
 
     async def _flush_signal_events(self) -> None:
+        async with self._flush_lock:
+            await self._flush_signal_events_locked()
+
+    async def _flush_signal_events_locked(self) -> None:
         events = self.cache.tracker.drain_events()
         if not events:
             return
@@ -445,9 +449,9 @@ class SentinelBot:
         ]
         text = "🛰 <b>STATUS</b>\n" + fmt._pre(rows, right=())
         if rep and rep.session:
-            text += fmt.session_line(rep.session.to_dict())
+            text += "\n" + fmt.session_line(rep.session.to_dict())
         if self.cache.last_error:
-            text += f"\n⚠️ Last error: <code>{escape(self.cache.last_error)[:200]}</code>"
+            text += f"\n⚠️ Last error: <code>{escape(self.cache.last_error[:200])}</code>"
         await self._send(update.effective_chat.id, text)
 
     # ------------------------------------------------------------------ jobs
@@ -531,6 +535,12 @@ class SentinelBot:
         event loop with the web dashboard)."""
         async with self.app:
             await self._post_init(self.app)
+            loop = asyncio.get_running_loop()
+
+            def _on_signal_event(_ev):          # called from the tick/pipeline threads: hop onto the bot loop
+                loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._flush_signal_events()))
+
+            self.cache.tracker.listeners.append(_on_signal_event)
             # Allowed chats are the intended recipients: subscribe them on every start, so a
             # redeploy (which resets the free-tier database) never silently drops the reports.
             for cid in self.settings.allowed_chat_ids:

@@ -157,8 +157,10 @@ def sizing_note(sz: Sizing | None, entry: float, tp1: float, tp2: float) -> str:
         return ""
     line = (f"At {sz.lots:.2f} lots: TP 1 ≈ <b>+{sz.money(sz.profit_at(tp1 - entry))}</b> · TP 2 ≈ <b>+{sz.money(sz.profit_at(tp2 - entry))}</b> · "
             f"stop −{sz.money(sz.actual_risk)} ({sz.pct_of_account:.1f}% of {sz.money(sz.account)})")
-    if sz.over_guide:
+    if sz.over_guide and sz.is_fixed and sz.lots_by_risk < sz.lots:
         line += f"\n⚠️ Wide stop: {sz.lots:.2f} lots risks {sz.pct_of_account:.1f}% here — <b>{sz.lots_by_risk:.2f} lots</b> keeps it at {sz.risk_pct:g}%."
+    elif sz.over_guide:
+        line += f"\n⚠️ Even the minimum 0.01 lot risks {sz.pct_of_account:.1f}% on this stop — above your {sz.risk_pct:g}% guide. Consider skipping it."
     return line
 
 

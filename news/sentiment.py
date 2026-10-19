@@ -289,23 +289,27 @@ def aggregate(articles: list[Article], half_life_hours: float = 10.0, scale: flo
 
 
 CORE_TITLE_TERMS = (
-    "gold", "xau", "bullion", "precious metal",
-    "fed ", "fed'", "fed,", "fomc", "powell", "rate cut", "rate hike", "rate decision", "interest rate",
-    "cpi", "inflation", "payroll", "nonfarm", "non-farm", "nfp", "jobs report", "gdp", "pce",
-    "treasury", "yield", "dollar", "dxy", "greenback",
-    "tariff", "trade war", "sanction", "war", "missile", "ceasefire", "invasion", "airstrike",
-    "central bank", "shutdown", "default", "jackson hole", "recession", "safe haven", "safe-haven",
+    "gold", "xau", "bullion", "precious metals?",
+    "fed", "fomc", "powell", "rate cuts?", "rate hikes?", "rate decision", "interest rates?",
+    "cpi", "inflation", "payrolls?", "nonfarm", "non-farm", "nfp", "jobs report", "gdp", "pce",
+    "treasur(?:y|ies)", "yields?", "dollar", "dxy", "greenback",
+    "tariffs?", "trade war", "sanctions?", "war", "missiles?", "ceasefire", "invasion", "airstrikes?",
+    "central banks?", "shutdown", "default", "jackson hole", "recession", "safe[- ]haven",
 )
+_CORE_RE = re.compile(r"\b(?:" + "|".join(CORE_TITLE_TERMS) + r")\b", re.I)
+
+
+def _term_re(terms: list[str]) -> re.Pattern:
+    return re.compile(r"\b(?:" + "|".join(re.escape(t.strip()) for t in terms if t.strip()) + r")\b", re.I)
 
 
 def is_high_impact(article: Article, terms: list[str]) -> bool:
     """High-impact = the headline itself is about a gold driver AND it carries a market-moving term
-    (or the classifier scored it strongly). The summary alone never qualifies a story – too many
-    unrelated items mention 'war' or 'central bank' in passing."""
-    title = f" {article.title.lower()} "
-    if not any(k in title for k in CORE_TITLE_TERMS):
+    (or the classifier scored it strongly). Whole words only ('warns' is not 'war', 'toward' is not 'war');
+    the summary alone never qualifies a story."""
+    if not _CORE_RE.search(article.title or ""):
         return False
-    text = f"{article.title} {article.summary[:160]}".lower()
-    if any(term.lower() in text for term in terms):
+    text = f"{article.title} {article.summary[:160]}"
+    if terms and _term_re(terms).search(text):
         return True
     return article.impact is not None and abs(article.impact) >= 1.5 and (article.confidence or 0) >= 0.6

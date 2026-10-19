@@ -55,7 +55,7 @@ class Sizing:
         if self.stop_distance <= 0 or self.account <= 0:
             return 0.0
         raw = (self.risk_amount / self.fx) / (self.stop_distance * self.contract_oz)
-        return max(0.01, math.floor(raw * 100) / 100.0)
+        return max(0.01, math.floor(raw * 100 + 1e-9) / 100.0)     # 0.01 lot is the broker minimum
 
     @property
     def lots(self) -> float:
@@ -81,8 +81,8 @@ class Sizing:
 
     @property
     def over_guide(self) -> bool:
-        """Fixed size risks noticeably more than the risk guide allows."""
-        return self.is_fixed and self.pct_of_account > self.risk_pct * 1.25 + 1e-9
+        """The chosen size (fixed, or the 0.01 minimum on a wide stop) risks noticeably more than the guide."""
+        return self.pct_of_account > self.risk_pct * 1.25 + 1e-9
 
     def profit_at(self, distance: float) -> float:
         """Profit (account currency) if price moves ``distance`` $ in your favour."""

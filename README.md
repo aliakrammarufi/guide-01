@@ -60,7 +60,7 @@ Other ways to run:
 3. Recommended: lock the bot to yourself. Your chat id is printed when the bot
    replies to an unknown chat, or ask **@userinfobot**. Put it in
    `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated for several).
-4. Works in groups/channels too – add the bot, send `/subscribe` there.
+4. Works in groups too – add the bot, allow the group's (negative) chat id in `TELEGRAM_ALLOWED_CHAT_IDS`, and it is subscribed automatically at start. Channels can't send commands; add a channel's id to the allow-list and it receives the reports.
 
 ### Commands
 
@@ -143,6 +143,15 @@ small: a few thousand tokens per hour at default settings. Without a key everyth
 still works – you just get rule-based scores and no written briefing.
 
 ---
+
+## Hosting notes
+
+* **Render free tier has no persistent disk**: every deploy or restart starts with an empty database — open
+  calls, signal history and `/risk` settings set in chat are lost. The allow-listed chats are re-subscribed
+  automatically and `ACCOUNT_SIZE` / `RISK_PCT` / `FIXED_LOTS` env defaults survive. The Starter plan with the
+  1 GB disk in `render.yaml` keeps everything.
+* Tick-driven events (setup confirmed, TP1, TP2, stop) reach Telegram within a second of the tick; the
+  scheduled report and the news scan are separate.
 
 ## Data sources
 

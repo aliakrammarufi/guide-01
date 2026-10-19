@@ -120,7 +120,9 @@ class QuoteService:
             except Exception as exc:  # noqa: BLE001
                 log.debug("prev_close_fn failed: %s", exc)
         now = time.time()
-        if self._prev_cached is None and now - self._prev_yf_ts > 600:
+        if self._prev_cached is None and now - self._prev_yf_ts > 600 and not settings.spot_basis:
+            # (with SPOT_BASIS the bars' previous close arrives via prev_close_fn once the analysis is cached;
+            #  a futures previous close under a spot tick would show a bogus −0.5 % for the first minute)
             self._prev_yf_ts = now
             try:
                 import yfinance as yf

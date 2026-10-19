@@ -35,6 +35,7 @@ class MarketData:
     fetched_at: datetime
     basis: float = 1.0   # multiplier applied to put the bars on the spot basis (1.0 = untouched)
     m15: pd.DataFrame | None = None   # 15-minute bars (last few days) for entry timing; None if unavailable
+    basis_known: bool = True          # False when a rescale was wanted but no spot reference was available
 
     @property
     def last_price(self) -> float:
@@ -134,14 +135,21 @@ def _fetch_yfinance(symbol: str) -> MarketData:
 # Spot basis
 # ---------------------------------------------------------------------------
 def spot_reference() -> float | None:
-    """Live spot XAU/USD from gold-api.com (free, no key); None if unavailable."""
-    try:
-        r = httpx.get("https://api.gold-api.com/price/XAU", timeout=6, headers={"User-Agent": "XAUSentinel/1.0"})
-        r.raise_for_status()
-        return float(r.json()["price"])
-    except Exception as exc:  # noqa: BLE001
-        log.debug("spot reference unavailable: %s", exc)
-        return None
+    """Live spot XAU/USD from gold-api.com (free, no key); None if unavailable (two attempts)."""
+    for attempt in (1, 2):
+        try:
+            r = httpx.get("https://api.gold-api.com/price/XAU", timeout=6, headers={"User-Agent": "XAUSentinel/1.0"})
+            r.raise_for_status()
+            v = float(r.json()["price"])
+            if v > 0:
+                return v
+        except Exception as exc:  # noqa: BLE001
+            log.debug("spot reference attempt %d failed: %s", attempt, exc)
+    return None
+
+
+_LAST_BASIS: dict[str, float] = {}   # symbol → last good spot/bars ratio (reused if the spot feed is briefly down)
+_LAST_BASIS_TS: dict[str, float] = {}
 
 
 def to_spot_basis(data: MarketData, spot: float | None) -> MarketData:
@@ -153,12 +161,25 @@ def to_spot_basis(data: MarketData, spot: float | None) -> MarketData:
     levels, ATR stops and targets land on the spot price scale. GLD (an ETF at ~1/10
     the price) is also handled by the same ratio.
     """
-    if not spot or data.hourly.empty:
+    import time as _time
+    if data.hourly.empty:
         return data
     ref = float(data.hourly["close"].iloc[-1])
     if not ref:
         return data
-    ratio = spot / ref
+    key = data.source
+    if not spot:
+        last, ts = _LAST_BASIS.get(key), _LAST_BASIS_TS.get(key, 0.0)
+        if last is not None and _time.time() - ts < 6 * 3600:
+            log.warning("Spot reference unavailable – reusing the last basis (x%.5f)", last)
+            ratio = last
+        else:
+            log.warning("Spot reference unavailable and no recent basis – bars left on the %s basis", key)
+            data.basis_known = False
+            return data
+    else:
+        ratio = spot / ref
+        _LAST_BASIS[key], _LAST_BASIS_TS[key] = ratio, _time.time()
     if abs(ratio - 1.0) < 0.0015:          # same instrument – nothing to do
         return data
     if not (0.05 < ratio < 20.0):          # not a plausible instrument of gold at all
@@ -238,6 +259,6 @@ def fetch_market_data() -> MarketData:
     if data is None:
         data = _fetch_yfinance(settings.yf_symbol)
     # Put the bars on the same basis as the live tick (spot XAU/USD) when they differ
-    if settings.quote_provider == "goldapi" and settings.spot_basis:
+    if settings.spot_basis:
         data = to_spot_basis(data, spot_reference())
     return data

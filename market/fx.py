@@ -20,15 +20,22 @@ _lock = threading.Lock()
 TTL = 3600.0
 
 
-def usd_rate(currency: str) -> tuple[float, str]:
-    """How many units of ``currency`` one US dollar buys, and where the rate came from."""
+def usd_rate(currency: str, cached_only: bool = False) -> tuple[float, str]:
+    """How many units of ``currency`` one US dollar buys, and where the rate came from.
+
+    ``cached_only=True`` never does network I/O (safe on the event loop): it returns the cached
+    rate even if stale, or the static fallback. The pipeline thread calls the blocking form
+    every run, so the cache is normally fresh.
+    """
     cur = (currency or "USD").upper()
     if cur == "USD":
         return 1.0, "fixed"
     with _lock:
         hit = _cache.get(cur)
-        if hit and time.time() - hit[1] < TTL:
-            return hit[0], hit[2]
+    if hit and (cached_only or time.time() - hit[1] < TTL):
+        return hit[0], hit[2]
+    if cached_only:
+        return FALLBACK.get(cur, 1.0), "fallback"
     rate, source = _fetch(cur)
     with _lock:
         _cache[cur] = (rate, time.time(), source)

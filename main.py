@@ -61,6 +61,28 @@ async def main_async(args: argparse.Namespace) -> int:
 
     tasks: list[asyncio.Task] = []
 
+    # Live tick engine (spot XAU/USD) + the tracker feed run whether or not the web terminal is on,
+    # so stop / take-profit checks always see every tick.
+    engine = None
+    if not args.demo:
+        from market.ticks import TickEngine
+        from signals.live import tracker_feed
+
+        engine = TickEngine()
+        await engine.start()
+        tasks.append(asyncio.create_task(tracker_feed(engine, cache.tracker), name="tracker-feed"))
+
+    async def guarded(coro, name: str):
+        """A crash in one component (e.g. an invalid Telegram token) must not take the others down."""
+        try:
+            await coro
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("%s stopped with an error – the other components keep running", name)
+            while True:
+                await asyncio.sleep(3600)
+
     if not args.no_telegram:
         if not settings.telegram_token:
             log.error("TELEGRAM_BOT_TOKEN is not set – starting without Telegram (use --no-telegram to silence this)")
@@ -68,14 +90,14 @@ async def main_async(args: argparse.Namespace) -> int:
             from bot.telegram_bot import SentinelBot
 
             bot = SentinelBot(settings, store, cache)
-            tasks.append(asyncio.create_task(bot.run_forever(), name="telegram"))
+            tasks.append(asyncio.create_task(guarded(bot.run_forever(), "Telegram"), name="telegram"))
 
     if not args.no_web:
         import uvicorn
 
         from web.server import create_app
 
-        app = create_app(cache, demo=args.demo)
+        app = create_app(cache, demo=args.demo, engine=engine)
         config = uvicorn.Config(app, host=args.host, port=args.port, log_level="warning", loop="asyncio")
         server = uvicorn.Server(config)
         tasks.append(asyncio.create_task(server.serve(), name="web"))

@@ -156,3 +156,38 @@ def test_pending_does_not_trigger_during_blackout(tmp_path):
     assert tr.pending() is not None and tr.active() is None
     ev = tr.on_analysis(_report(price=4494.5, m15=df), now=now)                             # window over → triggers
     assert [e.kind for e in ev] == ["triggered"]
+
+
+def test_confirmation_far_from_zone_is_a_miss_not_a_trade(tmp_path):
+    """Reviewer scenario: zone 4488-4496 touched, then price rallies and an EMA reclaim prints at 4536."""
+    now = datetime(2026, 10, 19, 12, 10, tzinfo=timezone.utc)
+    tr = SignalTracker(Store(tmp_path / "s.db"), min_conf=45)
+    quiet = _m15([4505 - i * 0.2 for i in range(30)], now)
+    tr.on_analysis(_report(price=4500.0, m15=quiet), now=now)
+    # dip into the zone, then a rally far above it with bullish closes
+    closes = [4505 - i * 0.5 for i in range(20)] + [4494.0, 4490.0, 4489.0, 4495.0, 4505.0, 4515.0, 4525.0, 4531.0, 4536.0, 4538.0]
+    df = _m15(closes, now)
+    ev = tr.on_analysis(_report(price=4538.0, m15=df), now=now)
+    assert all(e.kind != "triggered" for e in ev)
+    assert tr.active() is None
+    live = tr.pending()
+    assert live is None or live.entry < 4520        # never a live call entered beyond TP1
+
+
+def test_event_text_is_a_snapshot(tmp_path):
+    tr = SignalTracker(Store(tmp_path / "s.db"), min_conf=45, require_trigger=False)
+    tr.on_analysis(_report())
+    setup, triggered = tr.drain_events()
+    assert setup.kind == "setup" and setup.signal.status == "pending" and triggered.signal.status == "active"
+
+
+def test_touched_persists_across_restart(tmp_path):
+    now = datetime(2026, 10, 19, 12, 10, tzinfo=timezone.utc)
+    quiet = _m15([4505 - i * 0.2 for i in range(30)], now)
+    tr = SignalTracker(Store(tmp_path / "s.db"), min_conf=45)
+    tr.on_analysis(_report(price=4500.0, m15=quiet), now=now)
+    tr.on_price(4492.0, now)                               # enters the zone
+    assert tr.pending().touched
+    tr2 = SignalTracker(Store(tmp_path / "s.db"), min_conf=45)   # "restart"
+    assert tr2.pending().touched
+    assert tr2.on_price(4511.0, now) == []                 # touched → running past the chase level is not a miss

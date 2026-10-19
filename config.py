@@ -148,7 +148,7 @@ class Settings:
     tv_symbols: list[str] = field(default_factory=lambda: _env_list("TV_SYMBOLS", ["OANDA:XAUUSD", "FX_IDC:XAUUSD", "TVC:GOLD"]))
     # Keep a free-tier host (Render) awake by pinging our own public URL every few minutes.
     keepalive: bool = field(default_factory=lambda: _env_bool("KEEPALIVE", False))
-    keepalive_url: str = field(default_factory=lambda: _env("KEEPALIVE_URL", _env("RENDER_EXTERNAL_URL")))
+    keepalive_url: str = field(default_factory=lambda: _env("KEEPALIVE_URL") or _env("RENDER_EXTERNAL_URL"))
     keepalive_interval_min: int = field(default_factory=lambda: _env_int("KEEPALIVE_INTERVAL_MIN", 10))
 
     # --- AI (optional, Anthropic API) --------------------------------------

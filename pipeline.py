@@ -91,6 +91,12 @@ class Pipeline:
 
     # ---- full report -------------------------------------------------------
     def run(self, with_briefing: bool = True, refresh_news: bool = True) -> Report:
+        if self.settings.account_size and self.settings.account_currency != "USD":
+            try:
+                from market.fx import usd_rate
+                usd_rate(self.settings.account_currency)      # refresh the hourly cache off the event loop
+            except Exception as exc:  # noqa: BLE001
+                log.debug("fx refresh failed: %s", exc)
         data = fetch_market_data()
         tech = analyze_technicals(data)
         if refresh_news:

@@ -26,9 +26,10 @@ terminal read those events to notify you.  The bot never places orders.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+import threading
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from news.store import Store
 from signals import trigger as trig
@@ -63,7 +64,7 @@ class TradeSignal:
     triggered_at: datetime | None = None
     trigger_note: str = ""
     setup_mode: str = ""              # pullback | in-zone | market (legacy)
-    touched: bool = False             # transient: price has visited the zone (not persisted)
+    touched: bool = False             # price has visited the zone (persisted)
 
     # ---- state ---------------------------------------------------------------
     @property
@@ -172,18 +173,16 @@ class SignalTracker:
         self.pending_max_hours = pending_max_hours
         self.require_trigger = require_trigger
         self._pending: list[SignalEvent] = []
-        self._touched: dict[int, bool] = {}
         self.last_trigger: dict | None = None      # last trigger evaluation (for the UI)
+        self._lock = threading.RLock()             # on_price (tick thread) and on_analysis (pipeline thread) never interleave
+        self.listeners: list[Callable[[SignalEvent], None]] = []   # notified on every event, immediately
 
     # ---- reads --------------------------------------------------------------
     def active(self) -> TradeSignal | None:
         return self.store.active_signal()
 
     def pending(self) -> TradeSignal | None:
-        s = self.store.pending_signal()
-        if s is not None:
-            s.touched = self._touched.get(s.id, False)
-        return s
+        return self.store.pending_signal()
 
     def live(self) -> TradeSignal | None:
         """The call to show: an open trade, else a pending setup."""
@@ -215,11 +214,21 @@ class SignalTracker:
 
     # ---- writes -------------------------------------------------------------
     def _emit(self, kind: str, sig: TradeSignal, price: float) -> SignalEvent:
-        ev = SignalEvent(kind, sig, price)
+        ev = SignalEvent(kind, replace(sig), price)      # snapshot: later state changes must not rewrite this message
         self.store.add_signal_event(sig.id, kind, price, ev.text)
         self._pending.append(ev)
         log.info("Signal %s #%d: %s", kind, sig.id, ev.text)
+        for fn in list(self.listeners):
+            try:
+                fn(ev)
+            except Exception:  # noqa: BLE001
+                log.exception("signal listener failed")
         return ev
+
+    def _mark_touched(self, sig: TradeSignal) -> None:
+        if not sig.touched:
+            sig.touched = True
+            self.store.update_signal(sig)
 
     def _close(self, sig: TradeSignal, status: str, price: float, now: datetime) -> SignalEvent:
         sig.status = status
@@ -227,7 +236,6 @@ class SignalTracker:
         sig.exit_price = price
         sig.result_r = sig.r_at(price) if status not in NO_TRADE_STATUSES else None
         self.store.update_signal(sig)
-        self._touched.pop(sig.id, None)
         return self._emit(status, sig, price)
 
     @staticmethod
@@ -240,6 +248,10 @@ class SignalTracker:
 
     def on_analysis(self, report, now: datetime | None = None) -> list[SignalEvent]:
         """Called after every analysis. May publish a setup, trigger it, cancel it, or close an open call."""
+        with self._lock:
+            return self._on_analysis(report, now)
+
+    def _on_analysis(self, report, now: datetime | None = None) -> list[SignalEvent]:
         now = now or datetime.now(timezone.utc)
         eng = report.signal
         tech = report.tech
@@ -289,6 +301,9 @@ class SignalTracker:
         # ---- no call: publish a setup? -----------------------------------------
         if direction not in ("long", "short") or eng.confidence < self.min_conf:
             return events
+        if not getattr(getattr(report, "data", None), "basis_known", True):
+            log.warning("Price basis unknown (spot reference down) – not publishing a setup")
+            return events
         if session is not None and not session.allow_entries:
             return events
         plan = self._plan_from_signal(eng)
@@ -313,26 +328,40 @@ class SignalTracker:
         res = trig.evaluate(sig.side, sig.zone_lo, sig.zone_hi, tech.atr, m15, now)
         self.last_trigger = res.to_dict() | {"signal_id": sig.id}
         if res.touched:
-            self._touched[sig.id] = True
-            sig.touched = True
+            self._mark_touched(sig)
         if not res.fired:
             return []
-        return self._activate(sig, res.entry or tech.price, now, res.note)
+        return self._activate(sig, res.entry or tech.price, now, res.note, atr=tech.atr)
 
-    def _activate(self, sig: TradeSignal, entry: float, now: datetime, note: str) -> list[SignalEvent]:
-        sig.entry = float(entry)
+    def _activate(self, sig: TradeSignal, entry: float, now: datetime, note: str, atr: float | None = None) -> list[SignalEvent]:
+        """Turn a setup into a live call at ``entry`` – but only if the fill still makes sense:
+        inside/near the zone, not past the chase level, not past TP1, stop on the right side."""
+        entry = float(entry)
+        long = sig.side == "BUY"
+        if sig.zone_lo is not None and sig.zone_hi is not None and atr:
+            slack = 0.5 * atr
+            far = entry > sig.zone_hi + slack if long else entry < sig.zone_lo - slack
+            if far:
+                return [self._close(sig, "missed", entry, now)]
+        if sig.chase is not None and ((long and entry > sig.chase) or (not long and entry < sig.chase)):
+            return [self._close(sig, "missed", entry, now)]
+        if (long and entry >= sig.tp1) or (not long and entry <= sig.tp1):
+            return [self._close(sig, "missed", entry, now)]
+        if (long and sig.sl >= entry) or (not long and sig.sl <= entry):
+            return [self._close(sig, "invalidated", entry, now)]
+        sig.entry = entry
         sig.status = "active"
         sig.triggered_at = now
         sig.trigger_note = note
-        # keep the stop sane relative to the actual fill
-        if (sig.side == "BUY" and sig.sl >= sig.entry) or (sig.side == "SELL" and sig.sl <= sig.entry):
-            return [self._close(sig, "invalidated", entry, now)]
         self.store.update_signal(sig)
-        self._touched.pop(sig.id, None)
         return [self._emit("triggered", sig, entry)]
 
     def on_price(self, price: float, now: datetime | None = None) -> list[SignalEvent]:
         """Called on every quote: SL / TP1 / TP2 / expiry for an open call; missed / invalidated for a pending one."""
+        with self._lock:
+            return self._on_price(price, now)
+
+    def _on_price(self, price: float, now: datetime | None = None) -> list[SignalEvent]:
         now = now or datetime.now(timezone.utc)
         if price is None:
             return []
@@ -366,7 +395,7 @@ class SignalTracker:
             elif pend.chase is not None and not pend.touched and ((long and price >= pend.chase) or (not long and price <= pend.chase)):
                 events.append(self._close(pend, "missed", price, now))
             elif pend.zone_lo <= price <= pend.zone_hi:
-                self._touched[pend.id] = True
+                self._mark_touched(pend)
         return events
 
     # ---- demo ---------------------------------------------------------------

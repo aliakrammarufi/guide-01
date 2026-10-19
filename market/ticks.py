@@ -78,7 +78,7 @@ class TickEngine:
         return min(live, key=lambda t: PRIORITY.get(t.source.split(":")[0], 9))
 
     def publish(self, source: str, price: float, bid: float | None = None, ask: float | None = None, ts: float | None = None) -> None:
-        if not price or price <= 0:
+        if not price or price <= 0 or price != price or price in (float("inf"), float("-inf")):
             return
         key = source.split(":")[0]
         prev = self.slots.get(key)

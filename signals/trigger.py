@@ -102,9 +102,13 @@ def evaluate(side: str, zone_lo: float, zone_hi: float, atr: float, m15: pd.Data
     def fire(kind: str) -> TriggerResult:
         return TriggerResult(True, kind, KIND_LABELS[kind], touched=True, bar_time=bar_time, entry=c, bars_checked=len(recent))
 
+    near_lim = 0.5 * max(atr, 1e-6)      # the confirming bar must close within this distance of the zone
     if long:
         bullish = c > o
         in_zone = zone_lo - tol <= l <= zone_hi + tol
+        if c > zone_hi + near_lim:
+            res.note = "price has moved away from the zone – no entry up here"
+            return res
         # ema reclaim: closed below EMA20 within the last 6 bars, now closed above, bullish bar
         below_recently = bool((df["close"].iloc[-7:-1] < ema20.iloc[-7:-1]).any())
         if bullish and c > float(ema20.iloc[-1]) and below_recently and c > float(prev["close"]):
@@ -123,6 +127,9 @@ def evaluate(side: str, zone_lo: float, zone_hi: float, atr: float, m15: pd.Data
     else:
         bearish = c < o
         in_zone = zone_lo - tol <= h <= zone_hi + tol
+        if c < zone_lo - near_lim:
+            res.note = "price has moved away from the zone – no entry down here"
+            return res
         above_recently = bool((df["close"].iloc[-7:-1] > ema20.iloc[-7:-1]).any())
         if bearish and c < float(ema20.iloc[-1]) and above_recently and c < float(prev["close"]):
             return fire("ema_reclaim")

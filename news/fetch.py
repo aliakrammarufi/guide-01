@@ -11,7 +11,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from time import mktime
+from calendar import timegm
 
 import feedparser
 import httpx
@@ -69,7 +69,7 @@ def _entry_datetime(entry) -> datetime:
         tm = entry.get(key)
         if tm:
             try:
-                return datetime.fromtimestamp(mktime(tm), tz=timezone.utc)
+                return datetime.fromtimestamp(timegm(tm), tz=timezone.utc)
             except (OverflowError, ValueError):
                 pass
     for key in ("published", "updated"):

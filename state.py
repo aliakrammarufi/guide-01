@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from pipeline import Pipeline, Report
 from signals.tracker import SignalTracker
@@ -42,8 +42,14 @@ class ReportCache:
         return (datetime.now(timezone.utc) - self._report.generated_at).total_seconds() > self.max_age_sec
 
     def refresh_sync(self, with_briefing: bool = True, refresh_news: bool = True) -> Report:
-        """Run the pipeline (blocking). Only one refresh runs at a time."""
+        """Run the pipeline (blocking). Only one refresh runs at a time; callers that queued up behind a
+        refresh that just finished get that fresh report instead of running the pipeline again."""
+        asked_at = datetime.now(timezone.utc)
         with self._lock:
+            rep = self._report
+            if rep is not None and rep.generated_at >= asked_at - timedelta(seconds=20) \
+                    and (not with_briefing or rep.briefing is not None or not self.pipeline.settings.ai_enabled):
+                return rep
             try:
                 report = self.pipeline.run(with_briefing=with_briefing, refresh_news=refresh_news)
                 self.last_error = None
@@ -51,6 +57,9 @@ class ReportCache:
                 self.last_error = str(exc)
                 log.exception("Pipeline run failed")
                 raise
+            if report.briefing is None and rep is not None and rep.briefing and not with_briefing \
+                    and (report.generated_at - rep.generated_at) < timedelta(minutes=max(30, self.max_age_sec // 60)):
+                report.briefing = rep.briefing          # a light refresh keeps the last written briefing
             self._report = report
             try:
                 self.tracker.on_analysis(report)

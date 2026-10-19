@@ -29,6 +29,15 @@ log = logging.getLogger(__name__)
 STATIC = Path(__file__).resolve().parent / "static"
 
 
+def _r(x, d: int = 2):
+    """round() that turns NaN/inf (short data, no provider) into null instead of invalid JSON."""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if (v != v or v in (float("inf"), float("-inf"))) else round(v, d)
+
+
 def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict:
     h = rep.data.hourly
     tail = h.tail(candles)
@@ -38,7 +47,7 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
     e200 = ind.ema(close, 200).reindex(tail.index)
 
     def series(s):
-        return [None if v != v else round(float(v), 2) for v in s.to_numpy()]
+        return [None if v != v else _r(float(v), 2) for v in s.to_numpy()]
 
     t = rep.tech
     sig = rep.signal
@@ -47,11 +56,11 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
         "bar_time": rep.data.last_bar_time.isoformat(),
         "source": rep.data.source,
         "price": {
-            "last": round(t.price, 2),
-            "change_1h_pct": round(t.change_1h_pct, 3),
-            "change_24h_pct": round(t.change_24h_pct, 3),
-            "change_7d_pct": round(t.change_7d_pct, 3),
-            "atr": round(t.atr, 2),
+            "last": _r(t.price, 2),
+            "change_1h_pct": _r(t.change_1h_pct, 3),
+            "change_24h_pct": _r(t.change_24h_pct, 3),
+            "change_7d_pct": _r(t.change_7d_pct, 3),
+            "atr": _r(t.atr, 2),
         },
         "candles": {
             "time": [int(ts.timestamp()) for ts in tail.index],
@@ -66,20 +75,20 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
         "technical": {
             "score": t.score,
             "trend": t.trend_label,
-            "rsi": round(t.rsi, 1),
-            "macd_hist": round(t.macd_hist, 3),
-            "bb_pct": round(t.bb_pct, 3) if t.bb_pct == t.bb_pct else None,
+            "rsi": _r(t.rsi, 1),
+            "macd_hist": _r(t.macd_hist, 3),
+            "bb_pct": _r(t.bb_pct, 3) if t.bb_pct == t.bb_pct else None,
             "bb_squeeze": t.bb_squeeze,
-            "ema20": round(t.ema20, 2),
-            "ema50": round(t.ema50, 2),
-            "ema200": round(t.ema200, 2),
-            "daily_ema50": round(t.daily_ema50, 2),
-            "daily_ema200": round(t.daily_ema200, 2),
+            "ema20": _r(t.ema20, 2),
+            "ema50": _r(t.ema50, 2),
+            "ema200": _r(t.ema200, 2),
+            "daily_ema50": _r(t.daily_ema50, 2),
+            "daily_ema200": _r(t.daily_ema200, 2),
             "reasons": t.reasons,
             "flags": t.flags,
-            "supports": [round(s, 2) for s in t.supports],
-            "resistances": [round(r, 2) for r in t.resistances],
-            "pivots": {k: round(v, 2) for k, v in t.pivots.items()},
+            "supports": [_r(s, 2) for s in t.supports],
+            "resistances": [_r(r, 2) for r in t.resistances],
+            "pivots": {k: _r(v, 2) for k, v in t.pivots.items()},
         },
         "news": {
             "score": rep.news.score,
@@ -88,8 +97,8 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
             "n_bullish": rep.news.n_bullish,
             "n_bearish": rep.news.n_bearish,
             "n_neutral": rep.news.n_neutral,
-            "themes": [{"theme": th, "value": round(v, 2)} for th, v in rep.news.top_themes],
-            "articles": [article_to_dict(a) | {"age_hours": round(a.age_hours, 1)} for a in rep.news.drivers[:14]],
+            "themes": [{"theme": th, "value": _r(v, 2)} for th, v in rep.news.top_themes],
+            "articles": [article_to_dict(a) | {"age_hours": _r(a.age_hours, 1)} for a in rep.news.drivers[:14]],
         },
         "signal": {
             "bias": sig.bias,
@@ -100,13 +109,13 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
             "confidence": sig.confidence,
             "agreement": sig.agreement,
             "direction": sig.direction,
-            "stop": round(sig.stop, 2) if sig.stop else None,
-            "target1": round(sig.target1, 2) if sig.target1 else None,
-            "target2": round(sig.target2, 2) if sig.target2 else None,
+            "stop": _r(sig.stop, 2) if sig.stop else None,
+            "target1": _r(sig.target1, 2) if sig.target1 else None,
+            "target2": _r(sig.target2, 2) if sig.target2 else None,
             "zone_lo": sig.zone_lo, "zone_hi": sig.zone_hi, "zone_mid": sig.zone_mid, "chase_limit": sig.chase_limit,
             "entry_mode": sig.entry_mode, "planned_rr": sig.planned_rr, "raw_confidence": sig.raw_confidence,
-            "nearest_support": round(sig.nearest_support, 2) if sig.nearest_support else None,
-            "nearest_resistance": round(sig.nearest_resistance, 2) if sig.nearest_resistance else None,
+            "nearest_support": _r(sig.nearest_support, 2) if sig.nearest_support else None,
+            "nearest_resistance": _r(sig.nearest_resistance, 2) if sig.nearest_resistance else None,
             "notes": sig.notes,
         },
         "briefing": rep.briefing,
@@ -118,7 +127,7 @@ def report_to_json(rep: Report, history: list[dict], candles: int = 220) -> dict
 def sizing_defaults() -> dict:
     from config import settings as st
     from market.fx import usd_rate
-    fx, src = usd_rate(st.account_currency) if st.account_size else (1.0, "fixed")
+    fx, src = usd_rate(st.account_currency, cached_only=True) if st.account_size else (1.0, "fixed")
     return {"account": st.account_size, "currency": st.account_currency, "risk_pct": st.risk_pct,
             "fixed_lots": st.fixed_lots, "fx": fx, "fx_source": src, "contract_oz": st.contract_oz}
 
@@ -136,7 +145,7 @@ def signals_json(tracker, session=None) -> dict:
     }
 
 
-def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
+def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
     from market.quote import QuoteService
 
     app = FastAPI(title="XAU Sentinel", docs_url=None, redoc_url=None)
@@ -172,8 +181,9 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
     # ---- real-time tick engine (websocket feeds → SSE to the browser) --------------
     from market.ticks import TickEngine
 
-    engine = TickEngine()
-    tracker_state = {"last": 0.0}
+    owns_engine = engine is None and not demo
+    if engine is None:
+        engine = TickEngine()
 
     def tick_json(t) -> dict:
         """A tick plus the fields the page needs: previous close / today's change."""
@@ -188,32 +198,17 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
                   "stale": False, "demo": demo, "stream": True})
         return d
 
-    async def tracker_feed():
-        """Feed the trade-signal tracker at most once a second from the live ticks."""
-        q = engine.subscribe()
-        try:
-            while True:
-                t = await q.get()
-                if time.monotonic() - tracker_state["last"] < 1.0:
-                    continue
-                tracker_state["last"] = time.monotonic()
-                try:
-                    await asyncio.to_thread(cache.tracker.on_price, t.price)
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("tracker on_price failed: %s", exc)
-        finally:
-            engine.unsubscribe(q)
-
     @app.on_event("startup")
     async def _start_ticks():
-        if demo:
-            return
-        await engine.start()
-        asyncio.create_task(tracker_feed(), name="tracker-feed")
+        if owns_engine:                      # main.py normally owns the engine and the tracker feed
+            from signals.live import tracker_feed
+            await engine.start()
+            asyncio.create_task(tracker_feed(engine, cache.tracker), name="tracker-feed")
 
     @app.on_event("shutdown")
     async def _stop_ticks():
-        await engine.stop()
+        if owns_engine:
+            await engine.stop()
 
     @app.get("/api/stream")
     async def stream(request: Request):
@@ -250,7 +245,7 @@ def create_app(cache: ReportCache, demo: bool = False) -> FastAPI:
             q = tick_json(live) | {"interval_ms": 1000}
             return JSONResponse(q)
         q = await asyncio.to_thread(quotes.get_quote)
-        if q.get("price") is not None:
+        if demo and q.get("price") is not None:        # live mode: the tick engine feeds the tracker (spot only)
             try:
                 await asyncio.to_thread(cache.tracker.on_price, q["price"])
             except Exception as exc:  # noqa: BLE001
