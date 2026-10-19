@@ -162,7 +162,9 @@ class SentinelBot:
             "🥇 <b>XAU Sentinel</b> is online.\n"
             "I watch the gold market (XAU/USD) and the news that moves it, and I send you a "
             f"report every {self.settings.analysis_interval_min} min plus alerts when something changes.\n\n"
-            "You are subscribed in this chat. Try /analyze for a full report.\n\n" + fmt.HELP,
+            "You are subscribed in this chat. Try /analyze for a full report.\n\n"
+            f"🔒 Your chat id is <code>{chat_id}</code>. To make this bot private, set "
+            f"<code>TELEGRAM_ALLOWED_CHAT_IDS={chat_id}</code> on the server.\n\n" + fmt.HELP,
         )
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
