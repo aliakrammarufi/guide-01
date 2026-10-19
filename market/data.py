@@ -33,6 +33,7 @@ class MarketData:
     daily: pd.DataFrame
     source: str
     fetched_at: datetime
+    basis: float = 1.0   # multiplier applied to put the bars on the spot basis (1.0 = untouched)
 
     @property
     def last_price(self) -> float:
@@ -91,7 +92,10 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # yfinance
 # ---------------------------------------------------------------------------
-def _fetch_yfinance(symbol: str) -> MarketData:
+YF_FALLBACK_SYMBOLS = ["GC=F", "XAUUSD=X", "GLD"]   # tried in order if the configured symbol fails
+
+
+def _fetch_yfinance_one(symbol: str) -> MarketData:
     import yfinance as yf  # imported lazily so tests don't need it
 
     log.info("Fetching %s from yfinance", symbol)
@@ -104,6 +108,62 @@ def _fetch_yfinance(symbol: str) -> MarketData:
         source=f"yfinance:{symbol}",
         fetched_at=datetime.now(timezone.utc),
     )
+
+
+def _fetch_yfinance(symbol: str) -> MarketData:
+    """Fetch ``symbol``; if Yahoo refuses it, fall back to the alternates so a bad or
+    temporarily unavailable symbol never leaves the terminal without bars."""
+    last: Exception | None = None
+    for sym in [symbol] + [s for s in YF_FALLBACK_SYMBOLS if s != symbol]:
+        try:
+            return _fetch_yfinance_one(sym)
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            log.warning("yfinance %s failed (%s)", sym, exc)
+    raise DataError(f"all yfinance symbols failed: {last}")
+
+
+# ---------------------------------------------------------------------------
+# Spot basis
+# ---------------------------------------------------------------------------
+def spot_reference() -> float | None:
+    """Live spot XAU/USD from gold-api.com (free, no key); None if unavailable."""
+    try:
+        r = httpx.get("https://api.gold-api.com/price/XAU", timeout=6, headers={"User-Agent": "XAUSentinel/1.0"})
+        r.raise_for_status()
+        return float(r.json()["price"])
+    except Exception as exc:  # noqa: BLE001
+        log.debug("spot reference unavailable: %s", exc)
+        return None
+
+
+def to_spot_basis(data: MarketData, spot: float | None) -> MarketData:
+    """Rescale bars from another instrument (e.g. COMEX futures GC=F, which trade at a
+    premium to spot) onto the spot XAU/USD basis the trader actually sees in MT5.
+
+    All OHLC values are multiplied by ``spot / last close``. Percentage-based
+    indicators (EMA stack, RSI, MACD, Bollinger) are unchanged by a constant scale;
+    levels, ATR stops and targets land on the spot price scale. GLD (an ETF at ~1/10
+    the price) is also handled by the same ratio.
+    """
+    if not spot or data.hourly.empty:
+        return data
+    ref = float(data.hourly["close"].iloc[-1])
+    if not ref:
+        return data
+    ratio = spot / ref
+    if abs(ratio - 1.0) < 0.0015:          # same instrument – nothing to do
+        return data
+    if not (0.05 < ratio < 20.0):          # not a plausible instrument of gold at all
+        log.warning("spot basis ratio %.4f looks wrong; leaving bars untouched", ratio)
+        return data
+    for df in (data.hourly, data.daily):
+        for col in ("open", "high", "low", "close"):
+            df[col] = df[col] * ratio
+    data.basis = ratio
+    data.source = f"{data.source}→spot"
+    log.info("Bars rescaled to spot basis (x%.5f, spot %.2f vs bars %.2f)", ratio, spot, ref)
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +214,15 @@ def fetch_market_data() -> MarketData:
     Falls back to yfinance if Twelve Data fails, so a bad key never leaves
     the bot without prices.
     """
+    data: MarketData | None = None
     if settings.data_provider == "twelvedata":
         try:
-            return _fetch_twelvedata(settings.twelvedata_symbol, settings.twelvedata_api_key)
+            data = _fetch_twelvedata(settings.twelvedata_symbol, settings.twelvedata_api_key)
         except Exception as exc:  # noqa: BLE001 - we want to fall back on anything
             log.warning("Twelve Data failed (%s); falling back to yfinance", exc)
-    return _fetch_yfinance(settings.yf_symbol)
+    if data is None:
+        data = _fetch_yfinance(settings.yf_symbol)
+    # Put the bars on the same basis as the live tick (spot XAU/USD) when they differ
+    if settings.quote_provider == "goldapi" and settings.spot_basis:
+        data = to_spot_basis(data, spot_reference())
+    return data

@@ -139,6 +139,8 @@ class Settings:
     # Live tick source for the terminal: "goldapi" (free, no key, ~1 s), "twelvedata", or "yfinance"
     quote_provider: str = field(default_factory=lambda: _env("QUOTE_PROVIDER", "goldapi"))
     quote_interval_sec: float = field(default_factory=lambda: _env_float("QUOTE_INTERVAL_SEC", 1.0))
+    # Rescale futures/ETF bars onto the spot XAU/USD basis of the live tick (levels & SL/TP match MT5)
+    spot_basis: bool = field(default_factory=lambda: _env_bool("SPOT_BASIS", True))
     # Keep a free-tier host (Render) awake by pinging our own public URL every few minutes.
     keepalive: bool = field(default_factory=lambda: _env_bool("KEEPALIVE", False))
     keepalive_url: str = field(default_factory=lambda: _env("KEEPALIVE_URL", _env("RENDER_EXTERNAL_URL")))
