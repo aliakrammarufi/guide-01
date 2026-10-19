@@ -7,10 +7,12 @@ the trader can see how the rules would have done before trusting them, and so
 threshold changes can be judged on numbers instead of feelings.
 
 What it is **not**: a promise. The replay is technical-only (news flow, calendar
-blackouts and spreads are not available historically), fills are taken at the
-15-minute close that confirms the entry, and within a bar the stop is checked
-before the targets (the conservative reading of an ambiguous bar). Real results
-will differ; the numbers are for judging the rules, not for forecasting.
+blackouts and spreads are not available historically), entries are taken at the
+15-minute close that confirms them, stops and targets fill at their level, and
+within a bar the stop is checked before the targets (the conservative reading of
+an ambiguous bar). Results count half the position booked at TP1, as the call
+advises. Real results will differ; the numbers are for judging the rules, not
+for forecasting.
 
 The replay never touches the live database: it runs a private in-memory tracker.
 """
@@ -57,6 +59,7 @@ class ReplayParams:
     asia_entries: bool = True
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
+    method: int = 2                       # replay/accounting version: a change invalidates stored results
 
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
@@ -77,6 +80,36 @@ def _agg(bars: pd.DataFrame, start: pd.Timestamp) -> pd.DataFrame | None:
     row = {"open": float(bars["open"].iloc[0]), "high": float(bars["high"].max()), "low": float(bars["low"].min()),
            "close": float(bars["close"].iloc[-1]), "volume": float(bars["volume"].sum())}
     return pd.DataFrame([row], index=pd.DatetimeIndex([start]))
+
+
+def _bar_path(sig, lo: float, hi: float, close: float) -> list[float]:
+    """The prices to feed the tracker for one bar.
+
+    Open trade: orders fill *at their level*, not at the bar's extreme – a stop that is
+    touched fills at the stop, a target at the target. The ambiguous order inside a bar is
+    read conservatively: the stop first; after TP1 moves the stop to break-even, a bar that
+    also reaches back to the entry is taken as a break-even stop, not as a run to TP2.
+    Pending setup: the extremes (touch / chase / invalidation use levels, no P&L).
+    """
+    if not sig.is_open:
+        return [lo, hi, close] if sig.side == "BUY" else [hi, lo, close]
+    long = sig.side == "BUY"
+    adverse, favourable = (lo, hi) if long else (hi, lo)
+    beyond = (lambda level: adverse <= level) if long else (lambda level: adverse >= level)   # adverse side reached level
+    reached = (lambda level: favourable >= level) if long else (lambda level: favourable <= level)
+    path: list[float] = []
+    if beyond(sig.effective_sl):
+        return [sig.effective_sl]
+    if sig.status == "active" and reached(sig.tp1):
+        path.append(sig.tp1)                       # TP1 books half, stop → break-even
+        if beyond(sig.entry):
+            path.append(sig.entry)                 # the same bar came back to the entry: break-even stop
+            return path
+    if reached(sig.tp2):
+        path.append(sig.tp2)
+        return path
+    path.append(close)
+    return path
 
 
 def _conf_bucket(c: int) -> str:
@@ -116,12 +149,11 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
         bar = m15.iloc[i]
         t = m15.index[i] + step                 # this bar has just closed
         tnow = t.to_pydatetime()
-        # ---- price path of the bar: adverse extreme first (conservative), then the favourable one, then the close
+        # ---- price path of the bar
         live = tracker.live()
         if live is not None:
             lo, hi, c = float(bar["low"]), float(bar["high"]), float(bar["close"])
-            path = (lo, hi, c) if live.side == "BUY" else (hi, lo, c)
-            for px in path:
+            for px in _bar_path(live, lo, hi, c):
                 if tracker.on_price(px, now=tnow):
                     live = tracker.live()
                     if live is None:
@@ -257,7 +289,8 @@ def summarize(signals: list, meta: dict[int, dict], p: ReplayParams) -> dict:
         "equity": equity,
         "trades": trades,
         "note": ("Technical-only replay of the production rules on real bars: news flow, calendar blackouts and spreads are not "
-                 "included; entries at the confirming 15-minute close; within a bar the stop is checked before the targets. "
+                 "included; entries at the confirming 15-minute close, stops and targets fill at their level, within a bar the "
+                 "stop is checked before the targets; results book half the position at TP1 as the call advises. "
                  "Past replay results do not predict future results."),
     }
 

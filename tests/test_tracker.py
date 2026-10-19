@@ -42,8 +42,19 @@ def test_market_mode_open_tp1_breakeven_then_tp2(tmp_path):
     assert [e.kind for e in tr.on_price(4546.0)] == ["tp2"]
     assert tr.active() is None
     h = tr.history()[0]
-    assert h.status == "tp2" and abs(h.result_r - (46.0 / 25.0)) < 1e-6
+    # half booked at TP1 (4520 → +0.8R), half at the TP2 tick (4546 → +1.84R)
+    assert h.status == "tp2" and abs(h.result_r - (0.5 * 20.0 / 25.0 + 0.5 * 46.0 / 25.0)) < 1e-6
     st = tr.stats(); assert st["count"] == 1 and st["wins"] == 1 and st["win_rate"] == 100.0
+
+
+def test_breakeven_stop_after_tp1_keeps_the_first_half(tmp_path):
+    tr = SignalTracker(Store(tmp_path / "s.db"), min_conf=45, require_trigger=False)
+    tr.on_analysis(_report())
+    assert [e.kind for e in tr.on_price(4520.5)] == ["tp1"]
+    assert [e.kind for e in tr.on_price(4500.0)] == ["stopped"]      # break-even stop on the second half
+    h = tr.history()[0]
+    assert h.status == "stopped" and abs(h.result_r - 0.5 * 20.0 / 25.0) < 1e-6   # +0.4R, not 0
+    assert tr.stats()["wins"] == 1
 
 
 def test_market_mode_stop_out_and_no_duplicate(tmp_path):

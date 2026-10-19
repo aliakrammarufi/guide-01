@@ -12,7 +12,8 @@ Life of a call
    (EMA reclaim, engulfing, rejection wick or micro structure break). The entry is
    the close of the confirming bar. From here the old rules apply:
 3. **tp1** – stop moves to break-even;  **tp2 / stopped / flipped / expired** – closed,
-   result measured in R (multiples of the initial risk).
+   result measured in R (multiples of the initial risk) the way the call is meant to be
+   traded: half booked at TP1, the other half at the exit.
 
 A pending setup ends without a trade when price runs past the chase level
 (**missed**), trades through the stop before confirming (**invalidated**), the
@@ -235,9 +236,18 @@ class SignalTracker:
         sig.status = status
         sig.closed_at = now
         sig.exit_price = price
-        sig.result_r = sig.r_at(price) if status not in NO_TRADE_STATUSES else None
+        sig.result_r = self.realized_r(sig, price) if status not in NO_TRADE_STATUSES else None
         self.store.update_signal(sig)
         return self._emit(status, sig, price)
+
+    @staticmethod
+    def realized_r(sig: TradeSignal, exit_price: float) -> float:
+        """Result of following the call as advised: half the position booked at TP1 (at the TP1
+        level), the other half closed at ``exit_price``. Before TP1 the whole position exits there."""
+        full = sig.r_at(exit_price)
+        if sig.tp1_hit_at is None:
+            return full
+        return 0.5 * sig.r_at(sig.tp1) + 0.5 * full
 
     @staticmethod
     def _plan_from_signal(engine_sig) -> dict | None:

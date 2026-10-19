@@ -56,3 +56,20 @@ def test_replay_needs_history():
 def test_summarize_empty():
     res = summarize([], {}, ReplayParams())
     assert res["summary"]["count"] == 0 and res["summary"]["win_rate"] is None and res["equity"] == []
+
+
+def test_bar_path_fills_at_levels_conservatively():
+    from types import SimpleNamespace as N
+
+    from signals.backtest import _bar_path
+
+    buy = N(side="BUY", is_open=True, status="active", effective_sl=90.0, entry=100.0, tp1=110.0, tp2=120.0)
+    assert _bar_path(buy, 89, 115, 100) == [90.0]                 # stop first, at the stop level
+    assert _bar_path(buy, 101, 111, 105) == [110.0, 105]          # TP1 at its level, then the close
+    assert _bar_path(buy, 95, 111, 105) == [110.0, 100.0]         # TP1 and back below entry → break-even stop
+    assert _bar_path(buy, 101, 125, 118) == [110.0, 120.0]        # straight through to TP2
+    tp1 = N(side="BUY", is_open=True, status="tp1", effective_sl=100.0, entry=100.0, tp1=110.0, tp2=120.0)
+    assert _bar_path(tp1, 99.5, 121, 115) == [100.0]
+    sell = N(side="SELL", is_open=True, status="active", effective_sl=110.0, entry=100.0, tp1=90.0, tp2=80.0)
+    assert _bar_path(sell, 85, 99, 88) == [90.0, 88]
+    assert _bar_path(N(side="SELL", is_open=False), 85, 111, 88) == [111, 85, 88]
