@@ -90,8 +90,10 @@ A call has two stages, like a trader's own plan:
    is taken.
 2. **Live call** – the setup confirms when price is in the zone and the 15-minute chart prints an
    **EMA20 reclaim**, a **bullish/bearish engulfing candle**, a **rejection wick** or a **break of the
-   pullback high/low**. Entry = close of the confirming bar. From there: TP1 → stop to break-even,
-   TP2 / stop / bias flip / 48 h max hold closes it, results in R.
+   pullback high/low**. Entry = close of the confirming bar. From there: TP1 → book half, stop to
+   break-even; TP2 / stop / bias flip / 48 h max hold closes the rest. Results are in R (multiples of
+   the initial risk) and count the half booked at TP1 — e.g. TP1 then a break-even stop is about +0.4R,
+   not 0.
 
 Setups that never confirm end as *missed*, *invalidated* (price went through the stop first), *cancelled*
 (bias changed) or *expired* (12 h) – all "no trade", and they are counted separately from the win rate.
