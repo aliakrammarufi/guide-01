@@ -47,7 +47,10 @@ async def bar_close_watch(cache, delay_sec: float = 4.0) -> None:
         nxt = (int(now // 900) + 1) * 900 + delay_sec
         await asyncio.sleep(max(1.0, nxt - now))
         try:
-            await cache.refresh(with_briefing=False, refresh_news=False, fast=True)
+            rep = await cache.refresh(with_briefing=False, refresh_news=False, fast=True)
+            live = cache.tracker.live()
+            log.info("15-minute close read: %s %d%% · %s", rep.signal.bias, rep.signal.confidence,
+                     f"{live.side} {live.status}" if live else "no call")
         except Exception as exc:  # noqa: BLE001
             log.warning("bar-close refresh failed: %s", exc)
 

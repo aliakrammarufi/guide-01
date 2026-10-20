@@ -292,9 +292,13 @@ def fetch_market_data(max_age_sec: float = 0.0) -> MarketData:
         from market import bars as live_bars
 
         if live_bars.LIVE is not None and data.basis_known:
-            data.m15 = live_bars.merge_live(data.m15, live_bars.LIVE.frame(900), 900)
+            m15_live = live_bars.LIVE.frame(900)
+            data.m15 = live_bars.merge_live(data.m15, m15_live, 900)
             data.hourly = live_bars.merge_live(data.hourly, live_bars.LIVE.frame(3600), 3600)
             data.source = data.source + "+live" if "+live" not in data.source else data.source
+            if len(m15_live) and not _PROVIDER_CACHE.get("live_logged"):
+                _PROVIDER_CACHE["live_logged"] = True
+                log.info("Live candles active: %d × 15m from the tick stream overlaid on the provider's bars", len(m15_live))
     except Exception as exc:  # noqa: BLE001 – the live overlay is an improvement, never a dependency
         log.debug("live bar overlay skipped: %s", exc)
     if settings.macro_context:

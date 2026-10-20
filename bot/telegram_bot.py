@@ -514,6 +514,18 @@ class SentinelBot:
         await self._send(update.effective_chat.id, fmt.format_backtest(bt, on_start=self.settings.backtest_on_start, variants=variants,
                                                                        deep=deep, deep_variants=deep_v))
 
+    @staticmethod
+    def _live_candles_line() -> str:
+        try:
+            from market import bars as live_bars
+            st = live_bars.LIVE.status() if live_bars.LIVE else None
+        except Exception:  # noqa: BLE001
+            st = None
+        if not st:
+            return "off"
+        age = st.get("last_tick_age_sec")
+        return f"{st['bars_15m']} × 15m · {st['bars_1h']} × 1h · last tick {age:.0f}s ago" if age is not None else "waiting for ticks"
+
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         rep = self.cache.report
         s = self.settings
@@ -536,6 +548,7 @@ class SentinelBot:
             ("AI", ai),
             ("Subscribers", f"{len(self.store.subscribers())} · alerts on {len(self.store.subscribers(alerts_only=True))}"),
             ("State backup", self.cache.backup.describe() if self.cache.backup else "off"),
+            ("Live candles", self._live_candles_line()),
         ]
         text = "🛰 <b>STATUS</b>\n" + fmt._pre(rows, right=())
         if rep and rep.session:
