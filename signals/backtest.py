@@ -378,6 +378,7 @@ VARIANTS: list[tuple[str, dict]] = [
     ("no Asian-session entries", {"asia_entries": False}),
     ("no macro context", {"macro": False}),
     ("no engulfing confirmation", {"trigger_kinds": ("ema_reclaim", "pin_bar", "break")}),
+    ("structure-break confirmations only", {"trigger_kinds": ("break",)}),
     ("no zone refinement (fib / order block)", {"zone_refine": False}),
 ]
 VARIANTS_KEY = "backtest_variants"
