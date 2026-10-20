@@ -60,7 +60,7 @@ class DemoPipeline(Pipeline):
             self.store.upsert_articles(arts)
         return arts
 
-    def run(self, with_briefing: bool = True, refresh_news: bool = True):
+    def run(self, with_briefing: bool = True, refresh_news: bool = True, bars_max_age_sec: float = 0.0):
         import pipeline as _p
 
         original = _p.fetch_market_data
