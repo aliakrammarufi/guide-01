@@ -834,7 +834,7 @@ HELP = """📖 <b>COMMANDS</b>
 /signal — current bias, confidence and the entry plan
 /signals — setup or live BUY / SELL call with stop, targets and results
 /analyze — full report with chart, price action, technicals and news
-/backtest — how these rules did on the last two months of real bars
+/backtest — how these rules did on real bars: last two months, three years, and the alternatives
 
 <b>Settings</b>
 /risk 5000 1 — account size and % risk per trade → lot size on every call
