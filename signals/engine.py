@@ -108,7 +108,7 @@ def _bias_from_score(score: int) -> str:
     return "NEUTRAL"
 
 
-def plan_entry(direction: str, tech: TechSnapshot, atr_stop_mult: float = 1.5, atr_target_mult: float = 2.5, refine: bool = True) -> dict:
+def plan_entry(direction: str, tech: TechSnapshot, atr_stop_mult: float = 1.5, atr_target_mult: float = 3.0, refine: bool = True) -> dict:
     """Where to get in, where it is wrong, where to take profit.
 
     Long: the pullback zone sits between the H1 EMA20 (upper edge) and the nearest
@@ -271,7 +271,7 @@ def build_signal(
     tech_weight: float = 0.6,
     news_weight: float = 0.4,
     atr_stop_mult: float = 1.5,
-    atr_target_mult: float = 2.5,
+    atr_target_mult: float = 3.0,
     session=None,
     zone_refine: bool = True,
 ) -> Signal:

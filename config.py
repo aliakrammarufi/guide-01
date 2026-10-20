@@ -184,7 +184,8 @@ class Settings:
     tech_weight: float = field(default_factory=lambda: _env_float("TECH_WEIGHT", 0.6))
     news_weight: float = field(default_factory=lambda: _env_float("NEWS_WEIGHT", 0.4))
     atr_stop_mult: float = field(default_factory=lambda: _env_float("ATR_STOP_MULT", 1.5))
-    atr_target_mult: float = field(default_factory=lambda: _env_float("ATR_TARGET_MULT", 2.5))
+    # TP2 = this × ATR from the zone middle, TP1 = half of it. 3.0 (TP1 1.5 · TP2 3.0 ATR) replayed best over 3 years.
+    atr_target_mult: float = field(default_factory=lambda: _env_float("ATR_TARGET_MULT", 3.0))
 
     # --- Trade signals (BUY / SELL calls with SL, TP1, TP2) -----------------
     signal_min_conf: int = field(default_factory=lambda: _env_int("SIGNAL_MIN_CONF", 45))

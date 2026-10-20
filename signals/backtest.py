@@ -54,7 +54,7 @@ class ReplayParams:
     breakeven_after_tp1: bool = True
     require_trigger: bool = True
     atr_stop_mult: float = 1.5
-    atr_target_mult: float = 2.5
+    atr_target_mult: float = 3.0
     tech_weight: float = 0.6
     news_weight: float = 0.4
     session_filter: bool = True
@@ -380,19 +380,21 @@ VARIANTS: list[tuple[str, dict]] = [
     # most decision-relevant first (the sweep runs in this order and saves after each one)
     ("break-even stop after TP1", {"breakeven_after_tp1": True}),
     ("no break-even stop", {"breakeven_after_tp1": False}),
+    ("targets 1.25 / 2.5 ATR", {"atr_target_mult": 2.5}),
+    ("targets 1.5 / 3.0 ATR", {"atr_target_mult": 3.0}),
+    ("targets 2.0 / 4.0 ATR", {"atr_target_mult": 4.0}),
+    ("targets 1.0 / 2.0 ATR", {"atr_target_mult": 2.0}),
     ("no rejection-wick confirmation", {"trigger_kinds": ("ema_reclaim", "engulfing", "break")}),
     ("EMA reclaim + structure break only", {"trigger_kinds": ("ema_reclaim", "break")}),
     ("structure-break confirmations only", {"trigger_kinds": ("break",)}),
-    ("further targets (TP1 1.5 · TP2 3.0 ATR)", {"atr_target_mult": 3.0}),
     ("no engulfing confirmation", {"trigger_kinds": ("ema_reclaim", "pin_bar", "break")}),
-    ("closer targets (TP1 1.0 · TP2 2.0 ATR)", {"atr_target_mult": 2.0}),
     ("wider stop (2.0 ATR)", {"atr_stop_mult": 2.0}),
+    ("no zone refinement (fib / order block)", {"zone_refine": False}),
     ("no Asian-session entries", {"asia_entries": False}),
     ("no macro context", {"macro": False}),
     ("no London/NY-overlap entries", {"blocked_sessions": ("London/NY overlap",)}),
     ("break-only + no overlap entries", {"trigger_kinds": ("break",), "blocked_sessions": ("London/NY overlap",)}),
-    ("no zone refinement (fib / order block)", {"zone_refine": False}),
-    ("no break-even + further targets (3.0 ATR)", {"breakeven_after_tp1": False, "atr_target_mult": 3.0}),
+    ("no break-even + targets 1.5 / 3.0 ATR", {"breakeven_after_tp1": False, "atr_target_mult": 3.0}),
     ("no break-even + break-only", {"breakeven_after_tp1": False, "trigger_kinds": ("break",)}),
     ("no break-even + no overlap entries", {"breakeven_after_tp1": False, "blocked_sessions": ("London/NY overlap",)}),
 ]

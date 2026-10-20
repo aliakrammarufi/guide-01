@@ -135,7 +135,7 @@ news feeds ──► per-headline impact (-2..+2) ──► news score (-100..+1
           bias:  ≥55 strong buy · ≥25 buy · >-25 neutral · ≤-25 sell · ≤-55 strong sell
           confidence: |combined|, +15 when tech & news agree, −25 when they conflict,
                       −5 per warning flag (overbought, stretched band, squeeze…)
-          levels: stop = 1.5 × ATR (tucked under/over structure), T1 = 1.25 × ATR, T2 = 2.5 × ATR
+          levels: stop = 1.5 × ATR (tucked under/over structure), T1 = 1.5 × ATR, T2 = 3.0 × ATR (≈ 1R / 2R; `ATR_TARGET_MULT`)
 ```
 
 **Price action** (`market/structure.py`) reads the chart the way a discretionary trader does and feeds both

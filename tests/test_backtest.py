@@ -105,6 +105,7 @@ def test_applicable_variants_skip_the_current_rules_and_duplicates():
     names = [n for n, _o, _p in applicable_variants(base)]
     assert "break-even stop after TP1" not in names and "no break-even stop" in names
     assert "no break-even + break-only" in names                       # a real combination when the base has break-even
+    assert "targets 1.5 / 3.0 ATR" not in names and "targets 1.25 / 2.5 ATR" in names    # 3.0 is the default
     base2 = ReplayParams(breakeven_after_tp1=False)
     names2 = [n for n, _o, _p in applicable_variants(base2)]
     assert "no break-even stop" not in names2 and "break-even stop after TP1" in names2
