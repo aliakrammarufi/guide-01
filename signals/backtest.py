@@ -377,17 +377,18 @@ def params_from_settings(settings) -> ReplayParams:
 # Each entry is replayed with the current rules plus its overrides; entries that would equal the current
 # rules (or an earlier entry) are skipped, so the list reads the same whatever the live settings are.
 VARIANTS: list[tuple[str, dict]] = [
+    # most decision-relevant first (the sweep runs in this order and saves after each one)
     ("break-even stop after TP1", {"breakeven_after_tp1": True}),
     ("no break-even stop", {"breakeven_after_tp1": False}),
-    ("closer targets (TP1 1.0 · TP2 2.0 ATR)", {"atr_target_mult": 2.0}),
-    ("further targets (TP1 1.5 · TP2 3.0 ATR)", {"atr_target_mult": 3.0}),
-    ("wider stop (2.0 ATR)", {"atr_stop_mult": 2.0}),
-    ("no Asian-session entries", {"asia_entries": False}),
-    ("no macro context", {"macro": False}),
-    ("no engulfing confirmation", {"trigger_kinds": ("ema_reclaim", "pin_bar", "break")}),
     ("no rejection-wick confirmation", {"trigger_kinds": ("ema_reclaim", "engulfing", "break")}),
     ("EMA reclaim + structure break only", {"trigger_kinds": ("ema_reclaim", "break")}),
     ("structure-break confirmations only", {"trigger_kinds": ("break",)}),
+    ("further targets (TP1 1.5 · TP2 3.0 ATR)", {"atr_target_mult": 3.0}),
+    ("no engulfing confirmation", {"trigger_kinds": ("ema_reclaim", "pin_bar", "break")}),
+    ("closer targets (TP1 1.0 · TP2 2.0 ATR)", {"atr_target_mult": 2.0}),
+    ("wider stop (2.0 ATR)", {"atr_stop_mult": 2.0}),
+    ("no Asian-session entries", {"asia_entries": False}),
+    ("no macro context", {"macro": False}),
     ("no London/NY-overlap entries", {"blocked_sessions": ("London/NY overlap",)}),
     ("break-only + no overlap entries", {"trigger_kinds": ("break",), "blocked_sessions": ("London/NY overlap",)}),
     ("no zone refinement (fib / order block)", {"zone_refine": False}),
