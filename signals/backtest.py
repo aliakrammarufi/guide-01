@@ -385,6 +385,8 @@ VARIANTS: list[tuple[str, dict]] = [
     ("no Asian-session entries", {"asia_entries": False}),
     ("no macro context", {"macro": False}),
     ("no engulfing confirmation", {"trigger_kinds": ("ema_reclaim", "pin_bar", "break")}),
+    ("no rejection-wick confirmation", {"trigger_kinds": ("ema_reclaim", "engulfing", "break")}),
+    ("EMA reclaim + structure break only", {"trigger_kinds": ("ema_reclaim", "break")}),
     ("structure-break confirmations only", {"trigger_kinds": ("break",)}),
     ("no London/NY-overlap entries", {"blocked_sessions": ("London/NY overlap",)}),
     ("break-only + no overlap entries", {"trigger_kinds": ("break",), "blocked_sessions": ("London/NY overlap",)}),
