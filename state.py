@@ -23,7 +23,8 @@ class ReportCache:
         self.tracker = SignalTracker(pipeline.store, min_conf=st.signal_min_conf, max_hours=st.signal_max_hours,
                                      breakeven_after_tp1=st.signal_breakeven_after_tp1,
                                      pending_max_hours=st.signal_pending_max_hours, require_trigger=st.signal_require_trigger,
-                                     spread_usd=st.spread_usd, slippage_usd=st.slippage_usd)
+                                     spread_usd=st.spread_usd, slippage_usd=st.slippage_usd,
+                                     trigger_kinds=st.trigger_kinds or None)
         self._report: Report | None = None
         self._lock = threading.Lock()
         self._history: list[dict] = []   # recent signals (for the dashboard sparkline)

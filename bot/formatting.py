@@ -712,7 +712,20 @@ def _deep_section(deep: dict | None) -> str:
     return out
 
 
-def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | None = None, deep: dict | None = None) -> str:
+def _variants_table(rows_v: list, title: str) -> str:
+    trows = [("", "Trades", "Win", "Avg", "Total")]
+    for v in rows_v:
+        b = v.get("summary") or {}
+        if not b.get("count"):
+            continue
+        wr = f"{b['win_rate']:.0f}%" if b.get("win_rate") is not None else "–"
+        trows.append((v["name"], str(b["count"]), wr, _r(b["avg_r"]) if b.get("avg_r") is not None else "–",
+                      _r(b["total_r"], 1) if b.get("total_r") is not None else "–"))
+    return f"<b>{title}</b>\n{_pre(trows, right=(1, 2, 3, 4))}" if len(trows) > 1 else ""
+
+
+def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | None = None, deep: dict | None = None,
+                    deep_variants: dict | None = None) -> str:
     title = "🧪 <b>SELF-CHECK</b> — how these rules did on real bars"
     if not bt or not isinstance(bt, dict) or "summary" not in bt:
         why = ("It runs automatically a few minutes after the bot starts and takes about ten minutes; check back soon."
@@ -749,18 +762,12 @@ def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | Non
     deep_text = _deep_section(deep)
     if deep_text:
         parts.append(deep_text)
-    rows_v = (variants or {}).get("variants") or []
-    if rows_v:
-        trows = [("", "Trades", "Win", "Avg", "Total")]
-        for v in rows_v:
-            b = v.get("summary") or {}
-            if not b.get("count"):
-                continue
-            wr = f"{b['win_rate']:.0f}%" if b.get("win_rate") is not None else "–"
-            trows.append((v["name"], str(b["count"]), wr, _r(b["avg_r"]) if b.get("avg_r") is not None else "–",
-                          _r(b["total_r"], 1) if b.get("total_r") is not None else "–"))
-        if len(trows) > 1:
-            parts.append(f"<b>SAME CALLS, OTHER MANAGEMENT</b>\n{_pre(trows, right=(1, 2, 3, 4))}")
+    dv = _variants_table((deep_variants or {}).get("variants") or [], "OTHER MANAGEMENTS — multi-year")
+    if dv:
+        parts.append(dv)
+    vt = _variants_table((variants or {}).get("variants") or [], "OTHER MANAGEMENTS — last 60 days")
+    if vt:
+        parts.append(vt)
     gen = bt.get("generated_at")
     try:
         gen_s = datetime.fromisoformat(gen).strftime("%d %b %H:%M UTC")

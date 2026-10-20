@@ -192,6 +192,10 @@ class Settings:
     signal_breakeven_after_tp1: bool = field(default_factory=lambda: _env_bool("SIGNAL_BREAKEVEN_AFTER_TP1", True))
     # Entry timing: a call is a *setup* (zone) first and goes live only on a 15-minute confirmation
     signal_require_trigger: bool = field(default_factory=lambda: _env_bool("SIGNAL_REQUIRE_TRIGGER", True))
+    # Which 15-minute confirmations count: ema_reclaim, engulfing, pin_bar, break (empty = all)
+    trigger_kinds: list[str] = field(default_factory=lambda: _env_list("TRIGGER_KINDS", []))
+    # Let a fib 50/61.8 or an order block just beyond the zone pull its far edge out
+    zone_refine: bool = field(default_factory=lambda: _env_bool("ZONE_REFINE", True))
     signal_pending_max_hours: float = field(default_factory=lambda: _env_float("SIGNAL_PENDING_MAX_HOURS", 12.0))
     # Session filter: no new entries in the dead zone / weekend / Friday evening / Sunday open, and around high-impact news
     session_filter: bool = field(default_factory=lambda: _env_bool("SESSION_FILTER", True))
@@ -235,6 +239,8 @@ class Settings:
     # Deep check: the same replay over DEEP_CHECK_YEARS of Dukascopy spot 15-minute history (slow, runs in the background)
     deep_check: bool = field(default_factory=lambda: _env_bool("DEEP_CHECK", False))
     deep_check_years: float = field(default_factory=lambda: _env_float("DEEP_CHECK_YEARS", 3.0))
+    # Also replay the alternative managements over the deep history (several hours; the most informative comparison)
+    deep_sweep: bool = field(default_factory=lambda: _env_bool("DEEP_SWEEP", False))
 
     @property
     def ai_enabled(self) -> bool:

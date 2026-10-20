@@ -144,6 +144,7 @@ class Pipeline:
             atr_stop_mult=self.settings.atr_stop_mult,
             atr_target_mult=self.settings.atr_target_mult,
             session=session,
+            zone_refine=self.settings.zone_refine,
         )
         self._log_read(tech, signal)
         briefing = None

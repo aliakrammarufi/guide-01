@@ -61,12 +61,16 @@ class ReplayParams:
     spread_usd: float = 0.30              # round-trip spread charged to every trade ($/oz)
     slippage_usd: float = 0.10            # extra cost on a stop fill ($/oz)
     macro: bool = True                    # dollar / yields / equities context in the score (needs their daily history)
+    trigger_kinds: tuple = ()             # () = every confirmation type
+    zone_refine: bool = True              # fib / order-block zone refinement
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
     method: int = 5                       # replay/accounting/engine version: a change invalidates stored results
 
     def to_dict(self) -> dict:
-        return {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
+        d = {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
+        d["trigger_kinds"] = list(d["trigger_kinds"])
+        return d
 
 
 def _utc(df: pd.DataFrame) -> pd.DataFrame:
@@ -132,7 +136,7 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
     store = Store(":memory:")
     tracker = SignalTracker(store, min_conf=p.min_conf, max_hours=p.max_hours, breakeven_after_tp1=p.breakeven_after_tp1,
                             pending_max_hours=p.pending_max_hours, require_trigger=p.require_trigger,
-                            spread_usd=p.spread_usd, slippage_usd=p.slippage_usd)
+                            spread_usd=p.spread_usd, slippage_usd=p.slippage_usd, trigger_kinds=tuple(p.trigger_kinds) or None)
     tracker.quiet = True
     news = NewsScore(score=0, n_articles=0, n_bullish=0, n_bearish=0, n_neutral=0, top_themes=[], drivers=[])
     step = timedelta(minutes=15)
@@ -204,7 +208,8 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
             last_tech = tech
             session = session_info(now=tnow, events=[], asia_entries=p.asia_entries) if p.session_filter else None
             sig = build_signal(tech, news, tech_weight=p.tech_weight, news_weight=p.news_weight,
-                               atr_stop_mult=p.atr_stop_mult, atr_target_mult=p.atr_target_mult, session=session)
+                               atr_stop_mult=p.atr_stop_mult, atr_target_mult=p.atr_target_mult, session=session,
+                               zone_refine=p.zone_refine)
             report = SimpleNamespace(signal=sig, tech=tech, session=session, data=data)
             for ev in tracker.on_analysis(report, now=tnow):
                 m = meta.setdefault(ev.signal.id, {})
@@ -359,6 +364,7 @@ def params_from_settings(settings) -> ReplayParams:
         atr_target_mult=settings.atr_target_mult, tech_weight=settings.tech_weight, news_weight=settings.news_weight,
         session_filter=settings.session_filter, asia_entries=settings.asia_entries,
         spread_usd=settings.spread_usd, slippage_usd=settings.slippage_usd, macro=settings.macro_context,
+        trigger_kinds=tuple(settings.trigger_kinds), zone_refine=settings.zone_refine,
     )
 
 
@@ -371,6 +377,8 @@ VARIANTS: list[tuple[str, dict]] = [
     ("wider stop (2.0 ATR)", {"atr_stop_mult": 2.0}),
     ("no Asian-session entries", {"asia_entries": False}),
     ("no macro context", {"macro": False}),
+    ("no engulfing confirmation", {"trigger_kinds": ("ema_reclaim", "pin_bar", "break")}),
+    ("no zone refinement (fib / order block)", {"zone_refine": False}),
 ]
 VARIANTS_KEY = "backtest_variants"
 
@@ -391,7 +399,8 @@ def run_and_store(settings, store: Store, yield_sleep: float = 0.01, sweep: bool
     return result
 
 
-def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: dict | None = None) -> dict:
+def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: dict | None = None, key: str = VARIANTS_KEY,
+                 log_every: int = 0) -> dict:
     rows = []
     if base_summary is not None:
         rows.append({"name": "current rules", "overrides": {}, "summary": _brief(base_summary)})
@@ -399,7 +408,7 @@ def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: di
         p = ReplayParams(**{**base.__dict__, **overrides})
         log.info("Self-check variant '%s'…", name)
         try:
-            r = replay(h1, d1, m15, p)
+            r = replay(h1, d1, m15, p, progress=(lambda n, t: log.info("Self-check variant: %d/%d bars", n, t) if n and n % log_every == 0 else None) if log_every else None)
         except Exception as exc:  # noqa: BLE001
             log.warning("Self-check variant '%s' failed: %s", name, exc)
             continue
@@ -409,7 +418,7 @@ def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: di
                  name, b["count"], b["win_rate"], b["avg_r"], b["total_r"], b["profit_factor"], b["max_drawdown_r"])
         out = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "base_params": base.to_dict(), "variants": rows,
                "complete": len(rows) >= len(VARIANTS) + (1 if base_summary is not None else 0)}
-        store.set_state(VARIANTS_KEY, out)          # saved after every variant: a restart loses nothing
+        store.set_state(key, out)                   # saved after every variant: a restart loses nothing
     return out if rows else {}
 
 
@@ -439,6 +448,7 @@ def _fresh(stored: dict | None, base: ReplayParams, max_age_days: float, params_
 
 
 DEEP_KEY = "backtest_deep"
+DEEP_VARIANTS_KEY = "backtest_deep_variants"
 
 
 def run_deep(settings, store: Store, yield_sleep: float = 0.02) -> dict:
@@ -461,6 +471,7 @@ def run_deep(settings, store: Store, yield_sleep: float = 0.02) -> dict:
         result["equity"] = eq[::step] + ([eq[-1]] if eq[-1] != eq[::step][-1] else [])
     result["trades"] = result["trades"][-100:]
     store.set_state(DEEP_KEY, result)
+    result["_data"] = (h1, d1, m15)                                  # for a following sweep; stripped by the caller
     s = result["summary"]
     log.info("Deep check done in %.0fs: %d setups, %d trades, win rate %s%%, avg %sR, total %+.1fR, PF %s, max drawdown %.1fR",
              result["took_sec"], s["setups"], s["count"], s["win_rate"], s["avg_r"], s["total_r"], s["profit_factor"], s["max_drawdown_r"])
@@ -481,15 +492,33 @@ async def run_on_start(cache, delay_sec: int = 150) -> None:
     base = params_from_settings(settings)
     main_fresh = _fresh(store.get_state(STATE_KEY), base, settings.backtest_max_age_days, "params")
     deep_due = settings.deep_check and not _fresh(store.get_state(DEEP_KEY), base, settings.backtest_max_age_days, "params")
+    deep_sweep_due = settings.deep_check and settings.deep_sweep and \
+        not _fresh(store.get_state(DEEP_VARIANTS_KEY), base, settings.backtest_max_age_days, "base_params")
     sweep_due = settings.backtest_sweep and not _fresh(store.get_state(VARIANTS_KEY), base, settings.backtest_max_age_days, "base_params")
-    if main_fresh and not deep_due and not sweep_due:
+    if main_fresh and not deep_due and not sweep_due and not deep_sweep_due:
         log.info("Self-check: stored replays are recent – skipping")
         return
     try:
         if not main_fresh:
             await asyncio.to_thread(run_and_store, settings, store, 0.01, False)
-        if deep_due:
-            await asyncio.to_thread(run_deep, settings, store)
+        if deep_due or deep_sweep_due:
+            def _deep():
+                data = None
+                if deep_due:
+                    res = run_deep(settings, store)
+                    data = res.pop("_data", None)
+                if deep_sweep_due:
+                    if data is None:
+                        from market.history import load_history
+                        data = load_history(years=settings.deep_check_years, cache_path=Path(settings.db_path).parent / "history_m15.pkl.gz",
+                                            redis_url=settings.redis_url)
+                    h1, d1, m15 = data
+                    p = params_from_settings(settings)
+                    p.yield_sleep = 0.02
+                    deep = store.get_state(DEEP_KEY) or {}
+                    log.info("Deep check: replaying %d alternative managements over the same %d bars…", len(VARIANTS), len(m15))
+                    run_variants(h1, d1, m15, p, store, base_summary=deep.get("summary"), key=DEEP_VARIANTS_KEY, log_every=20000)
+            await asyncio.to_thread(_deep)
         if sweep_due:
             def _sweep_only():
                 h1, d1, m15, _sym = fetch_history(settings.yf_symbol)

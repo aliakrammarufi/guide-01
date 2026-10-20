@@ -66,9 +66,14 @@ def closed_bars(m15: pd.DataFrame, now: datetime | None = None, bar_minutes: int
     return m15
 
 
+ALL_KINDS = ("ema_reclaim", "engulfing", "pin_bar", "break")
+
+
 def evaluate(side: str, zone_lo: float, zone_hi: float, atr: float, m15: pd.DataFrame | None,
-             now: datetime | None = None) -> TriggerResult:
-    """Decide whether the 15-minute chart confirms an entry for ``side`` at the zone."""
+             now: datetime | None = None, kinds: tuple[str, ...] | list[str] | None = None) -> TriggerResult:
+    """Decide whether the 15-minute chart confirms an entry for ``side`` at the zone.
+    ``kinds`` limits which confirmations count (ema_reclaim, engulfing, pin_bar, break); default all."""
+    allowed = set(kinds) if kinds else set(ALL_KINDS)
     if m15 is None or len(m15) < 25:
         return TriggerResult(False, note="no 15-minute data")
     df = closed_bars(m15, now)
@@ -111,17 +116,17 @@ def evaluate(side: str, zone_lo: float, zone_hi: float, atr: float, m15: pd.Data
             return res
         # ema reclaim: closed below EMA20 within the last 6 bars, now closed above, bullish bar
         below_recently = bool((df["close"].iloc[-7:-1] < ema20.iloc[-7:-1]).any())
-        if bullish and c > float(ema20.iloc[-1]) and below_recently and c > float(prev["close"]):
+        if "ema_reclaim" in allowed and bullish and c > float(ema20.iloc[-1]) and below_recently and c > float(prev["close"]):
             return fire("ema_reclaim")
         prev_body = abs(float(prev["close"]) - float(prev["open"]))
-        if bullish and in_zone and float(prev["close"]) < float(prev["open"]) and c > float(prev["open"]) \
+        if "engulfing" in allowed and bullish and in_zone and float(prev["close"]) < float(prev["open"]) and c > float(prev["open"]) \
                 and o <= float(prev["close"]) + tol / 4 and body > prev_body:
             return fire("engulfing")
         lower_wick = min(o, c) - l
-        if in_zone and lower_wick >= 2 * body and (c - l) / rng >= 0.6:
+        if "pin_bar" in allowed and in_zone and lower_wick >= 2 * body and (c - l) / rng >= 0.6:
             return fire("pin_bar")
         pull_high = float(df["high"].iloc[-5:-1].max())
-        if bullish and c > pull_high and l >= zone_lo - tol * 2:
+        if "break" in allowed and bullish and c > pull_high and l >= zone_lo - tol * 2:
             return fire("break_high")
         res.note = "in the zone – no 15-minute confirmation yet"
     else:
@@ -131,17 +136,17 @@ def evaluate(side: str, zone_lo: float, zone_hi: float, atr: float, m15: pd.Data
             res.note = "price has moved away from the zone – no entry down here"
             return res
         above_recently = bool((df["close"].iloc[-7:-1] > ema20.iloc[-7:-1]).any())
-        if bearish and c < float(ema20.iloc[-1]) and above_recently and c < float(prev["close"]):
+        if "ema_reclaim" in allowed and bearish and c < float(ema20.iloc[-1]) and above_recently and c < float(prev["close"]):
             return fire("ema_reclaim")
         prev_body = abs(float(prev["close"]) - float(prev["open"]))
-        if bearish and in_zone and float(prev["close"]) > float(prev["open"]) and c < float(prev["open"]) \
+        if "engulfing" in allowed and bearish and in_zone and float(prev["close"]) > float(prev["open"]) and c < float(prev["open"]) \
                 and o >= float(prev["close"]) - tol / 4 and body > prev_body:
             return fire("engulfing")
         upper_wick = h - max(o, c)
-        if in_zone and upper_wick >= 2 * body and (h - c) / rng >= 0.6:
+        if "pin_bar" in allowed and in_zone and upper_wick >= 2 * body and (h - c) / rng >= 0.6:
             return fire("pin_bar")
         pull_low = float(df["low"].iloc[-5:-1].min())
-        if bearish and c < pull_low and h <= zone_hi + tol * 2:
+        if "break" in allowed and bearish and c < pull_low and h <= zone_hi + tol * 2:
             return fire("break_low")
         res.note = "in the zone – no 15-minute confirmation yet"
     return res

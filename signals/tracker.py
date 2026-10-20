@@ -168,9 +168,11 @@ class SignalEvent:
 
 class SignalTracker:
     def __init__(self, store: Store, min_conf: int = 45, max_hours: float = 48.0, breakeven_after_tp1: bool = True,
-                 pending_max_hours: float = 12.0, require_trigger: bool = True, spread_usd: float = 0.0, slippage_usd: float = 0.0):
+                 pending_max_hours: float = 12.0, require_trigger: bool = True, spread_usd: float = 0.0, slippage_usd: float = 0.0,
+                 trigger_kinds: tuple[str, ...] | list[str] | None = None):
         self.store = store
         self.min_conf = min_conf
+        self.trigger_kinds = tuple(trigger_kinds) if trigger_kinds else None   # None = every confirmation type
         self.spread_usd = spread_usd          # round-trip spread charged to every closed trade ($/oz)
         self.slippage_usd = slippage_usd      # extra cost when a stop fills ($/oz)
         self.max_hours = max_hours
@@ -352,7 +354,7 @@ class SignalTracker:
         return events
 
     def _try_trigger(self, sig: TradeSignal, tech, m15, now: datetime) -> list[SignalEvent]:
-        res = trig.evaluate(sig.side, sig.zone_lo, sig.zone_hi, tech.atr, m15, now)
+        res = trig.evaluate(sig.side, sig.zone_lo, sig.zone_hi, tech.atr, m15, now, kinds=self.trigger_kinds)
         self.last_trigger = res.to_dict() | {"signal_id": sig.id}
         if res.touched:
             self._mark_touched(sig)

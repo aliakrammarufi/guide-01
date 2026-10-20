@@ -289,7 +289,8 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
             raise HTTPException(status_code=404, detail="no self-check has run yet")
         variants = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest_variants")
         deep = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest_deep")
-        return JSONResponse(bt | {"variants": variants, "deep": deep}, headers={"Cache-Control": "no-store"})
+        deep_v = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest_deep_variants")
+        return JSONResponse(bt | {"variants": variants, "deep": deep, "deep_variants": deep_v}, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/tape")
     async def tape():

@@ -108,7 +108,7 @@ def _bias_from_score(score: int) -> str:
     return "NEUTRAL"
 
 
-def plan_entry(direction: str, tech: TechSnapshot, atr_stop_mult: float = 1.5, atr_target_mult: float = 2.5) -> dict:
+def plan_entry(direction: str, tech: TechSnapshot, atr_stop_mult: float = 1.5, atr_target_mult: float = 2.5, refine: bool = True) -> dict:
     """Where to get in, where it is wrong, where to take profit.
 
     Long: the pullback zone sits between the H1 EMA20 (upper edge) and the nearest
@@ -139,7 +139,7 @@ def plan_entry(direction: str, tech: TechSnapshot, atr_stop_mult: float = 1.5, a
             lo = max(candidates)
         if hi - lo < 0.3 * atr:
             lo = hi - 0.3 * atr
-        lo, confluence = _refine_zone("long", lo, hi, tech, atr)
+        lo, confluence = _refine_zone("long", lo, hi, tech, atr, move=refine)
         mid = (lo + hi) / 2
         stop = lo - 0.5 * atr
         if sup is not None and sup < hi:
@@ -166,7 +166,7 @@ def plan_entry(direction: str, tech: TechSnapshot, atr_stop_mult: float = 1.5, a
             hi = min(candidates)
         if hi - lo < 0.3 * atr:
             hi = lo + 0.3 * atr
-        hi, confluence = _refine_zone("short", lo, hi, tech, atr)
+        hi, confluence = _refine_zone("short", lo, hi, tech, atr, move=refine)
         mid = (lo + hi) / 2
         stop = hi + 0.5 * atr
         if res is not None and res > lo:
@@ -190,9 +190,9 @@ _LEVEL_LABEL = {"PDH": "prev-day high", "PDL": "prev-day low", "PWH": "prev-week
                 "ASIA_H": "Asia high", "ASIA_L": "Asia low", "VWAP": "daily VWAP", "ROUND_BELOW": "round number", "ROUND_ABOVE": "round number"}
 
 
-def _refine_zone(direction: str, lo: float, hi: float, tech: TechSnapshot, atr: float) -> tuple[float, list[str]]:
-    """Pull the far edge of the zone out to a fib 50/61.8 or an order block just beyond it, and list
-    everything that coincides with the zone. Returns (new far edge, confluence)."""
+def _refine_zone(direction: str, lo: float, hi: float, tech: TechSnapshot, atr: float, move: bool = True) -> tuple[float, list[str]]:
+    """Pull the far edge of the zone out to a fib 50/61.8 or an order block just beyond it (only when
+    ``move``), and list everything that coincides with the zone. Returns (new far edge, confluence)."""
     pa = tech.pa
     long = direction == "long"
     far = lo if long else hi
@@ -206,6 +206,8 @@ def _refine_zone(direction: str, lo: float, hi: float, tech: TechSnapshot, atr: 
         return a <= level <= b
 
     def beyond_but_close(level: float) -> bool:    # just past the far edge, within reach
+        if not move:
+            return False
         return (far - 0.5 * atr <= level < far) if long else (far < level <= far + 0.5 * atr)
 
     if pa is not None:
@@ -271,6 +273,7 @@ def build_signal(
     atr_stop_mult: float = 1.5,
     atr_target_mult: float = 2.5,
     session=None,
+    zone_refine: bool = True,
 ) -> Signal:
     total_w = tech_weight + news_weight
     tw, nw = tech_weight / total_w, news_weight / total_w
@@ -319,7 +322,7 @@ def build_signal(
 
     # Entry plan: pullback zone, stop beyond it, targets from the zone middle
     direction = "long" if bias in ("BUY", "STRONG_BUY") else "short" if bias in ("SELL", "STRONG_SELL") else "flat"
-    plan = plan_entry(direction, tech, atr_stop_mult, atr_target_mult)
+    plan = plan_entry(direction, tech, atr_stop_mult, atr_target_mult, refine=zone_refine)
     stop, t1, t2 = plan.get("stop"), plan.get("target1"), plan.get("target2")
 
     return Signal(
