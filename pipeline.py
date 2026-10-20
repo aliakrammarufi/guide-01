@@ -100,10 +100,12 @@ class Pipeline:
         else:
             zone = (f" · zone {signal.zone_lo:,.1f}–{signal.zone_hi:,.1f} [{' · '.join(signal.confluence) or 'no confluence'}]"
                     if signal.zone_lo is not None else "")
+            m = getattr(tech, "macro", None)
+            macro = f" · macro {m.get('label')} {m.get('score', 0):+d}" if m else " · macro n/a"
             line = (f"Read: {tech.price:,.1f} · tech {tech.score:+d} · {signal.bias} {signal.confidence}% · H4 {pa.h4.trend} ({pa.h4.label}) · "
                     f"H1 {pa.h1.trend} ({pa.h1.label}){' · BOS ' + pa.h1.bos if pa.h1.bos else ''}{' · CHoCH ' + pa.h1.choch if pa.h1.choch else ''} · "
                     f"{pa.regime} ADX {pa.adx:.0f} · ATR {pa.atr_pct:.0f}pct{' · ' + pa.divergence + ' div' if pa.divergence else ''}"
-                    f"{' · ' + pa.candle if pa.candle else ''}{zone}")
+                    f"{' · ' + pa.candle if pa.candle else ''}{macro}{zone}")
         if line != self._last_read:
             log.info(line)
             self._last_read = line
