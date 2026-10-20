@@ -245,12 +245,11 @@ def _fetch_twelvedata(symbol: str, api_key: str) -> MarketData:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
-def fetch_market_data() -> MarketData:
-    """Fetch hourly + daily XAU/USD data using the configured provider.
+_PROVIDER_CACHE: dict = {"at": 0.0, "data": None}
+_PROVIDER_LOCK = __import__("threading").Lock()
 
-    Falls back to yfinance if Twelve Data fails, so a bad key never leaves
-    the bot without prices.
-    """
+
+def _fetch_provider() -> MarketData:
     data: MarketData | None = None
     if settings.data_provider == "twelvedata":
         try:
@@ -262,6 +261,42 @@ def fetch_market_data() -> MarketData:
     # Put the bars on the same basis as the live tick (spot XAU/USD) when they differ
     if settings.spot_basis:
         data = to_spot_basis(data, spot_reference())
+    return data
+
+
+def fetch_market_data(max_age_sec: float = 0.0) -> MarketData:
+    """Hourly + daily (+15-minute) XAU/USD bars.
+
+    The provider's bars (yfinance, or Twelve Data with a yfinance fallback) are fetched at most once per
+    ``max_age_sec`` – a fast refresh passes ~150 s so the analysis can run every minute without hammering
+    Yahoo. On top of them the live tick-built 15-minute and hourly bars are overlaid (``market.bars``), so
+    the last bars are current to the second, and the macro context is attached.
+    """
+    import copy
+    import time as _time
+
+    with _PROVIDER_LOCK:
+        cached = _PROVIDER_CACHE["data"]
+        fresh_enough = cached is not None and max_age_sec > 0 and _time.time() - _PROVIDER_CACHE["at"] < max_age_sec
+    if fresh_enough:
+        data = copy.copy(cached)
+        data.hourly, data.daily = cached.hourly.copy(), cached.daily.copy()
+        data.m15 = cached.m15.copy() if cached.m15 is not None else None
+    else:
+        data = _fetch_provider()
+        with _PROVIDER_LOCK:
+            _PROVIDER_CACHE["data"], _PROVIDER_CACHE["at"] = copy.copy(data), _time.time()
+            _PROVIDER_CACHE["data"].hourly, _PROVIDER_CACHE["data"].daily = data.hourly.copy(), data.daily.copy()
+            _PROVIDER_CACHE["data"].m15 = data.m15.copy() if data.m15 is not None else None
+    try:
+        from market import bars as live_bars
+
+        if live_bars.LIVE is not None and data.basis_known:
+            data.m15 = live_bars.merge_live(data.m15, live_bars.LIVE.frame(900), 900)
+            data.hourly = live_bars.merge_live(data.hourly, live_bars.LIVE.frame(3600), 3600)
+            data.source = data.source + "+live" if "+live" not in data.source else data.source
+    except Exception as exc:  # noqa: BLE001 – the live overlay is an improvement, never a dependency
+        log.debug("live bar overlay skipped: %s", exc)
     if settings.macro_context:
         from market.macro import current_macro
 

@@ -75,12 +75,19 @@ async def main_async(args: argparse.Namespace) -> int:
     # so stop / take-profit checks always see every tick.
     engine = None
     if not args.demo:
+        from market import bars as live_bars
         from market.ticks import TickEngine
-        from signals.live import tracker_feed
+        from signals.live import bar_builder_feed, bar_close_watch, minute_refresh, tracker_feed
 
         engine = TickEngine()
         await engine.start()
         tasks.append(asyncio.create_task(tracker_feed(engine, cache.tracker), name="tracker-feed"))
+        # Candles from the tick stream (current to the second) + a chart read seconds after every 15-minute
+        # close and every minute in between – so confirmations are caught at once, not minutes later.
+        live_bars.LIVE = live_bars.BarBuilder()
+        tasks.append(asyncio.create_task(bar_builder_feed(engine, live_bars.LIVE), name="bar-builder"))
+        tasks.append(asyncio.create_task(bar_close_watch(cache), name="bar-close"))
+        tasks.append(asyncio.create_task(minute_refresh(cache), name="minute-refresh"))
 
     async def guarded(coro, name: str):
         """A crash in one component (e.g. an invalid Telegram token) must not take the others down."""

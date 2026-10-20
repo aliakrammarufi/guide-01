@@ -151,6 +151,8 @@ class SignalEvent:
             return f"Bias flipped · closed @ {self.price:,.1f} ({s.result_r:+.2f}R)"
         if k == "expired":
             return f"Expired after max hold · closed @ {self.price:,.1f} ({s.result_r:+.2f}R)"
+        if k == "touched":
+            return f"Price reached the zone {s.zone_lo:,.1f}–{s.zone_hi:,.1f} · watching for a 15-minute confirmation (no trade yet)"
         if k == "missed":
             return f"Setup missed · price ran to {self.price:,.1f} without a pullback into the zone (no trade)"
         if k == "invalidated":
@@ -240,10 +242,11 @@ class SignalTracker:
                 log.exception("signal listener failed")
         return ev
 
-    def _mark_touched(self, sig: TradeSignal) -> None:
+    def _mark_touched(self, sig: TradeSignal, price: float | None = None) -> None:
         if not sig.touched:
             sig.touched = True
             self.store.update_signal(sig)
+            self._emit("touched", sig, price if price is not None else sig.entry)
 
     def _close(self, sig: TradeSignal, status: str, price: float, now: datetime) -> SignalEvent:
         sig.status = status
@@ -357,7 +360,7 @@ class SignalTracker:
         res = trig.evaluate(sig.side, sig.zone_lo, sig.zone_hi, tech.atr, m15, now, kinds=self.trigger_kinds)
         self.last_trigger = res.to_dict() | {"signal_id": sig.id}
         if res.touched:
-            self._mark_touched(sig)
+            self._mark_touched(sig, tech.price)
         if not res.fired:
             return []
         return self._activate(sig, res.entry or tech.price, now, res.note, atr=tech.atr)
@@ -424,7 +427,7 @@ class SignalTracker:
             elif pend.chase is not None and not pend.touched and ((long and price >= pend.chase) or (not long and price <= pend.chase)):
                 events.append(self._close(pend, "missed", price, now))
             elif pend.zone_lo <= price <= pend.zone_hi:
-                self._mark_touched(pend)
+                self._mark_touched(pend, price)
         return events
 
     # ---- demo ---------------------------------------------------------------

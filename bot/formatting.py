@@ -616,6 +616,7 @@ def format_signal_event(e, sizing: Sizing | None = None) -> str:
     s = e.signal
     head = {
         "setup": f"📐 <b>NEW {s.side} SETUP</b> — wait for the zone",
+        "touched": f"👀 <b>{s.side} ZONE REACHED</b> — watch the 15-minute chart for a confirmation",
         "triggered": f"📡 <b>{s.side} CONFIRMED — LIVE CALL</b>",
         "tp1": "🎯 <b>TAKE PROFIT 1 HIT</b>",
         "tp2": "🏁 <b>TAKE PROFIT 2 HIT — closed</b>",

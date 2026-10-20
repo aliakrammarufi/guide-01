@@ -44,14 +44,15 @@ class ReportCache:
             return True
         return (datetime.now(timezone.utc) - self._report.generated_at).total_seconds() > self.max_age_sec
 
-    def refresh_sync(self, with_briefing: bool = True, refresh_news: bool = True) -> Report:
+    def refresh_sync(self, with_briefing: bool = True, refresh_news: bool = True, fast: bool = False) -> Report:
         """Run the pipeline (blocking). Only one refresh runs at a time; callers that queued up behind a
-        refresh that just finished get that fresh report instead of running the pipeline again."""
+        refresh that just finished get that fresh report instead of running the pipeline again.
+        ``fast`` reuses the provider's bars for up to 150 s (the live tick bars are always fresh)."""
         asked_at = datetime.now(timezone.utc)
         st = self.pipeline.settings
         with self._lock:
             rep = self._report
-            if rep is not None and rep.generated_at >= asked_at - timedelta(seconds=20) \
+            if rep is not None and rep.generated_at >= asked_at - timedelta(seconds=20 if not fast else 5) \
                     and (not with_briefing or rep.briefing is not None or not st.ai_enabled):
                 return rep
             # A fresh briefing costs API tokens: write one at most every BRIEFING_INTERVAL_MIN unless the bias changed.
@@ -61,7 +62,8 @@ class ReportCache:
                 carry = rep
                 with_briefing = False
             try:
-                report = self.pipeline.run(with_briefing=with_briefing, refresh_news=refresh_news)
+                report = self.pipeline.run(with_briefing=with_briefing, refresh_news=refresh_news,
+                                           bars_max_age_sec=150.0 if fast else 0.0)
                 self.last_error = None
             except Exception as exc:  # noqa: BLE001
                 self.last_error = str(exc)
@@ -86,8 +88,8 @@ class ReportCache:
             self._history = self._history[-200:]
             return report
 
-    async def refresh(self, with_briefing: bool = True, refresh_news: bool = True) -> Report:
-        return await asyncio.to_thread(self.refresh_sync, with_briefing, refresh_news)
+    async def refresh(self, with_briefing: bool = True, refresh_news: bool = True, fast: bool = False) -> Report:
+        return await asyncio.to_thread(self.refresh_sync, with_briefing, refresh_news, fast)
 
     async def get(self, max_age_sec: int | None = None, with_briefing: bool = True) -> Report:
         """Return a fresh-enough report, refreshing if needed."""

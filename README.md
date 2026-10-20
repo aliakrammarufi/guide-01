@@ -187,6 +187,12 @@ still works – you just get rule-based scores and no written briefing.
   them answer "304 Not Modified" instead of resending the whole feed every scan.
 * Tick-driven events (setup confirmed, TP1, TP2, stop) reach Telegram within a second of the tick; the
   scheduled report and the news scan are separate.
+* **Live candles.** The tick stream also builds the bot's own 15-minute and hourly candles
+  (`market/bars.py`); they are overlaid on the provider's bars (complete bars with enough ticks replace
+  them, the forming bar is extended), so the chart read is current to the second. A fast read runs a few
+  seconds after every 15-minute close (confirmations are caught at once) and every minute in between,
+  reusing the provider's bars for up to 150 s so Yahoo is not hit more often. A **"zone reached"** event is
+  sent the moment price enters a setup's zone.
 
 ## Data sources
 

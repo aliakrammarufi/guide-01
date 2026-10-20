@@ -1210,7 +1210,7 @@
       if (sigSeenEvents.has(e.id)) return; sigSeenEvents.add(e.id);
       if (sigFirst) return;
       const cls = (e.kind === 'opened' || e.kind === 'triggered' || e.kind === 'setup') ? (e.side === 'BUY' ? 'bull' : 'bear') : (e.kind === 'tp1' || e.kind === 'tp2') ? 'bull' : e.kind === 'stopped' ? 'bear' : '';
-      toast({ setup: `NEW ${e.side} SETUP · wait for the zone`, triggered: `${e.side} CONFIRMED · LIVE CALL`, opened: `NEW ${e.side} SIGNAL`, tp1: 'TP1 HIT', tp2: 'TP2 HIT', stopped: 'STOPPED OUT', flipped: 'CALL CLOSED', expired: 'CALL EXPIRED', missed: 'SETUP MISSED · no trade', invalidated: 'SETUP INVALIDATED · no trade', cancelled: 'SETUP CANCELLED', stale: 'SETUP EXPIRED' }[e.kind] || e.kind, e.text, cls, 14000);
+      toast({ setup: `NEW ${e.side} SETUP · wait for the zone`, touched: `${e.side} ZONE REACHED · watch for a confirmation`, triggered: `${e.side} CONFIRMED · LIVE CALL`, opened: `NEW ${e.side} SIGNAL`, tp1: 'TP1 HIT', tp2: 'TP2 HIT', stopped: 'STOPPED OUT', flipped: 'CALL CLOSED', expired: 'CALL EXPIRED', missed: 'SETUP MISSED · no trade', invalidated: 'SETUP INVALIDATED · no trade', cancelled: 'SETUP CANCELLED', stale: 'SETUP EXPIRED' }[e.kind] || e.kind, e.text, cls, 14000);
       slog(`SIGNAL ${e.kind.toUpperCase()} · ${e.text}`, cls === 'bull' ? 'up' : cls === 'bear' ? 'down' : 'sys');
     });
     sigFirst = false;

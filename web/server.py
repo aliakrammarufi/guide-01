@@ -317,6 +317,7 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
             "stale": cache.is_stale(),
             "error": cache.last_error,
             "backup": cache.backup.status() if getattr(cache, "backup", None) else {"enabled": False},
+            "live_bars": __import__("market.bars", fromlist=["LIVE"]).LIVE.status() if __import__("market.bars", fromlist=["LIVE"]).LIVE else None,
             "now": datetime.now(timezone.utc).isoformat(),
         }
 

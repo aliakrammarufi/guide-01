@@ -410,7 +410,12 @@ def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: di
     rows = []
     if base_summary is not None:
         rows.append({"name": "current rules", "overrides": {}, "summary": _brief(base_summary)})
+    prior = store.get_state(key) or {}
+    done = {r["name"]: r for r in (prior.get("variants") or [])} if prior.get("base_params") == base.to_dict() else {}
     for name, overrides in VARIANTS:
+        if name in done:                              # resume an interrupted sweep
+            rows.append(done[name])
+            continue
         p = ReplayParams(**{**base.__dict__, **overrides})
         log.info("Self-check variant '%s'…", name)
         try:
