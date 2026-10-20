@@ -87,17 +87,34 @@ def _get(client: httpx.Client, url: str, retries: int = 3) -> dict | None:
     return None
 
 
+def _bucket_url(kind: str, code: str, parts: list[int], start: datetime) -> str:
+    """Completed buckets are addressed by date path; the bucket that contains *now* only answers to ``?from=``."""
+    now = datetime.now(timezone.utc)
+    span = {"minute": timedelta(days=1), "day": timedelta(days=366)}[kind]
+    if kind == "day":
+        active = start.year == now.year
+    else:
+        active = start <= now < start + span
+    base = f"{API}/candles/{kind}/{code}/BID"
+    if active:
+        return f"{base}?from={int(start.timestamp() * 1000)}"
+    return base + "/" + "/".join(str(x) for x in parts)
+
+
 def fetch_minute_day(client: httpx.Client, day: date, code: str = CODE) -> pd.DataFrame:
     """One UTC day of 1-minute candles, aggregated to 15-minute bars."""
-    payload = _get(client, f"{API}/candles/minute/{code}/BID/{day.year}/{day.month}/{day.day}")
+    start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+    payload = _get(client, _bucket_url("minute", code, [day.year, day.month, day.day], start))
     m1 = decode_candles(payload) if payload else pd.DataFrame(columns=list(AGG), dtype=float)
     if not len(m1):
         return m1
-    return m1.resample("15min", label="left", closed="left").agg(AGG).dropna(subset=["close"])
+    m15 = m1.resample("15min", label="left", closed="left").agg(AGG).dropna(subset=["close"])
+    cutoff = pd.Timestamp(datetime.now(timezone.utc)).floor("15min")
+    return m15[m15.index < cutoff]                        # never keep the bar that is still forming
 
 
 def fetch_daily_year(client: httpx.Client, year: int, code: str = CODE) -> pd.DataFrame:
-    payload = _get(client, f"{API}/candles/day/{code}/BID/{year}")
+    payload = _get(client, _bucket_url("day", code, [year], datetime(year, 1, 1, tzinfo=timezone.utc)))
     return decode_candles(payload) if payload else pd.DataFrame(columns=list(AGG), dtype=float)
 
 
