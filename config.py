@@ -200,6 +200,8 @@ class Settings:
     # Session filter: no new entries in the dead zone / weekend / Friday evening / Sunday open, and around high-impact news
     session_filter: bool = field(default_factory=lambda: _env_bool("SESSION_FILTER", True))
     asia_entries: bool = field(default_factory=lambda: _env_bool("ASIA_ENTRIES", True))
+    # Sessions in which no new call is opened (names: Asia, London, London/NY overlap, New York)
+    blocked_sessions: list[str] = field(default_factory=lambda: _env_list("BLOCKED_SESSIONS", []))
     news_blackout_before_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_BEFORE_MIN", 30))
     news_blackout_after_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_AFTER_MIN", 15))
     # Trading costs charged to every result (replay and live stats): round-trip spread and the slippage

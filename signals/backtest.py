@@ -63,6 +63,7 @@ class ReplayParams:
     macro: bool = True                    # dollar / yields / equities context in the score (needs their daily history)
     trigger_kinds: tuple = ()             # () = every confirmation type
     zone_refine: bool = True              # fib / order-block zone refinement
+    blocked_sessions: tuple = ()          # sessions with no new entries
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
     method: int = 5                       # replay/accounting/engine version: a change invalidates stored results
@@ -70,6 +71,7 @@ class ReplayParams:
     def to_dict(self) -> dict:
         d = {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
         d["trigger_kinds"] = list(d["trigger_kinds"])
+        d["blocked_sessions"] = list(d["blocked_sessions"])
         return d
 
 
@@ -206,7 +208,7 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
                 log.debug("replay analysis failed at %s: %s", t, exc)
                 continue
             last_tech = tech
-            session = session_info(now=tnow, events=[], asia_entries=p.asia_entries) if p.session_filter else None
+            session = session_info(now=tnow, events=[], asia_entries=p.asia_entries, blocked=tuple(p.blocked_sessions) or None) if p.session_filter else None
             sig = build_signal(tech, news, tech_weight=p.tech_weight, news_weight=p.news_weight,
                                atr_stop_mult=p.atr_stop_mult, atr_target_mult=p.atr_target_mult, session=session,
                                zone_refine=p.zone_refine)
@@ -365,6 +367,7 @@ def params_from_settings(settings) -> ReplayParams:
         session_filter=settings.session_filter, asia_entries=settings.asia_entries,
         spread_usd=settings.spread_usd, slippage_usd=settings.slippage_usd, macro=settings.macro_context,
         trigger_kinds=tuple(settings.trigger_kinds), zone_refine=settings.zone_refine,
+        blocked_sessions=tuple(settings.blocked_sessions),
     )
 
 
@@ -379,6 +382,8 @@ VARIANTS: list[tuple[str, dict]] = [
     ("no macro context", {"macro": False}),
     ("no engulfing confirmation", {"trigger_kinds": ("ema_reclaim", "pin_bar", "break")}),
     ("structure-break confirmations only", {"trigger_kinds": ("break",)}),
+    ("no London/NY-overlap entries", {"blocked_sessions": ("London/NY overlap",)}),
+    ("break-only + no overlap entries", {"trigger_kinds": ("break",), "blocked_sessions": ("London/NY overlap",)}),
     ("no zone refinement (fib / order block)", {"zone_refine": False}),
 ]
 VARIANTS_KEY = "backtest_variants"

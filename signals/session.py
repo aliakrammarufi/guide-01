@@ -70,7 +70,8 @@ def _window(hour: int):
 
 
 def session_info(now: datetime | None = None, events: list | None = None, *,
-                 asia_entries: bool = True, blackout_before_min: int = 30, blackout_after_min: int = 15) -> SessionInfo:
+                 asia_entries: bool = True, blackout_before_min: int = 30, blackout_after_min: int = 15,
+                 blocked: tuple[str, ...] | list[str] | None = None) -> SessionInfo:
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     wd, hour = now.weekday(), now.hour      # Monday = 0
     reasons: list[str] = []
@@ -104,6 +105,9 @@ def session_info(now: datetime | None = None, events: list | None = None, *,
         reasons.append("London session – good liquidity")
     elif name == "New York":
         reasons.append("New York afternoon – decent liquidity, fades into the close")
+    if blocked and name in blocked:
+        allow = False
+        reasons.append(f"{name} entries are switched off (BLOCKED_SESSIONS)")
     next_change = now.replace(hour=end % 24, minute=0, second=0, microsecond=0)
     if end >= 24 or next_change <= now:
         next_change += timedelta(days=1)

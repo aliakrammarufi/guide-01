@@ -135,7 +135,8 @@ class Pipeline:
         if self.settings.session_filter:
             session = session_info(events=events, asia_entries=self.settings.asia_entries,
                                    blackout_before_min=self.settings.news_blackout_before_min,
-                                   blackout_after_min=self.settings.news_blackout_after_min)
+                                   blackout_after_min=self.settings.news_blackout_after_min,
+                                   blocked=self.settings.blocked_sessions or None)
         signal = build_signal(
             tech,
             news,
