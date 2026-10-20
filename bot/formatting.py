@@ -478,17 +478,35 @@ def format_alert_event(e) -> str:
 # trade signals
 # ---------------------------------------------------------------------------
 STATUS_LABEL = {
-    "pending": "SETUP", "active": "LIVE", "tp1": "TP 1 HIT · stop at break-even", "tp2": "TP 2 HIT ✅",
+    "pending": "SETUP", "active": "LIVE", "tp1": "TP 1 HIT · half booked", "tp2": "TP 2 HIT ✅",
     "stopped": "STOPPED OUT ❌", "flipped": "CLOSED · bias flipped", "expired": "CLOSED · max hold",
     "missed": "MISSED · no trade", "invalidated": "INVALIDATED · no trade", "cancelled": "CANCELLED · no trade",
     "stale": "EXPIRED · no trade",
 }
+BREAKEVEN_AFTER_TP1 = True     # mirrors SIGNAL_BREAKEVEN_AFTER_TP1 (set by state.py) – only changes the wording here
+
+
+def status_label(t) -> str:
+    if t.status == "tp1":
+        return "TP 1 HIT · stop at break-even" if t.sl_current is not None else "TP 1 HIT · half booked"
+    return STATUS_LABEL.get(t.status, t.status.upper())
+
+
+def management_line(t) -> str:
+    """What to do with the position from here, matching how the tracker manages it."""
+    if t.status == "active":
+        after = "move the stop to break-even" if BREAKEVEN_AFTER_TP1 else f"keep the stop at {t.sl:,.1f}"
+        return f"Plan: book half at TP 1, {after}, let the rest run to TP 2."
+    if t.status == "tp1":
+        stop = "at break-even" if t.sl_current is not None else f"stays at {t.sl:,.1f}"
+        return f"Half booked at TP 1 · stop {stop} · the rest runs to TP 2."
+    return ""
 
 
 def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = None) -> str:
     side = "🟢 BUY" if t.side == "BUY" else "🔴 SELL"
     sgn = t.sign
-    title = f"<b>{side} XAU/USD — {STATUS_LABEL.get(t.status, t.status.upper())}</b>"
+    title = f"<b>{side} XAU/USD — {status_label(t)}</b>"
 
     if t.status == "pending":
         mid = t.entry
@@ -537,6 +555,9 @@ def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = N
         note = sizing_note(sizing, t.entry, t.tp1, t.tp2)
         if note:
             tail.append(note)
+        plan = management_line(t)
+        if plan:
+            tail.append(plan)
     if t.trigger_note:
         tail.append(f"Confirmed by: <b>{escape(t.trigger_note)}</b>")
     if getattr(t, "confluence", ""):
@@ -581,7 +602,7 @@ def format_signals_overview(active, history: list, stats: dict, price: float | N
 def format_mark(sig, mark: str) -> str:
     verb = "Marked as taken" if mark == "took" else "Marked as skipped"
     when = (sig.triggered_at or sig.opened_at).strftime("%d %b %H:%M UTC")
-    return (f"✅ <b>{verb}:</b> #{sig.id} {sig.side} @ {sig.entry:,.1f} ({when}) · {escape(STATUS_LABEL.get(sig.status, sig.status))}\n"
+    return (f"✅ <b>{verb}:</b> #{sig.id} {sig.side} @ {sig.entry:,.1f} ({when}) · {escape(status_label(sig))}\n"
             f"<i>/signals shows the results of the calls you took separately.</i>")
 
 
@@ -713,8 +734,10 @@ def _deep_section(deep: dict | None) -> str:
     return out
 
 
-def _variants_table(rows_v: list, title: str) -> str:
+def _variants_table(rows_v: list, title: str, complete: bool | None = None) -> str:
+    """One row per management; profit factor / drawdown and the per-year totals (multi-year sweeps) underneath."""
     trows = [("", "Trades", "Win", "Avg", "Total")]
+    detail = []
     for v in rows_v:
         b = v.get("summary") or {}
         if not b.get("count"):
@@ -722,7 +745,19 @@ def _variants_table(rows_v: list, title: str) -> str:
         wr = f"{b['win_rate']:.0f}%" if b.get("win_rate") is not None else "–"
         trows.append((v["name"], str(b["count"]), wr, _r(b["avg_r"]) if b.get("avg_r") is not None else "–",
                       _r(b["total_r"], 1) if b.get("total_r") is not None else "–"))
-    return f"<b>{title}</b>\n{_pre(trows, right=(1, 2, 3, 4))}" if len(trows) > 1 else ""
+        pf = f"PF {b['profit_factor']:.2f}" if b.get("profit_factor") is not None else "PF –"
+        dd = f"DD {b['max_drawdown_r']:.1f}R" if b.get("max_drawdown_r") is not None else ""
+        years = b.get("by_year") or {}
+        yr = " · ".join(f"{y} {_r(x.get('total_r', 0.0), 1)}" for y, x in years.items() if x.get("count"))
+        detail.append(f"• <b>{escape(v['name'])}</b> — {pf}{' · ' + dd if dd else ''}" + (f"\n   {yr}" if yr else ""))
+    if len(trows) <= 1:
+        return ""
+    out = f"<b>{title}</b>\n{_pre(trows, right=(1, 2, 3, 4))}"
+    if detail:
+        out += "\n" + "\n".join(detail)
+    if complete is False:
+        out += "\n<i>Still running — more rows arrive as each replay finishes.</i>"
+    return out
 
 
 def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | None = None, deep: dict | None = None,
@@ -763,10 +798,10 @@ def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | Non
     deep_text = _deep_section(deep)
     if deep_text:
         parts.append(deep_text)
-    dv = _variants_table((deep_variants or {}).get("variants") or [], "OTHER MANAGEMENTS — multi-year")
+    dv = _variants_table((deep_variants or {}).get("variants") or [], "OTHER MANAGEMENTS — multi-year", (deep_variants or {}).get("complete"))
     if dv:
         parts.append(dv)
-    vt = _variants_table((variants or {}).get("variants") or [], "OTHER MANAGEMENTS — last 60 days")
+    vt = _variants_table((variants or {}).get("variants") or [], "OTHER MANAGEMENTS — last 60 days", (variants or {}).get("complete"))
     if vt:
         parts.append(vt)
     gen = bt.get("generated_at")

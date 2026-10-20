@@ -189,7 +189,8 @@ class Settings:
     # --- Trade signals (BUY / SELL calls with SL, TP1, TP2) -----------------
     signal_min_conf: int = field(default_factory=lambda: _env_int("SIGNAL_MIN_CONF", 45))
     signal_max_hours: float = field(default_factory=lambda: _env_float("SIGNAL_MAX_HOURS", 48.0))
-    signal_breakeven_after_tp1: bool = field(default_factory=lambda: _env_bool("SIGNAL_BREAKEVEN_AFTER_TP1", True))
+    # After TP1 keep the original stop (False) or move it to break-even (True). The 3-year replay favours False.
+    signal_breakeven_after_tp1: bool = field(default_factory=lambda: _env_bool("SIGNAL_BREAKEVEN_AFTER_TP1", False))
     # Entry timing: a call is a *setup* (zone) first and goes live only on a 15-minute confirmation
     signal_require_trigger: bool = field(default_factory=lambda: _env_bool("SIGNAL_REQUIRE_TRIGGER", True))
     # Which 15-minute confirmations count: ema_reclaim, engulfing, pin_bar, break (empty = all)

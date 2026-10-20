@@ -142,7 +142,8 @@ class SignalEvent:
         if k == "triggered":
             return f"{s.side} XAU/USD @ {s.entry:,.1f} · {s.trigger_note} · SL {s.sl:,.1f} · TP1 {s.tp1:,.1f} · TP2 {s.tp2:,.1f}"
         if k == "tp1":
-            return f"TP1 hit @ {self.price:,.1f} ({s.r_at(self.price):+.2f}R) · stop moved to break-even {s.effective_sl:,.1f}"
+            stop = f"stop moved to break-even {s.effective_sl:,.1f}" if s.sl_current is not None else f"stop stays at {s.effective_sl:,.1f}"
+            return f"TP1 hit @ {self.price:,.1f} ({s.r_at(self.price):+.2f}R) · half booked · {stop} · rest runs to TP2 {s.tp2:,.1f}"
         if k == "tp2":
             return f"TP2 hit @ {self.price:,.1f} · closed {s.result_r:+.2f}R"
         if k == "stopped":

@@ -165,6 +165,7 @@ def signals_json(tracker, session=None) -> dict:
         "trigger": tracker.last_trigger,
         "session": session.to_dict() if session is not None else None,
         "selfcheck": selfcheck_summary(tracker.store),
+        "breakeven_after_tp1": bool(getattr(tracker, "breakeven_after_tp1", True)),
     }
 
 

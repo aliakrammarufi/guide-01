@@ -96,3 +96,20 @@ def test_decode_dukascopy_candles_and_period_breakdown():
                                 result_r=1.5 if i % 3 else -1.0, triggered_at=opened))
     res = summarize(rows, {}, ReplayParams())
     assert "by_year" in res and set(res["by_year"]) == {"2024", "2025"} and "by_quarter" in res
+
+
+def test_applicable_variants_skip_the_current_rules_and_duplicates():
+    from signals.backtest import VARIANTS, ReplayParams, applicable_variants, _brief
+
+    base = ReplayParams(breakeven_after_tp1=True)
+    names = [n for n, _o, _p in applicable_variants(base)]
+    assert "break-even stop after TP1" not in names and "no break-even stop" in names
+    assert "no break-even + break-only" in names                       # a real combination when the base has break-even
+    base2 = ReplayParams(breakeven_after_tp1=False)
+    names2 = [n for n, _o, _p in applicable_variants(base2)]
+    assert "no break-even stop" not in names2 and "break-even stop after TP1" in names2
+    assert "no break-even + break-only" not in names2                  # same as "structure-break confirmations only" now
+    assert "structure-break confirmations only" in names2
+    assert len(names2) < len(VARIANTS)
+    b = _brief({"count": 3, "total_r": 1.0}, {"2025": {"count": 3, "win_rate": 66.7, "total_r": 1.0, "avg_r": 0.33}})
+    assert b["by_year"] == {"2025": {"count": 3, "win_rate": 66.7, "total_r": 1.0}} and b["count"] == 3

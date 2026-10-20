@@ -25,6 +25,9 @@ class ReportCache:
                                      pending_max_hours=st.signal_pending_max_hours, require_trigger=st.signal_require_trigger,
                                      spread_usd=st.spread_usd, slippage_usd=st.slippage_usd,
                                      trigger_kinds=st.trigger_kinds or None)
+        from bot import formatting as _fmt
+
+        _fmt.BREAKEVEN_AFTER_TP1 = bool(st.signal_breakeven_after_tp1)     # the call wording follows the management rule
         self._report: Report | None = None
         self._lock = threading.Lock()
         self._history: list[dict] = []   # recent signals (for the dashboard sparkline)

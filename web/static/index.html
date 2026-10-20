@@ -1084,7 +1084,7 @@
 
   // ================= trade signals (BUY / SELL calls) =================
   let sigState = null, sigSeenEvents = new Set(), sigFirst = true;
-  const STATUS_TXT = { pending: 'SETUP · WAITING FOR THE ZONE', active: 'LIVE', tp1: 'TP1 HIT · STOP AT BREAK-EVEN', tp2: 'TP2 HIT', stopped: 'STOPPED OUT', flipped: 'CLOSED · BIAS FLIPPED', expired: 'CLOSED · EXPIRED', missed: 'MISSED · NO TRADE', invalidated: 'INVALIDATED · NO TRADE', cancelled: 'CANCELLED · NO TRADE', stale: 'EXPIRED · NO TRADE' };
+  const STATUS_TXT = { pending: 'SETUP · WAITING FOR THE ZONE', active: 'LIVE', tp1: 'TP1 HIT · HALF BOOKED', tp2: 'TP2 HIT', stopped: 'STOPPED OUT', flipped: 'CLOSED · BIAS FLIPPED', expired: 'CLOSED · EXPIRED', missed: 'MISSED · NO TRADE', invalidated: 'INVALIDATED · NO TRADE', cancelled: 'CANCELLED · NO TRADE', stale: 'EXPIRED · NO TRADE' };
   // ---- position sizing (kept in this browser only)
   const CCY_SYM = { USD: '$', CAD: 'C$', EUR: '€', GBP: '£', AUD: 'A$', NZD: 'NZ$', CHF: 'CHF ', JPY: '¥', SGD: 'S$' };
   function riskSettings() {
@@ -1159,12 +1159,12 @@
     renderSession(sg.session); renderTrigger(sg); renderSelfcheck(sg.selfcheck);
     if (sg.sizing && sg.sizing.account) { const ai = $('risk-acct'), pi = $('risk-pct'); if (ai && !ai.value) ai.placeholder = `${sg.sizing.account} ${sg.sizing.currency}`; if (pi && !pi.value) pi.placeholder = sg.sizing.risk_pct; }
     if (a) {
-      const buy = a.side === 'BUY', pending = a.status === 'pending';
+      const buy = a.side === 'BUY', pending = a.status === 'pending', BE = sg.breakeven_after_tp1 !== false;
       box.className = 'sig-active ' + (buy ? 'buy' : 'sell') + (pending ? ' setup' : '');
       const dir = buy ? 'Buy' : 'Sell', pull = buy ? 'dip' : 'bounce';
       const plan = pending
         ? `<b>Setup, not a trade yet.</b> Wait for a ${pull} into <b>${fmt(a.zone_lo, 1)} – ${fmt(a.zone_hi, 1)}</b> and a 15-minute confirmation (EMA reclaim, engulfing candle, rejection wick or break of the pullback ${buy ? 'high' : 'low'}). Don't chase beyond <b>${fmt(a.chase, 1)}</b> — if price runs there first, the setup is missed and no trade is taken. When it confirms, the call goes <b>LIVE</b> here and on Telegram with the exact entry.`
-        : `<b>${dir}</b> entered at <b>${fmt(a.entry, 1)}</b>${a.trigger_note ? ` (${esc(a.trigger_note)})` : ''}. Take half off at <b>TP1 ${fmt(a.tp1, 1)}</b> and move the stop to break-even, let the rest run to <b>TP2 ${fmt(a.tp2, 1)}</b>. Hard stop <b>${fmt(a.sl_current, 1)}</b>. The call closes automatically if the engine turns ${buy ? 'bearish' : 'bullish'}.`;
+        : `<b>${dir}</b> entered at <b>${fmt(a.entry, 1)}</b>${a.trigger_note ? ` (${esc(a.trigger_note)})` : ''}. Take half off at <b>TP1 ${fmt(a.tp1, 1)}</b>${BE ? ' and move the stop to break-even' : ' and keep the stop where it is'}, let the rest run to <b>TP2 ${fmt(a.tp2, 1)}</b>. Hard stop <b>${fmt(a.sl_current, 1)}</b>. The call closes automatically if the engine turns ${buy ? 'bearish' : 'bullish'}.`;
       const entryCell = pending
         ? `<div class="sig-lv"><div class="k">ENTRY ZONE</div><div class="v">${fmt(a.zone_lo, 1)}–${fmt(a.zone_hi, 1)}</div><div class="d">1R = ${fmt(a.risk, 1)}</div></div>`
         : `<div class="sig-lv"><div class="k">ENTRY</div><div class="v">${fmt(a.entry, 1)}</div><div class="d">1R = ${fmt(a.risk, 1)}</div></div>`;

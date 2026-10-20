@@ -202,3 +202,37 @@ def test_touched_persists_across_restart(tmp_path):
     tr2 = SignalTracker(Store(tmp_path / "s.db"), min_conf=45)   # "restart"
     assert tr2.pending().touched
     assert tr2.on_price(4511.0, now) == []                 # touched → running past the chase level is not a miss
+
+
+def test_no_breakeven_keeps_the_original_stop_after_tp1(tmp_path):
+    tr = SignalTracker(Store(tmp_path / "s.db"), min_conf=45, require_trigger=False, breakeven_after_tp1=False)
+    tr.on_analysis(_report())
+    ev = tr.on_price(4520.5)
+    assert [e.kind for e in ev] == ["tp1"]
+    assert "stop stays at 4,475.0" in ev[0].text and "break-even" not in ev[0].text
+    a = tr.active(); assert a.status == "tp1" and a.sl_current is None and a.effective_sl == 4475.0
+    assert tr.on_price(4500.0) == []                                   # back at the entry: nothing happens
+    assert [e.kind for e in tr.on_price(4474.0)] == ["stopped"]        # the original stop closes the second half
+    h = tr.history()[0]
+    # half at TP1 (+0.8R), half at the stop fill 4474 (−1.04R); no spread/slippage here → −0.12R
+    assert h.status == "stopped" and abs(h.result_r - (0.5 * 20.0 / 25.0 - 0.5 * 26.0 / 25.0)) < 1e-6
+
+
+def test_tp1_wording_follows_the_rule(tmp_path):
+    from bot import formatting as fmt
+
+    tr = SignalTracker(Store(tmp_path / "s.db"), min_conf=45, require_trigger=False)
+    tr.on_analysis(_report())
+    live = tr.active()
+    fmt.BREAKEVEN_AFTER_TP1 = True
+    assert "move the stop to break-even" in fmt.management_line(live)
+    fmt.BREAKEVEN_AFTER_TP1 = False
+    assert "keep the stop at 4,475.0" in fmt.management_line(live)
+    tr.on_price(4520.5)
+    live = tr.active()
+    assert fmt.status_label(live) == "TP 1 HIT · stop at break-even" and "at break-even" in fmt.management_line(live)
+    tr2 = SignalTracker(Store(tmp_path / "t.db"), min_conf=45, require_trigger=False, breakeven_after_tp1=False)
+    tr2.on_analysis(_report()); tr2.on_price(4520.5)
+    live2 = tr2.active()
+    assert fmt.status_label(live2) == "TP 1 HIT · half booked" and "stays at 4,475.0" in fmt.management_line(live2)
+    assert "TP 1 HIT · half booked" in fmt.format_trade_signal(live2, 4510.0)

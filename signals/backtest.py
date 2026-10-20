@@ -19,6 +19,7 @@ The replay never touches the live database: it runs a private in-memory tracker.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -372,8 +373,11 @@ def params_from_settings(settings) -> ReplayParams:
 
 
 # Structurally different ways to manage the same calls, replayed on the same bars so they can be
-# compared on numbers. Deliberately few and coarse: 70 days of data cannot support fine tuning.
+# compared on numbers. Deliberately few and coarse: fine tuning on a few years of data would only fit noise.
+# Each entry is replayed with the current rules plus its overrides; entries that would equal the current
+# rules (or an earlier entry) are skipped, so the list reads the same whatever the live settings are.
 VARIANTS: list[tuple[str, dict]] = [
+    ("break-even stop after TP1", {"breakeven_after_tp1": True}),
     ("no break-even stop", {"breakeven_after_tp1": False}),
     ("closer targets (TP1 1.0 · TP2 2.0 ATR)", {"atr_target_mult": 2.0}),
     ("further targets (TP1 1.5 · TP2 3.0 ATR)", {"atr_target_mult": 3.0}),
@@ -385,8 +389,29 @@ VARIANTS: list[tuple[str, dict]] = [
     ("no London/NY-overlap entries", {"blocked_sessions": ("London/NY overlap",)}),
     ("break-only + no overlap entries", {"trigger_kinds": ("break",), "blocked_sessions": ("London/NY overlap",)}),
     ("no zone refinement (fib / order block)", {"zone_refine": False}),
+    ("no break-even + further targets (3.0 ATR)", {"breakeven_after_tp1": False, "atr_target_mult": 3.0}),
+    ("no break-even + break-only", {"breakeven_after_tp1": False, "trigger_kinds": ("break",)}),
+    ("no break-even + no overlap entries", {"breakeven_after_tp1": False, "blocked_sessions": ("London/NY overlap",)}),
 ]
 VARIANTS_KEY = "backtest_variants"
+
+
+def applicable_variants(base: ReplayParams) -> list[tuple[str, dict, ReplayParams]]:
+    """The VARIANTS that differ from ``base`` and from each other, with their full parameters."""
+    seen = {_pkey(base)}
+    out = []
+    for name, overrides in VARIANTS:
+        p = ReplayParams(**{**base.__dict__, **overrides})
+        k = _pkey(p)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append((name, overrides, p))
+    return out
+
+
+def _pkey(p: ReplayParams) -> str:
+    return json.dumps(p.to_dict(), sort_keys=True)
 
 
 def run_and_store(settings, store: Store, yield_sleep: float = 0.01, sweep: bool = False) -> dict:
@@ -401,41 +426,51 @@ def run_and_store(settings, store: Store, yield_sleep: float = 0.01, sweep: bool
     store.set_state(STATE_KEY, result)
     _log_result(result)
     if sweep:
-        run_variants(h1, d1, m15, p, store, base_summary=result["summary"])
+        run_variants(h1, d1, m15, p, store, base_summary=result["summary"], base_by_year=result.get("by_year"))
     return result
 
 
 def run_variants(h1, d1, m15, base: ReplayParams, store: Store, base_summary: dict | None = None, key: str = VARIANTS_KEY,
-                 log_every: int = 0) -> dict:
+                 log_every: int = 0, base_by_year: dict | None = None) -> dict:
     rows = []
     if base_summary is not None:
-        rows.append({"name": "current rules", "overrides": {}, "summary": _brief(base_summary)})
+        rows.append({"name": "current rules", "overrides": {}, "summary": _brief(base_summary, base_by_year)})
     prior = store.get_state(key) or {}
     done = {r["name"]: r for r in (prior.get("variants") or [])} if prior.get("base_params") == base.to_dict() else {}
-    for name, overrides in VARIANTS:
+    todo = applicable_variants(base)
+    out: dict = {}
+    for name, overrides, p in todo:
         if name in done:                              # resume an interrupted sweep
             rows.append(done[name])
             continue
-        p = ReplayParams(**{**base.__dict__, **overrides})
         log.info("Self-check variant '%s'…", name)
         try:
             r = replay(h1, d1, m15, p, progress=(lambda n, t: log.info("Self-check variant: %d/%d bars", n, t) if n and n % log_every == 0 else None) if log_every else None)
         except Exception as exc:  # noqa: BLE001
             log.warning("Self-check variant '%s' failed: %s", name, exc)
             continue
-        b = _brief(r["summary"])
+        b = _brief(r["summary"], r.get("by_year"))
         rows.append({"name": name, "overrides": overrides, "summary": b})
-        log.info("Self-check variant '%s': trades %d · win %s%% · avg %sR · total %sR · PF %s · maxDD %sR",
-                 name, b["count"], b["win_rate"], b["avg_r"], b["total_r"], b["profit_factor"], b["max_drawdown_r"])
+        log.info("Self-check variant '%s': trades %d · win %s%% · avg %sR · total %sR · PF %s · maxDD %sR%s",
+                 name, b["count"], b["win_rate"], b["avg_r"], b["total_r"], b["profit_factor"], b["max_drawdown_r"],
+                 (" · by year " + ", ".join(f"{y}: {v['total_r']:+.1f}R" for y, v in b["by_year"].items())) if b.get("by_year") else "")
         out = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "base_params": base.to_dict(), "variants": rows,
-               "complete": len(rows) >= len(VARIANTS) + (1 if base_summary is not None else 0)}
+               "complete": len(rows) >= len(todo) + (1 if base_summary is not None else 0)}
         store.set_state(key, out)                   # saved after every variant: a restart loses nothing
-    return out if rows else {}
+    if not out and rows:                            # everything was already stored – re-save with the right completeness
+        out = {"generated_at": prior.get("generated_at") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+               "base_params": base.to_dict(), "variants": rows, "complete": len(rows) >= len(todo) + (1 if base_summary is not None else 0)}
+        store.set_state(key, out)
+    return out
 
 
-def _brief(s: dict) -> dict:
-    keys = ("count", "wins", "losses", "breakeven", "win_rate", "avg_r", "total_r", "profit_factor", "max_drawdown_r", "tp1_rate", "setups", "no_trade")
-    return {k: s.get(k) for k in keys}
+def _brief(s: dict, by_year: dict | None = None) -> dict:
+    keys = ("count", "wins", "losses", "breakeven", "win_rate", "avg_r", "total_r", "profit_factor", "max_drawdown_r", "tp1_rate",
+            "avg_hold_h", "setups", "no_trade")
+    out = {k: s.get(k) for k in keys}
+    if by_year:
+        out["by_year"] = {y: {"count": v.get("count"), "win_rate": v.get("win_rate"), "total_r": v.get("total_r")} for y, v in by_year.items()}
+    return out
 
 
 def _log_result(result: dict) -> None:
@@ -462,7 +497,7 @@ DEEP_KEY = "backtest_deep"
 DEEP_VARIANTS_KEY = "backtest_deep_variants"
 
 
-def run_deep(settings, store: Store, yield_sleep: float = 0.02) -> dict:
+def run_deep(settings, store: Store, yield_sleep: float = 0.008) -> dict:
     """The deep self-check: the rules replayed over DEEP_CHECK_YEARS of Dukascopy 15-minute bars (spot basis).
     Blocking and slow (hours on a small instance) – call from a thread."""
     from market.history import load_history
@@ -525,17 +560,19 @@ async def run_on_start(cache, delay_sec: int = 150) -> None:
                                             redis_url=settings.redis_url)
                     h1, d1, m15 = data
                     p = params_from_settings(settings)
-                    p.yield_sleep = 0.02
+                    p.yield_sleep = 0.008
                     deep = store.get_state(DEEP_KEY) or {}
-                    log.info("Deep check: replaying %d alternative managements over the same %d bars…", len(VARIANTS), len(m15))
-                    run_variants(h1, d1, m15, p, store, base_summary=deep.get("summary"), key=DEEP_VARIANTS_KEY, log_every=20000)
+                    log.info("Deep check: replaying %d alternative managements over the same %d bars…", len(applicable_variants(p)), len(m15))
+                    run_variants(h1, d1, m15, p, store, base_summary=deep.get("summary"), key=DEEP_VARIANTS_KEY, log_every=20000,
+                                 base_by_year=deep.get("by_year"))
             await asyncio.to_thread(_deep)
         if sweep_due:
             def _sweep_only():
                 h1, d1, m15, _sym = fetch_history(settings.yf_symbol)
                 p = params_from_settings(settings)
                 p.yield_sleep = 0.01
-                run_variants(h1, d1, m15, p, store, base_summary=store.get_state(STATE_KEY)["summary"])
+                base_res = store.get_state(STATE_KEY) or {}
+                run_variants(h1, d1, m15, p, store, base_summary=base_res.get("summary"), base_by_year=base_res.get("by_year"))
             await asyncio.to_thread(_sweep_only)
     except Exception as exc:  # noqa: BLE001
         log.exception("Self-check failed: %s", exc)
