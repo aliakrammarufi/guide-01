@@ -64,7 +64,7 @@ class DemoPipeline(Pipeline):
         import pipeline as _p
 
         original = _p.fetch_market_data
-        _p.fetch_market_data = lambda: make_market(drift_h=0.004, seed=self._seed, start=3600.0)
+        _p.fetch_market_data = lambda max_age_sec=0.0: make_market(drift_h=0.004, seed=self._seed, start=3600.0)
         try:
             report = super().run(with_briefing=False, refresh_news=refresh_news)
         finally:
