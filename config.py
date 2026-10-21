@@ -220,6 +220,9 @@ class Settings:
 
     # --- Scheduler ----------------------------------------------------------
     analysis_interval_min: int = field(default_factory=lambda: _env_int("ANALYSIS_INTERVAL_MIN", 15))
+    # The short scheduled message to subscribers ("pulse"): price, bias, plan / live call, what's next.
+    # Calls and alerts are sent the moment they happen regardless of this.
+    report_interval_min: int = field(default_factory=lambda: _env_int("REPORT_INTERVAL_MIN", 60))
     news_scan_interval_min: int = field(default_factory=lambda: _env_int("NEWS_SCAN_INTERVAL_MIN", 3))
     # Alert when price moves more than this % within the last hour
     price_move_alert_pct: float = field(default_factory=lambda: _env_float("PRICE_MOVE_ALERT_PCT", 0.8))

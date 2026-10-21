@@ -340,10 +340,10 @@ class SentinelBot:
             chat_id,
             "🥇 <b>XAU SENTINEL — ONLINE</b>\n"
             "Gold (XAU/USD) analysis, news and trade setups.\n\n"
-            f"✅ Subscribed — a report every <b>{self.settings.analysis_interval_min} min</b> plus alerts: bias changes, big moves, "
-            "breaking news, pre-release warnings, and every BUY / SELL setup and live call.\n"
+            f"✅ Subscribed — a short update every <b>{self.settings.report_interval_min} min</b> while the market is open, "
+            "plus every setup, live call, TP / stop, bias change, big move, breaking news and pre-release warning the moment it happens.\n"
             f"{lock}\n\n"
-            "Start with /price or /signal. Set /risk for lot sizes.\n\n" + fmt.HELP,
+            "Start with /signal. Set /risk for lot sizes. /analyze gives the full picture.\n\n" + fmt.HELP,
         )
 
     async def cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -464,10 +464,13 @@ class SentinelBot:
         if not events:
             return
         subs = self.store.subscribers()          # signal calls go to every subscriber, alerts on or off
+        rep = self.cache.report
         for e in events:
             for chat_id in subs:
                 sz = self._sizing(chat_id, e.signal.entry, e.signal.sl)
-                await self._broadcast([chat_id], fmt.format_signal_event(e, sz))
+                # the chart goes with the live call only – it shows the entry, stop and targets on the bars
+                await self._broadcast([chat_id], fmt.format_signal_event(e, sz), report=rep if e.kind == "triggered" else None,
+                                      with_chart=(e.kind == "triggered"))
 
     async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
@@ -559,17 +562,28 @@ class SentinelBot:
 
     # ------------------------------------------------------------------ jobs
     async def job_report(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Every analysis interval: refresh, bias-change check, signal events. The scheduled message itself
+        (the short "pulse") goes out every REPORT_INTERVAL_MIN and not while the market is closed."""
         subs = self.store.subscribers()
         try:
-            rep = await self.cache.refresh(with_briefing=bool(subs))
+            rep = await self.cache.refresh(with_briefing=False)
         except Exception:  # noqa: BLE001
             return
         await self._check_bias_change(rep)
         await self._flush_signal_events()
         if not subs:
             return
+        last = self.store.get_state("last_pulse_at")
+        every = timedelta(minutes=max(self.settings.analysis_interval_min, self.settings.report_interval_min))
+        if last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < every - timedelta(seconds=30):
+            return
+        if rep.session is not None and rep.session.name == "Weekend":
+            return
+        self.store.set_state("last_pulse_at", datetime.now(timezone.utc).isoformat())
+        trade = self.cache.tracker.live()
         for chat_id in subs:
-            await self._broadcast([chat_id], self._full_report(rep, chat_id), report=rep, with_chart=True)
+            sizing = self._sizing(chat_id, trade.entry, trade.sl) if trade is not None else None
+            await self._broadcast([chat_id], fmt.format_pulse(rep.tech, rep.signal, trade, sizing, rep.events, rep.data.last_bar_time))
 
     async def job_monitor(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         alert_subs = self.store.subscribers(alerts_only=True)
