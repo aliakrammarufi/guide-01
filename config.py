@@ -96,7 +96,8 @@ DEFAULT_FEEDS: list[str] = [
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://www.theguardian.com/uk/business/rss",
     "https://www.aljazeera.com/xml/rss/all.xml",                  # geopolitics
-    "https://www.federalreserve.gov/feeds/press_all.xml",         # Fed statements, first-hand
+    "https://www.federalreserve.gov/feeds/press_monetary.xml",    # Fed monetary-policy statements, first-hand
+    "https://www.federalreserve.gov/feeds/speeches_and_testimony.xml",   # Fed speakers (Powell, Waller…)
     "https://www.forexlive.com/feed/news",
     "https://www.investing.com/rss/news_11.rss",                  # commodities
     "https://www.investing.com/rss/news_95.rss",                  # economic indicators

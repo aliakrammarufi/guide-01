@@ -186,6 +186,17 @@ class Store:
             ).fetchall()
             return [self._row_to_article(r) for r in rows]
 
+    def lexicon_scored_recent(self, hours: float, limit: int = 150) -> list[Article]:
+        """Recent articles that were scored by the keyword lexicon (before an API key existed, or during an outage)."""
+        with self._lock:
+            since = _iso(datetime.now(timezone.utc) - timedelta(hours=hours))
+            rows = self._conn.execute(
+                "SELECT * FROM articles WHERE published_at >= ? AND (scored_by IS NULL OR scored_by != 'claude') "
+                "AND impact IS NOT NULL ORDER BY published_at DESC LIMIT ?",
+                (since, limit),
+            ).fetchall()
+            return [self._row_to_article(r) for r in rows]
+
     def unscored_articles(self, limit: int = 50) -> list[Article]:
         with self._lock:
             rows = self._conn.execute(

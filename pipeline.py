@@ -49,6 +49,7 @@ class Pipeline:
         self.store = store
         self.calendar = CalendarService(settings.calendar_url, settings.calendar_currencies)
         self._classifier: ClaudeClassifier | None = None
+        self._rescored = False
         if settings.ai_enabled:
             try:
                 self._classifier = ClaudeClassifier(settings.anthropic_api_key, settings.classifier_model)
@@ -77,6 +78,16 @@ class Pipeline:
         if pending:
             self._score(pending)
             self.store.update_scores(pending)
+        # Once per start, when the AI reader is on: re-read the recent headlines the keyword scorer handled
+        # (before the key existed, or during an outage) so the news score is consistent.
+        if self._classifier and not self._rescored:
+            self._rescored = True
+            old = self.store.lexicon_scored_recent(self.settings.news_lookback_hours)
+            if old:
+                self._score(old)
+                done = [a for a in old if a.scored_by == "claude"]
+                self.store.update_scores(done)
+                log.info("AI re-read %d recent headlines that were scored by keywords", len(done))
         self.store.prune(days=14)
         return new
 

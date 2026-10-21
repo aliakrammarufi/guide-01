@@ -110,3 +110,21 @@ def test_entry_plan_invariants_across_markets():
                 else:
                     assert lo >= p - 0.05 * atr - 0.02 and st > hi and t1 < mid and t2 < t1 and ch < lo and ch < p
                     assert st - mid <= 1.5 * atr + 0.02
+
+
+def test_lexicon_scored_recent_only_returns_keyword_scored(tmp_path):
+    store = Store(tmp_path / "t.db")
+    now = datetime.now(timezone.utc)
+    rows = [Article(id=f"k{i}", title=f"headline {i}", link="", source="t", summary="", published_at=now - timedelta(hours=i))
+            for i in range(4)]
+    store.upsert_articles(rows)
+    rows[0].impact, rows[0].scored_by = 0.5, "lexicon"
+    rows[1].impact, rows[1].scored_by = -0.5, "claude"
+    rows[2].impact, rows[2].scored_by = 0.0, None          # scored, source unknown → treat as keyword
+    store.update_scores(rows[:3])                           # rows[3] stays unscored
+    got = store.lexicon_scored_recent(hours=36)
+    assert sorted(a.id for a in got) == ["k0", "k2"]
+    assert [a.id for a in store.lexicon_scored_recent(hours=0.5)] == ["k0"]
+    rows[0].scored_by = "claude"
+    store.update_scores([rows[0]])
+    assert [a.id for a in store.lexicon_scored_recent(hours=36)] == ["k2"]
