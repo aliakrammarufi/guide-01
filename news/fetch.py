@@ -10,6 +10,7 @@ import html
 import logging
 import re
 import threading
+import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -125,14 +126,24 @@ def parse_feed(content: bytes | str, feed_url: str) -> list[Article]:
 # (a few hundred bytes) when nothing changed, instead of the whole feed every 3 minutes.
 _COND: dict[str, tuple[str | None, str | None, list[Article]]] = {}   # url → (etag, last-modified, parsed)
 _COND_LOCK = threading.Lock()
-_STATS = {"not_modified": 0}
+_STATS = {"not_modified": 0, "cooling": 0}
+# A feed that failed (503, timeout…) is left alone for a while instead of being hit again 3 minutes
+# later: 5 min after the first failure, doubling to an hour. Google News rate-limits bursts this way.
+_BACKOFF: dict[str, tuple[float, int]] = {}      # url → (retry not before (epoch s), consecutive failures)
+BACKOFF_BASE_SEC = 300
+BACKOFF_MAX_SEC = 3600
 
 
 def _fetch_feed_ex(url: str, timeout: float = 15.0) -> tuple[list[Article], bool]:
     """Fetch one feed. Returns (articles, not_modified)."""
+    now = time.time()
     headers = {"User-Agent": USER_AGENT}
     with _COND_LOCK:
         cached = _COND.get(url)
+        bo = _BACKOFF.get(url)
+        if bo and now < bo[0]:
+            _STATS["cooling"] += 1
+            return [], False                      # cooling down after a failure
     if cached:
         if cached[0]:
             headers["If-None-Match"] = cached[0]
@@ -143,11 +154,18 @@ def _fetch_feed_ex(url: str, timeout: float = 15.0) -> tuple[list[Article], bool
         if resp.status_code == 304 and cached:
             with _COND_LOCK:
                 _STATS["not_modified"] += 1
+                _BACKOFF.pop(url, None)
             return [replace(a) for a in cached[2]], True
         resp.raise_for_status()
     except Exception as exc:  # noqa: BLE001
-        log.warning("Feed failed %s: %s", url, exc)
+        with _COND_LOCK:
+            fails = (_BACKOFF.get(url) or (0.0, 0))[1] + 1
+            wait = min(BACKOFF_MAX_SEC, BACKOFF_BASE_SEC * 2 ** (fails - 1))
+            _BACKOFF[url] = (now + wait, fails)
+        log.warning("Feed failed %s: %s (next try in %d min)", url, exc, wait // 60)
         return [], False
+    with _COND_LOCK:
+        _BACKOFF.pop(url, None)
     try:
         articles = parse_feed(resp.content, url)
     except Exception as exc:  # noqa: BLE001
