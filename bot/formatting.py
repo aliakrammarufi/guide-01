@@ -637,11 +637,13 @@ def format_signal_event(e, sizing: Sizing | None = None) -> str:
 # full report
 # ---------------------------------------------------------------------------
 def format_pulse(tech: TechSnapshot, sig: Signal, trade=None, sizing: Sizing | None = None, events: list | None = None,
-                 as_of: datetime | None = None) -> str:
-    """The scheduled message: price, bias, the plan or the live call, what's next. Eight lines at most."""
+                 as_of: datetime | None = None, news: NewsScore | None = None, briefing: str | None = None) -> str:
+    """The scheduled message: price, bias, the plan or the live call, structure, top headline, what's next —
+    and the AI briefing only when a fresh one was just written. Short by design."""
     ts = as_of.astimezone(timezone.utc).strftime("%H:%M UTC") if as_of else datetime.now(timezone.utc).strftime("%H:%M UTC")
-    lines = [f"🥇 <b>XAU/USD {tech.price:,.1f}</b> · {_pct(tech.change_24h_pct, '24h')} · {ts}",
-             f"{sig.emoji} <b>{escape(sig.label.upper())}</b> {sig.confidence}% · tech {_m(f'{sig.tech_score:+d}')} · news {_m(f'{sig.news_score:+d}')}"]
+    lines = [f"🥇 <b>XAU/USD {tech.price:,.1f}</b> · {_pct(tech.change_1h_pct, '1h')} · {_pct(tech.change_24h_pct, '24h')} · {ts}",
+             f"{sig.emoji} <b>{escape(sig.label.upper())}</b> {sig.confidence}% · tech {_m(f'{sig.tech_score:+d}')} · news {_m(f'{sig.news_score:+d}')}"
+             f" · RSI {tech.rsi:.0f} · ATR {tech.atr:,.0f}"]
     if trade is not None:
         lines.append(format_trade_signal(trade, tech.price if trade.is_open else None, sizing))
     elif sig.direction != "flat" and sig.stop is not None and sig.zone_lo is not None:
@@ -653,12 +655,18 @@ def format_pulse(tech: TechSnapshot, sig: Signal, trade=None, sizing: Sizing | N
     pa = price_action_line(tech)
     if pa:
         lines.append(pa)
+    lines.append(f"🧭 Support <b>{_num(sig.nearest_support)}</b> · Resistance <b>{_num(sig.nearest_resistance)}</b>")
+    if news is not None and news.drivers:
+        top = news.drivers[0]
+        lines.append(f"📰 {_impact_icon(top)} {escape(top.title)} <i>({escape(top.source)}, {_age(top)})</i>")
     nxt = next((e for e in (events or []) if e.impact == "High" and e.minutes_away > -15), None)
     if nxt is not None:
         lines.append(f"⏱ {escape(nxt.title)} {_countdown(nxt.minutes_away)}")
     sl = session_line(sig.session)
     if sl and not (sig.session or {}).get("allow_entries", True):
         lines.append(sl)
+    if briefing:
+        lines.append(f"\n🧠 <b>AI BRIEFING</b>\n{escape(briefing)}")
     return "\n".join(lines)
 
 
@@ -850,7 +858,7 @@ HELP = """📖 <b>COMMANDS</b>
 <b>Settings</b>
 /risk 5000 1 — account and % risk → lot size on every call
 /took · /skipped — mark the latest call (your own scorecard)
-/subscribe · /unsubscribe — the hourly update
+/subscribe · /unsubscribe — the 15-minute report
 /alerts on|off — bias changes, big moves, breaking news, pre-release warnings
 /status — bot status
 

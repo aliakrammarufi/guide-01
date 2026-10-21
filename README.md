@@ -235,7 +235,7 @@ lists you can edit, and `NEWS_FEEDS` in `.env` overrides the whole list.
 |---|---|---|
 | `NEWS_SCAN_INTERVAL_MIN` | 3 | how often all feeds are re-scanned and alerts checked |
 | `ANALYSIS_INTERVAL_MIN` | 15 | how often the scheduled analysis runs (bias changes, setups, calls) |
-| `REPORT_INTERVAL_MIN` | 60 | how often subscribers get the short update: price, bias, plan or live call, what's next. `/analyze` gives the full picture on demand |
+| `REPORT_INTERVAL_MIN` | 15 | how often subscribers get the short update: price, bias, plan or live call, what's next. `/analyze` gives the full picture on demand |
 | `QUOTE_PROVIDER` / `QUOTE_INTERVAL_SEC` | goldapi / 1 | live price tick on the terminal: gold-api.com every second (free, no key); falls back to the data provider |
 | `FEED_WORKERS` / `FEED_TIMEOUT_SEC` | 16 / 8 | concurrency and per-feed timeout |
 

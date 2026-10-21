@@ -340,7 +340,7 @@ class SentinelBot:
             chat_id,
             "🥇 <b>XAU SENTINEL — ONLINE</b>\n"
             "Gold (XAU/USD) analysis, news and trade setups.\n\n"
-            f"✅ Subscribed — a short update every <b>{self.settings.report_interval_min} min</b> while the market is open, "
+            f"✅ Subscribed — a short report every <b>{self.settings.report_interval_min} min</b> while the market is open, "
             "plus every setup, live call, TP / stop, bias change, big move, breaking news and pre-release warning the moment it happens.\n"
             f"{lock}\n\n"
             "Start with /signal. Set /risk for lot sizes. /analyze gives the full picture.\n\n" + fmt.HELP,
@@ -566,7 +566,7 @@ class SentinelBot:
         (the short "pulse") goes out every REPORT_INTERVAL_MIN and not while the market is closed."""
         subs = self.store.subscribers()
         try:
-            rep = await self.cache.refresh(with_briefing=False)
+            rep = await self.cache.refresh(with_briefing=bool(subs))     # the briefing itself is capped hourly / on bias change
         except Exception:  # noqa: BLE001
             return
         await self._check_bias_change(rep)
@@ -580,10 +580,14 @@ class SentinelBot:
         if rep.session is not None and rep.session.name == "Weekend":
             return
         self.store.set_state("last_pulse_at", datetime.now(timezone.utc).isoformat())
+        # include the written briefing only when it was (re)written since the last update, so it appears once, not every time
+        fresh = rep.briefing if (rep.briefing and rep.briefing_at is not None
+                                 and datetime.now(timezone.utc) - rep.briefing_at < every + timedelta(seconds=30)) else None
         trade = self.cache.tracker.live()
         for chat_id in subs:
             sizing = self._sizing(chat_id, trade.entry, trade.sl) if trade is not None else None
-            await self._broadcast([chat_id], fmt.format_pulse(rep.tech, rep.signal, trade, sizing, rep.events, rep.data.last_bar_time))
+            await self._broadcast([chat_id], fmt.format_pulse(rep.tech, rep.signal, trade, sizing, rep.events, rep.data.last_bar_time,
+                                                              news=rep.news, briefing=fresh))
 
     async def job_monitor(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         alert_subs = self.store.subscribers(alerts_only=True)
