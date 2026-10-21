@@ -570,6 +570,8 @@ class SentinelBot:
             return
         for chat_id in subs:
             await self._broadcast([chat_id], self._full_report(rep, chat_id), report=rep, with_chart=True)
+        log.info("Report sent to %d subscriber(s): %s %d%% · %s", len(subs), rep.signal.bias, rep.signal.confidence,
+                 f"{self.cache.tracker.live().side} {self.cache.tracker.live().status}" if self.cache.tracker.live() else "no call")
 
     async def job_monitor(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         alert_subs = self.store.subscribers(alerts_only=True)

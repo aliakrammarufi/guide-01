@@ -397,6 +397,8 @@ VARIANTS: list[tuple[str, dict]] = [
     ("no break-even + targets 1.5 / 3.0 ATR", {"breakeven_after_tp1": False, "atr_target_mult": 3.0}),
     ("no break-even + break-only", {"breakeven_after_tp1": False, "trigger_kinds": ("break",)}),
     ("no break-even + no overlap entries", {"breakeven_after_tp1": False, "blocked_sessions": ("London/NY overlap",)}),
+    ("more calls: minimum confidence 35%", {"min_conf": 35}),
+    ("fewer calls: minimum confidence 55%", {"min_conf": 55}),
 ]
 VARIANTS_KEY = "backtest_variants"
 
