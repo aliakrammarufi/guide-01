@@ -73,7 +73,7 @@ Other ways to run:
 | `/signals` | the open BUY/SELL call (entry, SL, TP1, TP2, open R), recent results, win rate and total R |
 | `/levels` | swing support & resistance, daily pivots, EMAs |
 | `/calendar` | upcoming USD releases (CPI, FOMC, payrolls, PCE, Fed speakers) with forecast / previous and a countdown |
-| `/subscribe` / `/unsubscribe` | the short scheduled update every `REPORT_INTERVAL_MIN` minutes (market hours), plus every call and alert as it happens |
+| `/subscribe` / `/unsubscribe` | scheduled report every `ANALYSIS_INTERVAL_MIN` minutes |
 | `/alerts on|off` | bias-change, big-move and breaking-news alerts |
 | `/backtest` | how the signal rules did on the last ~60 days of real 15-minute bars (technical-only replay) |
 | `/status` | what the bot is doing and with which settings |
@@ -234,8 +234,7 @@ lists you can edit, and `NEWS_FEEDS` in `.env` overrides the whole list.
 | Setting | Default | What it controls |
 |---|---|---|
 | `NEWS_SCAN_INTERVAL_MIN` | 3 | how often all feeds are re-scanned and alerts checked |
-| `ANALYSIS_INTERVAL_MIN` | 15 | how often the scheduled analysis runs (bias changes, setups, calls) |
-| `REPORT_INTERVAL_MIN` | 15 | how often subscribers get the short update: price, bias, plan or live call, what's next. `/analyze` gives the full picture on demand |
+| `ANALYSIS_INTERVAL_MIN` | 15 | how often the full report (chart, AI briefing) is produced and sent |
 | `QUOTE_PROVIDER` / `QUOTE_INTERVAL_SEC` | goldapi / 1 | live price tick on the terminal: gold-api.com every second (free, no key); falls back to the data provider |
 | `FEED_WORKERS` / `FEED_TIMEOUT_SEC` | 16 / 8 | concurrency and per-feed timeout |
 

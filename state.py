@@ -28,7 +28,6 @@ class ReportCache:
         from bot import formatting as _fmt
 
         _fmt.BREAKEVEN_AFTER_TP1 = bool(st.signal_breakeven_after_tp1)     # the call wording follows the management rule
-        _fmt.MIN_CONF = int(st.signal_min_conf)
         self._report: Report | None = None
         self._lock = threading.Lock()
         self._history: list[dict] = []   # recent signals (for the dashboard sparkline)

@@ -15,8 +15,6 @@ proper minus signs, no log-style strings, a single short disclaimer.
 """
 from __future__ import annotations
 
-import re
-
 from datetime import datetime, timezone
 from html import escape
 
@@ -208,113 +206,46 @@ def format_price(tech: TechSnapshot, source: str, as_of: datetime) -> str:
 # ---------------------------------------------------------------------------
 # signal (bias + plan)
 # ---------------------------------------------------------------------------
-def _chg(x: float) -> str:
-    """'▼ 0.40%' – the day change without a sign (the arrow carries it)."""
-    arrow = "▲" if x > 0.005 else ("▼" if x < -0.005 else "•")
-    return f"{arrow} {abs(x):.2f}%"
-
-
-def _r_mult(level: float, ref: float, risk: float) -> str:
-    return f"({abs(level - ref) / risk:.1f}R)" if risk and risk > 0 else ""
-
-
-def levels_block(zone_lo=None, zone_hi=None, entry=None, sl=None, tp1=None, tp2=None, sizing: Sizing | None = None,
-                 now: float | None = None, r_now: float | None = None, ref: float | None = None) -> str:
-    """The stacked levels of the update: ENTRY ZONE / ENTRY, SL, TP1, TP2, Size – aligned in a monospace block."""
-    ref = ref if ref is not None else (entry if entry is not None else ((zone_lo + zone_hi) / 2 if zone_lo is not None else None))
-    risk = abs(ref - sl) if (ref is not None and sl is not None) else 0.0
-    rows: list[tuple] = []
-    if entry is not None:
-        extra = f"   now {now:,.1f} · {_r(r_now)}" if (now is not None and r_now is not None and abs(now - entry) >= 0.05) else ""
-        rows.append(("ENTRY", f"{entry:,.1f}{extra}"))
-    elif zone_lo is not None:
-        rows.append(("ENTRY ZONE", f"{zone_lo:,.1f} – {zone_hi:,.1f}"))
-    if sl is not None:
-        rows.append(("SL", f"{sl:,.1f}" + (f"   ({risk:,.1f} pts)" if risk else "")))
-    if tp1 is not None:
-        rows.append(("TP1", f"{tp1:,.1f}   {_r_mult(tp1, ref, risk)}".rstrip()))
-    if tp2 is not None:
-        rows.append(("TP2", f"{tp2:,.1f}   {_r_mult(tp2, ref, risk)}".rstrip()))
-    if sizing is not None:
-        rows.append(("Size", f"{sizing.lots:.2f} lots · risk {sizing.money(sizing.actual_risk)} ({sizing.pct_of_account:.1f}%)"))
-    return _pre(rows, right=()) if rows else ""
-
-
-def bias_lines(sig: Signal, tech: TechSnapshot | None = None, tag: str = "", trade=None) -> str:
-    """'BIAS: SELL 🔴 52%' and the trend line. With a setup or live call, its side and confidence lead."""
-    if trade is not None:
-        label, emoji, conf = trade.side, ("🔴" if trade.side == "SELL" else "🟢"), trade.confidence
-    else:
-        label, emoji, conf = BIAS_WORD.get(sig.bias, sig.bias), sig.emoji, sig.confidence
-    head = f"<b>BIAS: {escape(label)} {emoji} {conf}%</b>" + (f" · {tag}" if tag else "")
-    pa = tech.pa if tech is not None else None
-    if pa is not None:
-        adx = f" · ADX {pa.adx:.0f}" if pa.adx == pa.adx else ""
-        trend = f"Trend: H4 {escape(pa.h4.trend)} · H1 {escape(pa.h1.trend)}{adx}"
-    else:
-        trend = f"Trend: {escape(tech.trend_label)}" if tech is not None else "Trend: n/a"
-    return head + "\n" + trend
-
-
-def no_call_lines(sig: Signal) -> str:
-    """Why there is no call right now, in one line, plus the levels that matter meanwhile."""
-    if sig.direction == "flat":
-        why = "bias is neutral"
-    else:
-        why = f"confidence {sig.confidence}% is below the {MIN_CONF}% needed"
-    reasons = []
-    if sig.agreement == "conflict":
-        reasons.append("technicals and news disagree")
-    sess = sig.session or {}
-    if sess.get("label") and (not sess.get("allow_entries", True) or (sess.get("conf_adj") or 0) < 0):
-        reasons.append(escape(sess["label"]))
-    line = f"No call — {why}" + (f" ({' · '.join(reasons)})" if reasons else "") + ". Waiting."
-    return f"{line}\nLevels: R <b>{_num(sig.nearest_resistance)}</b> · S <b>{_num(sig.nearest_support)}</b>"
-
-
-def wait_line(sig_or_trade, chase=None, in_zone: bool = False) -> str:
-    if in_zone:
-        return "⚠️ Price is in the zone — wait for a 15-min confirmation."
-    return "⚠️ Wait for a 15-min confirmation in the zone." + (f" No chase beyond {chase:,.1f}." if chase else "")
-
-
-def plan_line(sig: Signal) -> str:
-    """Stop · TP1 · TP2 · R:R on one line (the levels you act on)."""
-    if sig.direction == "flat" or sig.stop is None or sig.zone_lo is None:
-        return ""
-    return (f"Stop <b>{_num(sig.stop)}</b> · TP1 <b>{_num(sig.target1)}</b> · TP2 <b>{_num(sig.target2)}</b>"
-            f" · R:R 1:{sig.planned_rr or 0:.1f}")
-
-
-def entry_hint(sig: Signal) -> str:
-    if sig.direction == "flat" or sig.zone_lo is None:
-        return ""
-    if sig.entry_mode == "in-zone":
-        return "Price is in the zone — wait for a 15-minute confirmation."
-    return f"Wait for a pullback into the zone and a 15-minute confirmation. Don't chase beyond {_num(sig.chase_limit)}."
-
-
 def format_signal(sig: Signal, compact: bool = False) -> str:
-    """Bias, confidence, the plan. Short: the decision and the levels, nothing to decode."""
-    agree = {"aligned": "aligned", "conflict": "conflict ⚠️", "one-sided": "one-sided"}.get(sig.agreement, sig.agreement)
-    lines = [f"{sig.emoji} <b>{escape(sig.label.upper())}</b> — confidence <b>{sig.confidence}%</b> ({_confidence_word(sig.confidence)})",
-             f"Technicals {_m(f'{sig.tech_score:+d}')} · News {_m(f'{sig.news_score:+d}')} · {agree}"]
+    parts = [
+        f"{sig.emoji} <b>{escape(sig.label.upper())}</b> — confidence <b>{sig.confidence}%</b> ({_confidence_word(sig.confidence)})",
+        f"Bearish {_meter(sig.combined)} Bullish  <b>{_m(f'{sig.combined:+d}')}</b>",
+    ]
+    agree = {"aligned": "aligned ✅", "conflict": "conflict ⚠️", "one-sided": "one-sided"}.get(sig.agreement, sig.agreement)
+    parts.append(_pre([
+        ("Technicals", _m(f"{sig.tech_score:+d}"), _score_word(sig.tech_score)),
+        ("News", _m(f"{sig.news_score:+d}"), _score_word(sig.news_score)),
+        ("Agreement", "", agree),
+    ]))
+
     if sig.direction != "flat" and sig.stop is not None and sig.zone_lo is not None:
         side = "BUY" if sig.direction == "long" else "SELL"
-        lines.append(f"🎯 <b>{side} PLAN</b> — zone <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b>")
-        lines.append(plan_line(sig))
-        lines.append(entry_hint(sig))
-    else:
-        lines.append("No trade plan — bias is not strong enough for a call.")
+        mid = sig.zone_mid
+        rows = [
+            ("Stop", _num(sig.stop), _diff(sig.stop - mid)),
+            ("TP 1", _num(sig.target1), _diff(sig.target1 - mid)),
+            ("TP 2", _num(sig.target2), _diff(sig.target2 - mid)),
+            ("R:R", f"1 : {sig.planned_rr or 0:.1f}", ""),
+        ]
+        how = ("Price is in the zone — wait for a 15-minute confirmation."
+               if sig.entry_mode == "in-zone" else
+               f"Wait for a pullback into the zone. Don't chase beyond {_num(sig.chase_limit)}.")
+        conf = confluence_line(sig.confluence)
+        parts.append(f"🎯 <b>{side} PLAN</b> — entry zone <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b>\n{_pre(rows)}\n{how}"
+                     + (f"\n{conf}" if conf else ""))
+
+    tail = []
     sl = session_line(sig.session)
     if sl:
-        lines.append(sl)
+        tail.append(sl)
+    tail.append(f"🧭 Support <b>{_num(sig.nearest_support)}</b> · Resistance <b>{_num(sig.nearest_resistance)}</b>")
+    parts.append("\n".join(tail))
     if not compact and sig.notes:
         skip = set((sig.session or {}).get("reasons") or []) | {"Technicals and news agree"}
-        notes = [n for n in sig.notes if n not in skip][:3]
+        notes = [n for n in sig.notes if n not in skip]
         if notes:
-            lines.append("\n".join(f"• {escape(n)}" for n in notes))
-    return "\n".join(lines)
+            parts.append("\n".join(f"• {escape(n)}" for n in notes))
+    return "\n\n".join(parts)
 
 
 def price_action_line(tech: TechSnapshot) -> str:
@@ -326,13 +257,13 @@ def price_action_line(tech: TechSnapshot) -> str:
         return f"{_STRUCT_ICON.get(x.trend, '⚪')} {tf} {x.trend}" + (f" ({escape(x.label)})" if x.label else "")
     adx = f" · ADX {pa.adx:.0f}" if pa.adx == pa.adx else ""
     m = getattr(tech, "macro", None)
-    macro = f" · macro {escape(m.get('label', ''))}" if m else ""
+    macro = f" · 🌍 macro {escape(m.get('label', ''))} ({_m(f'{m.get('score', 0):+d}')})" if m else ""
     return f"🧱 {st(pa.h4, 'H4')} · {st(pa.h1, 'H1')} · {escape(pa.regime)}{adx}{macro}"
 
 
-def format_signal_message(tech: TechSnapshot, sig: Signal, source: str, as_of: datetime, trade=None, sizing: Sizing | None = None,
-                          events: list | None = None) -> str:
-    return format_pulse(tech, sig, trade, sizing, events, as_of, title="XAU/USD SIGNAL")
+def format_signal_message(tech: TechSnapshot, sig: Signal, source: str, as_of: datetime) -> str:
+    pa = price_action_line(tech)
+    return f"{price_header(tech)}\n\n{format_signal(sig)}" + (f"\n\n{pa}" if pa else "") + f"\n\n{_footer(source, as_of)}"
 
 
 # ---------------------------------------------------------------------------
@@ -384,10 +315,10 @@ def format_price_action(tech: TechSnapshot) -> str:
     # key levels table
     below, above = tech.levels_around(max_dist_atr=4.0)
     rows: list[tuple] = []
-    for name, lvl in reversed(above[:3]):
+    for name, lvl in reversed(above[:4]):
         rows.append((_LEVEL_SHORT.get(name, name), f"{lvl:,.1f}", _diff(lvl - tech.price)))
     rows.append(("▶ now", f"{tech.price:,.1f}", ""))
-    for name, lvl in below[:3]:
+    for name, lvl in below[:4]:
         rows.append((_LEVEL_SHORT.get(name, name), f"{lvl:,.1f}", _diff(lvl - tech.price)))
     zones = []
     for ob in pa.order_blocks[-2:]:
@@ -397,11 +328,11 @@ def format_price_action(tech: TechSnapshot) -> str:
     out = "🧱 <b>PRICE ACTION</b>\n" + "\n".join(lines)
     if len(rows) > 1:
         out += "\n<b>Key levels</b>\n" + _pre(rows, right=(1, 2))
-    m = getattr(tech, "macro", None)
-    if m and isinstance(m, dict):
-        out += f"\n🌍 Macro {escape(m.get('label', 'mixed'))} for gold ({_m(f'{m.get('score', 0):+d}')})"
-        for f in m.get("flags") or []:
-            out += f" · ⚠️ {escape(f)}"
+    if zones:
+        out += "\n<b>Unfilled zones</b>\n" + "\n".join(f"• {escape(z)}" for z in zones)
+    mt = macro_text(tech)
+    if mt:
+        out += "\n\n" + mt
     return out
 
 
@@ -453,8 +384,8 @@ def _pivot_table(p: dict) -> str:
 
 
 def format_levels(tech: TechSnapshot) -> str:
-    res = sorted(r for r in tech.resistances if r > tech.price)[:3]
-    sup = sorted((s for s in tech.supports if s < tech.price), reverse=True)[:3]
+    res = sorted(r for r in tech.resistances if r > tech.price)[:4]
+    sup = sorted((s for s in tech.supports if s < tech.price), reverse=True)[:4]
     rows: list[tuple] = [("Resistance", "", "")]
     rows += [("", f"{r:,.1f}", _diff(r - tech.price)) for r in reversed(res)] or [("", "none nearby", "")]
     rows.append(("▶ now", f"{tech.price:,.1f}", ""))
@@ -463,6 +394,7 @@ def format_levels(tech: TechSnapshot) -> str:
     out = f"📐 <b>KEY LEVELS</b> — price <b>{tech.price:,.2f}</b> · ATR {tech.atr:,.1f}\n{_pre(rows)}"
     if tech.pivots:
         out += "\n<b>Daily pivots</b>\n" + _pivot_table(tech.pivots)
+    out += "\n<b>EMA (H1)</b>\n" + _pre([("EMA 20", f"{tech.ema20:,.1f}"), ("EMA 50", f"{tech.ema50:,.1f}"), ("EMA 200", f"{tech.ema200:,.1f}")])
     pa = tech.pa
     if pa is not None:
         kl = [(k, v) for k, v in (("Prev-day high", pa.levels.get("PDH")), ("Prev-day low", pa.levels.get("PDL")),
@@ -537,8 +469,9 @@ def format_alert_event(e) -> str:
     extra = ""
     if e.forecast or e.previous:
         extra = f"\nForecast <b>{escape(e.forecast or '–')}</b> · previous <b>{escape(e.previous or '–')}</b>"
-    return (f"⏰ <b>{escape(e.title)}</b> {_countdown(e.minutes_away)} ({e.when.strftime('%H:%M UTC')}) — high impact\n"
-            f"Gold often moves sharply and spreads widen: tighten risk or wait for the print.{extra}")
+    return (f"⏰ <b>{escape(e.title)}</b> {_countdown(e.minutes_away)} ({e.when.strftime('%H:%M UTC')})\n"
+            f"High-impact USD release. Gold often moves sharply and spreads widen — "
+            f"consider tightening risk or waiting for the print.{extra}")
 
 
 # ---------------------------------------------------------------------------
@@ -551,8 +484,6 @@ STATUS_LABEL = {
     "stale": "EXPIRED · no trade",
 }
 BREAKEVEN_AFTER_TP1 = True     # mirrors SIGNAL_BREAKEVEN_AFTER_TP1 (set by state.py) – only changes the wording here
-MIN_CONF = 45                  # mirrors SIGNAL_MIN_CONF (set by state.py): below this no setup is posted
-BIAS_WORD = {"STRONG_BUY": "STRONG BUY", "BUY": "BUY", "NEUTRAL": "NEUTRAL", "SELL": "SELL", "STRONG_SELL": "STRONG SELL"}
 
 
 def status_label(t) -> str:
@@ -572,49 +503,69 @@ def management_line(t) -> str:
     return ""
 
 
-def _size_line(sz: Sizing | None, entry: float, tp1: float, tp2: float) -> str:
-    if sz is None:
-        return ""
-    line = (f"{sz.lots:.2f} lots · risk <b>{sz.money(sz.actual_risk)}</b> ({sz.pct_of_account:.1f}%) · "
-            f"TP1 ≈ +{sz.money(sz.profit_at(tp1 - entry))} · TP2 ≈ +{sz.money(sz.profit_at(tp2 - entry))}")
-    if sz.over_guide and sz.is_fixed and sz.lots_by_risk < sz.lots:
-        line += f"\n⚠️ Wide stop: {sz.lots:.2f} lots risks {sz.pct_of_account:.1f}% — {sz.lots_by_risk:.2f} lots keeps it at {sz.risk_pct:g}%."
-    elif sz.over_guide:
-        line += f"\n⚠️ Even 0.01 lot risks {sz.pct_of_account:.1f}% on this stop — consider skipping it."
-    return line
-
-
-def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = None, with_title: bool = True) -> str:
-    """The call on a few lines: levels, size, what to do. No tables, no filler."""
+def format_trade_signal(t, price: float | None = None, sizing: Sizing | None = None) -> str:
     side = "🟢 BUY" if t.side == "BUY" else "🔴 SELL"
     sgn = t.sign
-    lines = [f"<b>{side} XAU/USD — {status_label(t)}</b>"] if with_title else []
+    title = f"<b>{side} XAU/USD — {status_label(t)}</b>"
+
     if t.status == "pending":
-        lines.append(f"Zone <b>{_num(t.zone_lo)} – {_num(t.zone_hi)}</b> · Stop <b>{t.sl:,.1f}</b> · TP1 <b>{t.tp1:,.1f}</b> · TP2 <b>{t.tp2:,.1f}</b>"
-                     f" · R:R 1:{t.rr:.1f} · conf {t.confidence}%")
-        sl = _size_line(sizing, t.entry, t.tp1, t.tp2)
-        if sl:
-            lines.append(sl)
-        lines.append("Price is in the zone — waiting for a 15-minute confirmation." if (t.setup_mode == "in-zone" or t.touched)
-                     else f"Waiting for a pullback into the zone. Don't chase beyond {_num(t.chase)}.")
-        return "\n".join(lines)
-    lines.append(f"Entry <b>{t.entry:,.1f}</b> · Stop <b>{t.effective_sl:,.1f}</b> ({abs(t.effective_sl - t.entry):,.1f} pts)"
-                 f" · TP1 <b>{t.tp1:,.1f}</b> · TP2 <b>{t.tp2:,.1f}</b> · R:R 1:{t.rr:.1f}")
+        mid = t.entry
+        rows = [
+            ("Stop", f"{t.sl:,.1f}", _diff(t.sl - mid)),
+            ("TP 1", f"{t.tp1:,.1f}", f"{_diff(t.tp1 - mid)}  {abs(t.tp1 - mid) / t.risk:.1f}R"),
+            ("TP 2", f"{t.tp2:,.1f}", f"{_diff(t.tp2 - mid)}  {t.rr:.1f}R"),
+            ("No chase", _num(t.chase), ""),
+            ("R:R", f"1 : {t.rr:.1f}", ""),
+            ("Confidence", f"{t.confidence}%", ""),
+        ]
+        sr = _sizing_row(sizing)
+        if sr:
+            rows.append(sr)
+        if price is not None:
+            rows.append(("Now", f"{price:,.1f}", f"{_diff(price - mid)} vs mid"))
+        waiting = ("Price is in the zone — waiting for a 15-minute confirmation."
+                   if (t.setup_mode == "in-zone" or t.touched) else "Waiting for a pullback into the zone.")
+        note = sizing_note(sizing, mid, t.tp1, t.tp2)
+        return (f"{title}\nEntry zone <b>{_num(t.zone_lo)} – {_num(t.zone_hi)}</b>\n{_pre(rows)}\n"
+                + (note + "\n" if note else "") +
+                f"{waiting} A live call is posted the moment it confirms.\n"
+                f"<i>Setup posted {t.opened_at.strftime('%d %b %H:%M UTC')}</i>")
+
+    rows = [
+        ("Entry", f"{t.entry:,.1f}", ""),
+        ("Stop", f"{t.effective_sl:,.1f}", f"{_diff(t.effective_sl - t.entry)}  {_r((t.effective_sl - t.entry) * sgn / t.risk, 1)}"),
+        ("TP 1", f"{t.tp1:,.1f}", f"{_diff(t.tp1 - t.entry)}  {abs(t.tp1 - t.entry) / t.risk:.1f}R"),
+        ("TP 2", f"{t.tp2:,.1f}", f"{_diff(t.tp2 - t.entry)}  {t.rr:.1f}R"),
+        ("R:R", f"1 : {t.rr:.1f}", ""),
+        ("Confidence", f"{t.confidence}%", ""),
+    ]
     if t.is_open:
-        sl = _size_line(sizing, t.entry, t.tp1, t.tp2)
-        if sl:
-            lines.append(sl)
-        if price is not None and abs(price - t.entry) >= 0.05:
-            lines.append(f"Now <b>{price:,.1f}</b> ({_diff((price - t.entry) * sgn)} · {_r(t.r_at(price))})")
-        plan = management_line(t)
-        if plan:
-            lines.append(plan)
+        sr = _sizing_row(sizing)
+        if sr:
+            rows.append(sr)
+        if price is not None:
+            pnl = (price - t.entry) * sgn
+            rows.append(("Now", f"{price:,.1f}", f"{_diff(pnl)}  {_r(t.r_at(price))}"))
     elif t.result_r is not None:
         mark = "✅" if t.result_r > 0.05 else ("❌" if t.result_r < -0.05 else "➖")
-        lines.append(f"Closed at <b>{t.exit_price:,.1f}</b> · <b>{_r(t.result_r)}</b> {mark}")
+        rows.append(("Result", f"{t.exit_price:,.1f}", f"{_r(t.result_r)} {mark}"))
+    when = t.triggered_at or t.opened_at
+    tail = []
+    if t.is_open:
+        note = sizing_note(sizing, t.entry, t.tp1, t.tp2)
+        if note:
+            tail.append(note)
+        plan = management_line(t)
+        if plan:
+            tail.append(plan)
     if t.trigger_note:
-        lines.append(f"Confirmed by {escape(t.trigger_note)} · conf {t.confidence}%")
-    return "\n".join(lines)
+        tail.append(f"Confirmed by: <b>{escape(t.trigger_note)}</b>")
+    if getattr(t, "confluence", ""):
+        tail.append(confluence_line(t.confluence))
+    if t.reason:
+        tail.append(f"<i>{escape(t.reason)}</i>")
+    tail.append(f"<i>{'Entered' if t.traded else 'Posted'} {when.strftime('%d %b %H:%M UTC')}</i>")
+    return f"{title}\n{_pre(rows)}\n" + "\n".join(tail)
 
 
 def format_signals_overview(active, history: list, stats: dict, price: float | None, sizing_for=None, session: dict | None = None,
@@ -624,11 +575,12 @@ def format_signals_overview(active, history: list, stats: dict, price: float | N
         sz = sizing_for(active.entry, active.sl) if sizing_for else None
         parts.append(format_trade_signal(active, price, sz))
     else:
-        parts.append("⚪ <b>No call right now.</b> A setup is posted when the bias is strong enough; it goes live after a 15-minute confirmation.")
+        parts.append("⚪ <b>No call right now.</b>\nA setup is posted when technicals and news line up with enough confidence; "
+                     "it goes live after a 15-minute confirmation in the entry zone.")
     sl = session_line(session)
     if sl:
         parts.append(sl)
-    closed = [h for h in history if h.traded and not h.is_open][:5]
+    closed = [h for h in history if h.traded and not h.is_open][:8]
     if closed:
         rows = []
         for h in closed:
@@ -641,7 +593,9 @@ def format_signals_overview(active, history: list, stats: dict, price: float | N
         parts.append(f"📊 Closed <b>{stats['count']}</b> · win rate <b>{stats['win_rate']}%</b> · "
                      f"total <b>{_r(stats['total_r'])}</b> · average <b>{_r(stats['avg_r'])}</b>{extra}")
     if mine and mine.get("count"):
-        parts.append(f"🧾 Calls you took: <b>{mine['count']}</b> · win rate <b>{mine['win_rate']}%</b> · total <b>{_r(mine['total_r'])}</b>")
+        parts.append(f"🧾 Calls you took: <b>{mine['count']}</b> · win rate <b>{mine['win_rate']}%</b> · total <b>{_r(mine['total_r'])}</b>"
+                     f" — mark calls with /took or /skipped")
+    parts.append(DISCLAIMER)
     return "\n\n".join(parts)
 
 
@@ -681,153 +635,47 @@ def format_scorecard(week: dict, allt: dict, mine: dict | None, selfcheck: dict 
 
 def format_signal_event(e, sizing: Sizing | None = None) -> str:
     s = e.signal
-    icon = "🔴" if s.side == "SELL" else "🟢"
-    head_bias = f"<b>{s.side} {icon} {s.confidence}%</b>"
-    if e.kind == "setup":
-        return (f"📐 <b>NEW SETUP</b> · {head_bias}\n\n"
-                f"{levels_block(zone_lo=s.zone_lo, zone_hi=s.zone_hi, sl=s.sl, tp1=s.tp1, tp2=s.tp2, sizing=sizing)}\n\n"
-                f"{wait_line(s, s.chase, in_zone=(s.setup_mode == 'in-zone' or s.touched))}")
-    if e.kind == "touched":
-        return (f"👀 <b>ZONE REACHED</b> · {head_bias} at {e.price:,.1f}\n\n"
-                f"{levels_block(zone_lo=s.zone_lo, zone_hi=s.zone_hi, sl=s.sl, tp1=s.tp1, tp2=s.tp2)}\n\n"
-                f"⚠️ Watch the 15-min chart for a confirmation (EMA reclaim, engulfing, rejection wick, break of the pullback).")
-    if e.kind == "triggered":
-        return (f"📡 <b>LIVE CALL</b> · {head_bias}\n\n"
-                f"{levels_block(entry=s.entry, sl=s.effective_sl, tp1=s.tp1, tp2=s.tp2, sizing=sizing)}\n\n"
-                f"Confirmed by {escape(s.trigger_note or '15-min confirmation')}.\n{management_line(s)}")
-    if e.kind == "tp1":
-        stop = f"stop at break-even {s.effective_sl:,.1f}" if s.sl_current is not None else f"stop stays {s.sl:,.1f}"
-        return (f"🎯 <b>TP1 HIT</b> · {s.side} from {s.entry:,.1f}\n"
-                f"Half booked at <b>{e.price:,.1f}</b> ({_r(s.r_at(e.price))}) · {stop} · rest runs to TP2 <b>{s.tp2:,.1f}</b>")
-    closes = {"tp2": "🏁 <b>TP2 HIT — closed</b>", "stopped": "🛑 <b>STOPPED OUT — closed</b>",
-              "flipped": "🔁 <b>CLOSED — bias flipped</b>", "expired": "⌛ <b>CLOSED — max hold</b>"}
-    if e.kind in closes:
-        mark = "✅" if (s.result_r or 0) > 0.05 else ("❌" if (s.result_r or 0) < -0.05 else "➖")
-        return f"{closes[e.kind]} · {s.side} from {s.entry:,.1f}\nClosed at <b>{e.price:,.1f}</b> · <b>{_r(s.result_r or 0.0)}</b> {mark}"
-    no_trade = {"missed": "🏃 <b>SETUP MISSED</b> — price ran without a pullback, no trade",
-                "invalidated": f"🚫 <b>SETUP INVALIDATED</b> — price went through {s.sl:,.1f} first, no trade",
-                "cancelled": "↩️ <b>SETUP CANCELLED</b> — bias changed, no trade",
-                "stale": "⌛ <b>SETUP EXPIRED</b> — no confirmation in time, no trade"}
-    if e.kind in no_trade:
-        return f"{no_trade[e.kind]}\n{s.side} zone was {_num(s.zone_lo)} – {_num(s.zone_hi)}"
-    return f"{e.kind}: {escape(e.text)}"
+    head = {
+        "setup": f"📐 <b>NEW {s.side} SETUP</b> — wait for the zone",
+        "touched": f"👀 <b>{s.side} ZONE REACHED</b> — watch the 15-minute chart for a confirmation",
+        "triggered": f"📡 <b>{s.side} CONFIRMED — LIVE CALL</b>",
+        "tp1": "🎯 <b>TAKE PROFIT 1 HIT</b>",
+        "tp2": "🏁 <b>TAKE PROFIT 2 HIT — closed</b>",
+        "stopped": "🛑 <b>STOPPED OUT — closed</b>",
+        "flipped": "🔁 <b>CLOSED — bias flipped</b>",
+        "expired": "⌛ <b>CLOSED — max hold reached</b>",
+        "missed": "🏃 <b>SETUP MISSED</b> — price ran without a pullback, no trade",
+        "invalidated": "🚫 <b>SETUP INVALIDATED</b> — no trade",
+        "cancelled": "↩️ <b>SETUP CANCELLED</b> — bias changed, no trade",
+        "stale": "⌛ <b>SETUP EXPIRED</b> — no confirmation in time, no trade",
+    }.get(e.kind, e.kind)
+    body = format_trade_signal(s, e.price if s.is_live else None, sizing)
+    return f"{head}\n\n{body}\n\n{DISCLAIMER}"
 
 
 # ---------------------------------------------------------------------------
 # full report
 # ---------------------------------------------------------------------------
-def format_pulse(tech: TechSnapshot, sig: Signal, trade=None, sizing: Sizing | None = None, events: list | None = None,
-                 as_of: datetime | None = None, news: NewsScore | None = None, briefing: str | None = None,
-                 title: str = "XAU/USD UPDATE") -> str:
-    """The scheduled update (and /signal): price · bias/trend · the levels · what to do · top headline · next release."""
-    ts = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%H:%M UTC")
-    parts = [f"📌 <b>{escape(title)}</b> · {ts}\nPrice <b>{tech.price:,.1f}</b> ({_chg(tech.change_24h_pct)})"]
-    if trade is not None and trade.is_open:
-        parts.append(bias_lines(sig, tech, tag="<b>LIVE CALL</b>", trade=trade))
-        parts.append(levels_block(entry=trade.entry, sl=trade.effective_sl, tp1=trade.tp1, tp2=trade.tp2, sizing=sizing,
-                                  now=tech.price, r_now=trade.r_at(tech.price), ref=trade.entry))
-        parts.append(management_line(trade))
-    elif trade is not None:
-        parts.append(bias_lines(sig, tech, tag="setup", trade=trade))
-        parts.append(levels_block(zone_lo=trade.zone_lo, zone_hi=trade.zone_hi, sl=trade.sl, tp1=trade.tp1, tp2=trade.tp2, sizing=sizing))
-        parts.append(wait_line(trade, trade.chase, in_zone=(trade.setup_mode == "in-zone" or trade.touched)))
-    elif sig.direction != "flat" and sig.stop is not None and sig.zone_lo is not None and sig.confidence >= MIN_CONF:
-        parts.append(bias_lines(sig, tech))
-        parts.append(levels_block(zone_lo=sig.zone_lo, zone_hi=sig.zone_hi, sl=sig.stop, tp1=sig.target1, tp2=sig.target2, sizing=sizing))
-        parts.append(wait_line(sig, sig.chase_limit, in_zone=(sig.entry_mode == "in-zone")))
-    else:
-        parts.append(bias_lines(sig, tech))
-        parts.append(no_call_lines(sig))
-    tail = []
-    if news is not None and news.drivers:
-        top = news.drivers[0]
-        tail.append(f"📰 {escape(top.title)} <i>({escape(top.source)}, {_age(top)})</i>")
+def format_full_report(tech: TechSnapshot, news: NewsScore, sig: Signal, briefing: str | None,
+                       source: str, as_of: datetime, max_headlines: int = 6, hours: int = 36,
+                       events: list | None = None, trade=None, sizing: Sizing | None = None) -> str:
+    sections = [price_header(tech), format_signal(sig)]
+    if trade is not None:
+        sections.append(format_trade_signal(trade, tech.price, sizing))
     nxt = next((e for e in (events or []) if e.impact == "High" and e.minutes_away > -15), None)
     if nxt is not None:
-        tail.append(f"⏱ {escape(nxt.title)} {_countdown(nxt.minutes_away)}")
-    sl = session_line(sig.session)
-    if sl and not (sig.session or {}).get("allow_entries", True):
-        tail.append(sl)
-    if tail:
-        parts.append("\n".join(tail))
-    if briefing:
-        parts.append(f"🧠 <b>AI BRIEFING</b>\n{escape(briefing)}")
-    return "\n\n".join(parts)
-
-
-def _short_source(src: str, n: int = 18) -> str:
-    src = (src or "").split(" – ")[0].split(" - ")[0].split(" | ")[0].strip()
-    src = re.sub(r"^www\.", "", src)
-    return src[:n].rstrip() + ("…" if len(src) > n else "")
-
-
-def headline_short(a: Article, max_len: int = 95) -> str:
-    """One line: icon, linked title (trimmed), short source, age."""
-    title = a.title if len(a.title) <= max_len else a.title[:max_len].rsplit(" ", 1)[0] + "…"
-    title = escape(title)
-    if a.link:
-        title = f'<a href="{escape(a.link, quote=True)}">{title}</a>'
-    return f"{_impact_icon(a)} {title} <i>({_short_source(a.source)}, {_age(a)})</i>"
-
-
-def format_structure(tech: TechSnapshot) -> str:
-    """Structure in two lines + macro in one."""
-    pa = tech.pa
-    if pa is None:
-        return ""
-    def st(x, tf):
-        txt = f"{_STRUCT_ICON.get(x.trend, '⚪')} {tf} {escape(x.trend)}" + (f" ({escape(x.label)})" if x.label else "")
-        if x.bos:
-            txt += f" · BOS {x.bos} {x.bos_level:,.1f}"
-        if x.choch:
-            txt += f" · CHoCH {x.choch} {x.choch_level:,.1f}"
-        return txt
-    adx = f"ADX {pa.adx:.0f}" if pa.adx == pa.adx else "ADX n/a"
-    vol = "high" if pa.atr_pct >= 85 else "low" if pa.atr_pct <= 15 else "normal"
-    lines = [st(pa.h4, "H4"), st(pa.h1, "H1"), f"{escape(pa.regime).capitalize()} · {adx} · volatility {vol}"
-             + (f" · {escape(pa.divergence)} RSI divergence" if pa.divergence else "")]
-    m = getattr(tech, "macro", None)
-    if m and isinstance(m, dict):
-        lines.append(f"🌍 Macro {escape(m.get('label', 'mixed'))} for gold ({_m(f'{m.get('score', 0):+d}')})")
-    return "🧱 <b>STRUCTURE</b>\n" + "\n".join(lines)
-
-
-def format_key_levels(tech: TechSnapshot) -> str:
-    below, above = tech.levels_around(max_dist_atr=4.0)
-    rows: list[tuple] = []
-    for name, lvl in reversed(above[:3]):
-        rows.append((_LEVEL_SHORT.get(name, name), f"{lvl:,.1f}", _diff(lvl - tech.price)))
-    rows.append(("▶ now", f"{tech.price:,.1f}", ""))
-    for name, lvl in below[:3]:
-        rows.append((_LEVEL_SHORT.get(name, name), f"{lvl:,.1f}", _diff(lvl - tech.price)))
-    return "📐 <b>KEY LEVELS</b>\n" + _pre(rows, right=(1, 2)) if len(rows) > 1 else ""
-
-
-def format_full_report(tech: TechSnapshot, news: NewsScore, sig: Signal, briefing: str | None,
-                       source: str, as_of: datetime, max_headlines: int = 3, hours: int = 36,
-                       events: list | None = None, trade=None, sizing: Sizing | None = None) -> str:
-    """/analyze – the update, then briefing, structure, key levels, three headlines, the next releases. ~25 lines."""
-    sections = [format_pulse(tech, sig, trade, sizing, events, as_of, title="XAU/USD ANALYSIS")]
+        sections.append(format_next_event(nxt))
     if briefing:
         sections.append(f"🧠 <b>AI BRIEFING</b>\n{escape(briefing)}")
-    st = format_structure(tech)
-    if st:
-        sections.append(st)
-    kl = format_key_levels(tech)
-    if kl:
-        sections.append(kl)
-    head = f"📰 <b>NEWS</b> · score {_m(f'{news.score:+d}')} · {escape(news.label.split(' / ')[0].lower())}"
-    if news.drivers:
-        sections.append(head + "\n" + "\n".join(headline_short(a) for a in news.drivers[:max(1, min(max_headlines, 3))]))
-    else:
-        sections.append(head + "\n<i>no relevant headlines yet</i>")
+    pa_text = format_price_action(tech)
+    if pa_text:
+        sections.append(pa_text)
+    sections.append(format_technicals(tech))
+    sections.append(format_news(news, max_items=max_headlines, hours=hours))
     if events:
-        ev = []
-        for e in events[:2]:
-            flame = "🔥" if e.impact == "High" else "🔸"
-            ev.append(f"{flame} {escape(e.title)} · {e.when.strftime('%a %H:%M UTC')} · {_countdown(e.minutes_away)}")
-        sections.append("📅 <b>NEXT</b>\n" + "\n".join(ev))
-    return "\n\n".join(sections)
+        sections.append(format_calendar(events, limit=5))
+    sections.append(_footer(source, as_of))
+    return f"\n\n{RULE}\n\n".join(sections)
 
 
 # ---------------------------------------------------------------------------
@@ -835,25 +683,20 @@ def format_full_report(tech: TechSnapshot, news: NewsScore, sig: Signal, briefin
 # ---------------------------------------------------------------------------
 def format_alert_bias_change(prev_bias: str | None, sig: Signal, tech: TechSnapshot) -> str:
     was = escape(prev_bias.replace("_", " ").title()) if prev_bias else "n/a"
-    parts = [f"🔔 <b>BIAS CHANGED</b> · {was} → {escape(BIAS_WORD.get(sig.bias, sig.bias))} {sig.emoji} {sig.confidence}%\n"
-             f"Price <b>{tech.price:,.1f}</b> ({_chg(tech.change_24h_pct)})"]
-    if sig.direction != "flat" and sig.stop is not None and sig.zone_lo is not None and sig.confidence >= MIN_CONF:
-        parts.append(levels_block(zone_lo=sig.zone_lo, zone_hi=sig.zone_hi, sl=sig.stop, tp1=sig.target1, tp2=sig.target2))
-        parts.append(wait_line(sig, sig.chase_limit, in_zone=(sig.entry_mode == "in-zone")))
-    else:
-        parts.append(no_call_lines(sig))
-    return "\n\n".join(parts)
+    return (f"🔔 <b>BIAS CHANGED</b> — {was} → {sig.emoji} <b>{escape(sig.label)}</b>\n"
+            f"XAU/USD <b>{tech.price:,.2f}</b>\n\n{format_signal(sig, compact=True)}\n\n{DISCLAIMER}")
 
 
 def format_alert_news(articles: list[Article]) -> str:
-    return "🚨 <b>HIGH-IMPACT GOLD NEWS</b>\n" + "\n".join(headline_line(a) for a in articles[:3])
+    return "🚨 <b>HIGH-IMPACT GOLD NEWS</b>\n\n" + "\n".join(headline_line(a) for a in articles[:5])
 
 
 def format_alert_price(tech: TechSnapshot, move_pct: float, window_label: str) -> str:
-    direction = "up" if move_pct > 0 else "down"
+    direction = "jumped" if move_pct > 0 else "dropped"
     icon = "🚀" if move_pct > 0 else "📉"
-    return (f"{icon} <b>XAU/USD {direction} {abs(move_pct):.2f}% in the last {window_label}</b> → {tech.price:,.1f}\n"
-            f"RSI {tech.rsi:.0f} · support {_num(tech.nearest_support())} · resistance {_num(tech.nearest_resistance())}")
+    rows = [("Now", f"{tech.price:,.2f}"), ("RSI (14)", f"{tech.rsi:.0f}"), ("ATR (14)", f"{tech.atr:,.1f}"),
+            ("Support", _num(tech.nearest_support())), ("Resistance", _num(tech.nearest_resistance()))]
+    return f"{icon} <b>XAU/USD {direction} {abs(move_pct):.2f}% in the last {window_label}</b>\n{_pre(rows, right=())}"
 
 
 # ---------------------------------------------------------------------------
@@ -981,23 +824,24 @@ def format_backtest(bt: dict | None, on_start: bool = True, variants: dict | Non
 # ---------------------------------------------------------------------------
 HELP = """📖 <b>COMMANDS</b>
 
-<b>Trade</b>
-/signal — bias, confidence, entry zone, stop and targets
-/signals — the live call or setup, recent results
-/analyze — full picture: chart, AI briefing, structure, levels, news, calendar
-/levels — support, resistance, pivots, session levels, fibs
-
 <b>Market</b>
-/price — price, trend, RSI, ATR
-/news — top gold-moving headlines
-/calendar — upcoming USD releases
-/backtest — how the rules did on real bars (2 months, 3 years, alternatives)
+/price — live price, trend, RSI, ATR, nearest levels
+/levels — support, resistance, pivots, session levels and fibs
+/news — latest gold-moving headlines with sentiment
+/calendar — upcoming CPI, FOMC, payrolls and other USD releases
+
+<b>Signals</b>
+/signal — current bias, confidence and the entry plan
+/signals — setup or live BUY / SELL call with stop, targets and results
+/analyze — full report with chart, price action, technicals and news
+/backtest — how these rules did on real bars: last two months, three years, and the alternatives
 
 <b>Settings</b>
-/risk 5000 1 — account and % risk → lot size on every call
-/took · /skipped — mark the latest call (your own scorecard)
-/subscribe · /unsubscribe — the 15-minute report
-/alerts on|off — bias changes, big moves, breaking news, pre-release warnings
+/risk 5000 1 — account size and % risk per trade → lot size on every call
+/took · /skipped — mark the latest call as taken or skipped (your own record in /signals and the weekly scorecard)
+/subscribe · /unsubscribe — scheduled reports in this chat
+/alerts on · /alerts off — bias changes, big moves, breaking news, pre-release warnings
 /status — bot status
+/help — this list
 
 """ + DISCLAIMER
