@@ -38,6 +38,10 @@ class Signal:
     session: dict | None = None       # session verdict used for this signal
     raw_confidence: int = 0           # confidence before the session adjustment
     confluence: list[str] = field(default_factory=list)   # what else sits at the zone (fib, OB, PDL, VWAP…)
+    # ---- lean (only when the bias is NEUTRAL): the plan for the side the scores lean to, shown as reference,
+    #      never posted as a setup. Lets every report carry levels even while no call qualifies.
+    lean_side: str = ""               # "BUY" | "SELL" | ""
+    lean_plan: dict = field(default_factory=dict)   # zone_lo/zone_hi/stop/target1/target2/chase_limit/confluence
 
     @property
     def direction(self) -> str:
@@ -324,6 +328,19 @@ def build_signal(
     direction = "long" if bias in ("BUY", "STRONG_BUY") else "short" if bias in ("SELL", "STRONG_SELL") else "flat"
     plan = plan_entry(direction, tech, atr_stop_mult, atr_target_mult, refine=zone_refine)
     stop, t1, t2 = plan.get("stop"), plan.get("target1"), plan.get("target2")
+    lean_side, lean_plan = "", {}
+    if direction == "flat":
+        tilt = combined if combined != 0 else tech.score
+        if tilt != 0:
+            lean_dir = "long" if tilt > 0 else "short"
+            try:
+                lean_plan = plan_entry(lean_dir, tech, atr_stop_mult, atr_target_mult, refine=zone_refine) or {}
+            except Exception:  # noqa: BLE001
+                lean_plan = {}
+            if lean_plan.get("stop") is not None and lean_plan.get("zone_lo") is not None:
+                lean_side = "BUY" if lean_dir == "long" else "SELL"
+            else:
+                lean_plan = {}
 
     return Signal(
         bias=bias,
@@ -343,6 +360,7 @@ def build_signal(
         zone_lo=plan.get("zone_lo"), zone_hi=plan.get("zone_hi"), chase_limit=plan.get("chase_limit"),
         entry_mode=plan.get("entry_mode", ""), session=session_dict, raw_confidence=raw_confidence,
         confluence=list(plan.get("confluence") or []),
+        lean_side=lean_side, lean_plan=lean_plan,
     )
 
 

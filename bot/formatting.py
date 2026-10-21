@@ -234,6 +234,23 @@ def format_signal(sig: Signal, compact: bool = False) -> str:
         parts.append(f"🎯 <b>{side} PLAN</b> — entry zone <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b>\n{_pre(rows)}\n{how}"
                      + (f"\n{conf}" if conf else ""))
 
+    elif sig.lean_side and sig.lean_plan:
+        lp = sig.lean_plan
+        mid = (lp["zone_lo"] + lp["zone_hi"]) / 2.0
+        risk = abs(mid - lp["stop"])
+        rr = (abs(lp["target2"] - mid) / risk) if risk else 0.0
+        rows = [
+            ("Stop", _num(lp["stop"]), _diff(lp["stop"] - mid)),
+            ("TP 1", _num(lp["target1"]), f"{_diff(lp['target1'] - mid)}  {abs(lp['target1'] - mid) / risk:.1f}R" if risk else _diff(lp["target1"] - mid)),
+            ("TP 2", _num(lp["target2"]), f"{_diff(lp['target2'] - mid)}  {rr:.1f}R"),
+            ("R:R", f"1 : {rr:.1f}", ""),
+        ]
+        how = ("Price is in the zone — a 15-minute confirmation would be needed."
+               if lp.get("entry_mode") == "in-zone" else
+               f"Pullback into the zone, then a 15-minute confirmation. Don't chase beyond {_num(lp.get('chase_limit'))}.")
+        parts.append(f"🎯 <b>LEAN {sig.lean_side}</b> — <i>no call yet (neutral, {sig.confidence}%); the plan if it strengthens</i>\n"
+                     f"Entry zone <b>{_num(lp['zone_lo'])} – {_num(lp['zone_hi'])}</b>\n{_pre(rows)}\n{how}")
+
     tail = []
     sl = session_line(sig.session)
     if sl:

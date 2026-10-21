@@ -128,3 +128,23 @@ def test_lexicon_scored_recent_only_returns_keyword_scored(tmp_path):
     rows[0].scored_by = "claude"
     store.update_scores([rows[0]])
     assert [a.id for a in store.lexicon_scored_recent(hours=36)] == ["k2"]
+
+
+def test_neutral_signal_carries_a_lean_plan(flat_market):
+    from signals.engine import build_signal
+    from news.sentiment import NewsScore
+    from market.analysis import analyze_technicals
+    tech = analyze_technicals(flat_market)
+    news = NewsScore(score=-10, n_articles=3, n_bullish=0, n_bearish=2, n_neutral=1, top_themes=[], drivers=[])
+    sig = build_signal(tech, news)
+    if sig.direction == "flat":
+        assert sig.stop is None                      # nothing the tracker could post
+        if sig.lean_side:                            # a tilt exists → reference plan for that side
+            lp = sig.lean_plan
+            assert sig.lean_side in ("BUY", "SELL") and lp["zone_lo"] < lp["zone_hi"] and lp["stop"] is not None
+            if sig.lean_side == "SELL":
+                assert lp["target2"] < lp["target1"] < lp["zone_lo"] < lp["stop"]
+            else:
+                assert lp["stop"] < lp["zone_hi"] < lp["target1"] < lp["target2"]
+    else:
+        assert sig.lean_side == "" and sig.lean_plan == {}
