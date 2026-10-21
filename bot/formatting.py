@@ -206,6 +206,60 @@ def format_price(tech: TechSnapshot, source: str, as_of: datetime) -> str:
 # ---------------------------------------------------------------------------
 # signal (bias + plan)
 # ---------------------------------------------------------------------------
+def _chg(x: float) -> str:
+    """'▼ 0.40%' – the day change without a sign (the arrow carries it)."""
+    arrow = "▲" if x > 0.005 else ("▼" if x < -0.005 else "•")
+    return f"{arrow} {abs(x):.2f}%"
+
+
+def _r_mult(level: float, ref: float, risk: float) -> str:
+    return f"({abs(level - ref) / risk:.1f}R)" if risk and risk > 0 else ""
+
+
+def levels_block(zone_lo=None, zone_hi=None, entry=None, sl=None, tp1=None, tp2=None, sizing: Sizing | None = None,
+                 now: float | None = None, r_now: float | None = None, ref: float | None = None) -> str:
+    """The stacked levels of the update: ENTRY ZONE / ENTRY, SL, TP1, TP2, Size – aligned in a monospace block."""
+    ref = ref if ref is not None else (entry if entry is not None else ((zone_lo + zone_hi) / 2 if zone_lo is not None else None))
+    risk = abs(ref - sl) if (ref is not None and sl is not None) else 0.0
+    rows: list[tuple] = []
+    if entry is not None:
+        extra = f"   now {now:,.1f} · {_r(r_now)}" if (now is not None and r_now is not None and abs(now - entry) >= 0.05) else ""
+        rows.append(("ENTRY", f"{entry:,.1f}{extra}"))
+    elif zone_lo is not None:
+        rows.append(("ENTRY ZONE", f"{zone_lo:,.1f} – {zone_hi:,.1f}"))
+    if sl is not None:
+        rows.append(("SL", f"{sl:,.1f}" + (f"   ({risk:,.1f} pts)" if risk else "")))
+    if tp1 is not None:
+        rows.append(("TP1", f"{tp1:,.1f}   {_r_mult(tp1, ref, risk)}".rstrip()))
+    if tp2 is not None:
+        rows.append(("TP2", f"{tp2:,.1f}   {_r_mult(tp2, ref, risk)}".rstrip()))
+    if sizing is not None:
+        rows.append(("Size", f"{sizing.lots:.2f} lots · risk {sizing.money(sizing.actual_risk)} ({sizing.pct_of_account:.1f}%)"))
+    return _pre(rows, right=()) if rows else ""
+
+
+def bias_lines(sig: Signal, tech: TechSnapshot | None = None, tag: str = "", trade=None) -> str:
+    """'BIAS: SELL 🔴 52%' and the trend line. With a setup or live call, its side and confidence lead."""
+    if trade is not None:
+        label, emoji, conf = trade.side, ("🔴" if trade.side == "SELL" else "🟢"), trade.confidence
+    else:
+        label, emoji, conf = sig.label.upper().replace(" / WAIT", ""), sig.emoji, sig.confidence
+    head = f"<b>BIAS: {escape(label)} {emoji} {conf}%</b>" + (f" · {tag}" if tag else "")
+    pa = tech.pa if tech is not None else None
+    if pa is not None:
+        adx = f" · ADX {pa.adx:.0f}" if pa.adx == pa.adx else ""
+        trend = f"Trend: H4 {escape(pa.h4.trend)} · H1 {escape(pa.h1.trend)}{adx}"
+    else:
+        trend = f"Trend: {escape(tech.trend_label)}" if tech is not None else "Trend: n/a"
+    return head + "\n" + trend
+
+
+def wait_line(sig_or_trade, chase=None, in_zone: bool = False) -> str:
+    if in_zone:
+        return "⚠️ Price is in the zone — wait for a 15-min confirmation."
+    return "⚠️ Wait for a 15-min confirmation in the zone." + (f" No chase beyond {chase:,.1f}." if chase else "")
+
+
 def plan_line(sig: Signal) -> str:
     """Stop · TP1 · TP2 · R:R on one line (the levels you act on)."""
     if sig.direction == "flat" or sig.stop is None or sig.zone_lo is None:
@@ -258,9 +312,9 @@ def price_action_line(tech: TechSnapshot) -> str:
     return f"🧱 {st(pa.h4, 'H4')} · {st(pa.h1, 'H1')} · {escape(pa.regime)}{adx}{macro}"
 
 
-def format_signal_message(tech: TechSnapshot, sig: Signal, source: str, as_of: datetime) -> str:
-    pa = price_action_line(tech)
-    return f"{price_header(tech)}\n\n{format_signal(sig, compact=True)}" + (f"\n{pa}" if pa else "")
+def format_signal_message(tech: TechSnapshot, sig: Signal, source: str, as_of: datetime, trade=None, sizing: Sizing | None = None,
+                          events: list | None = None) -> str:
+    return format_pulse(tech, sig, trade, sizing, events, as_of, title="XAU/USD SIGNAL")
 
 
 # ---------------------------------------------------------------------------
@@ -607,29 +661,35 @@ def format_scorecard(week: dict, allt: dict, mine: dict | None, selfcheck: dict 
 
 def format_signal_event(e, sizing: Sizing | None = None) -> str:
     s = e.signal
-    side = "🟢 BUY" if s.side == "BUY" else "🔴 SELL"
+    icon = "🔴" if s.side == "SELL" else "🟢"
+    head_bias = f"<b>{s.side} {icon} {s.confidence}%</b>"
     if e.kind == "setup":
-        return f"📐 <b>NEW {s.side} SETUP</b> — wait for the zone\n{format_trade_signal(s, None, sizing, with_title=False)}"
+        return (f"📐 <b>NEW SETUP</b> · {head_bias}\n\n"
+                f"{levels_block(zone_lo=s.zone_lo, zone_hi=s.zone_hi, sl=s.sl, tp1=s.tp1, tp2=s.tp2, sizing=sizing)}\n\n"
+                f"{wait_line(s, s.chase, in_zone=(s.setup_mode == 'in-zone' or s.touched))}")
     if e.kind == "touched":
-        return (f"👀 <b>{s.side} ZONE REACHED</b> at {e.price:,.1f} — watch the 15-minute chart for a confirmation\n"
-                f"Zone {_num(s.zone_lo)} – {_num(s.zone_hi)} · Stop {s.sl:,.1f} · TP1 {s.tp1:,.1f} · TP2 {s.tp2:,.1f}")
+        return (f"👀 <b>ZONE REACHED</b> · {head_bias} at {e.price:,.1f}\n\n"
+                f"{levels_block(zone_lo=s.zone_lo, zone_hi=s.zone_hi, sl=s.sl, tp1=s.tp1, tp2=s.tp2)}\n\n"
+                f"⚠️ Watch the 15-min chart for a confirmation (EMA reclaim, engulfing, rejection wick, break of the pullback).")
     if e.kind == "triggered":
-        return f"📡 <b>{s.side} CONFIRMED — LIVE CALL</b>\n{format_trade_signal(s, e.price, sizing, with_title=False)}"
+        return (f"📡 <b>LIVE CALL</b> · {head_bias}\n\n"
+                f"{levels_block(entry=s.entry, sl=s.effective_sl, tp1=s.tp1, tp2=s.tp2, sizing=sizing)}\n\n"
+                f"Confirmed by {escape(s.trigger_note or '15-min confirmation')}.\n{management_line(s)}")
     if e.kind == "tp1":
         stop = f"stop at break-even {s.effective_sl:,.1f}" if s.sl_current is not None else f"stop stays {s.sl:,.1f}"
-        return (f"🎯 <b>TP1 HIT</b> · {side} from {s.entry:,.1f}\n"
+        return (f"🎯 <b>TP1 HIT</b> · {s.side} from {s.entry:,.1f}\n"
                 f"Half booked at <b>{e.price:,.1f}</b> ({_r(s.r_at(e.price))}) · {stop} · rest runs to TP2 <b>{s.tp2:,.1f}</b>")
     closes = {"tp2": "🏁 <b>TP2 HIT — closed</b>", "stopped": "🛑 <b>STOPPED OUT — closed</b>",
               "flipped": "🔁 <b>CLOSED — bias flipped</b>", "expired": "⌛ <b>CLOSED — max hold</b>"}
     if e.kind in closes:
         mark = "✅" if (s.result_r or 0) > 0.05 else ("❌" if (s.result_r or 0) < -0.05 else "➖")
-        return f"{closes[e.kind]} · {side} from {s.entry:,.1f}\nClosed at <b>{e.price:,.1f}</b> · <b>{_r(s.result_r or 0.0)}</b> {mark}"
+        return f"{closes[e.kind]} · {s.side} from {s.entry:,.1f}\nClosed at <b>{e.price:,.1f}</b> · <b>{_r(s.result_r or 0.0)}</b> {mark}"
     no_trade = {"missed": "🏃 <b>SETUP MISSED</b> — price ran without a pullback, no trade",
                 "invalidated": f"🚫 <b>SETUP INVALIDATED</b> — price went through {s.sl:,.1f} first, no trade",
                 "cancelled": "↩️ <b>SETUP CANCELLED</b> — bias changed, no trade",
                 "stale": "⌛ <b>SETUP EXPIRED</b> — no confirmation in time, no trade"}
     if e.kind in no_trade:
-        return f"{no_trade[e.kind]}\n{side} zone was {_num(s.zone_lo)} – {_num(s.zone_hi)}"
+        return f"{no_trade[e.kind]}\n{s.side} zone was {_num(s.zone_lo)} – {_num(s.zone_hi)}"
     return f"{e.kind}: {escape(e.text)}"
 
 
@@ -637,49 +697,49 @@ def format_signal_event(e, sizing: Sizing | None = None) -> str:
 # full report
 # ---------------------------------------------------------------------------
 def format_pulse(tech: TechSnapshot, sig: Signal, trade=None, sizing: Sizing | None = None, events: list | None = None,
-                 as_of: datetime | None = None, news: NewsScore | None = None, briefing: str | None = None) -> str:
-    """The scheduled message: price, bias, the plan or the live call, structure, top headline, what's next —
-    and the AI briefing only when a fresh one was just written. Short by design."""
-    ts = as_of.astimezone(timezone.utc).strftime("%H:%M UTC") if as_of else datetime.now(timezone.utc).strftime("%H:%M UTC")
-    lines = [f"🥇 <b>XAU/USD {tech.price:,.1f}</b> · {_pct(tech.change_1h_pct, '1h')} · {_pct(tech.change_24h_pct, '24h')} · {ts}",
-             f"{sig.emoji} <b>{escape(sig.label.upper())}</b> {sig.confidence}% · tech {_m(f'{sig.tech_score:+d}')} · news {_m(f'{sig.news_score:+d}')}"
-             f" · RSI {tech.rsi:.0f} · ATR {tech.atr:,.0f}"]
-    if trade is not None:
-        lines.append(format_trade_signal(trade, tech.price if trade.is_open else None, sizing))
+                 as_of: datetime | None = None, news: NewsScore | None = None, briefing: str | None = None,
+                 title: str = "XAU/USD UPDATE") -> str:
+    """The scheduled update (and /signal): price · bias/trend · the levels · what to do · top headline · next release."""
+    ts = (as_of or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%H:%M UTC")
+    parts = [f"📌 <b>{escape(title)}</b> · {ts}\nPrice <b>{tech.price:,.1f}</b> ({_chg(tech.change_24h_pct)})"]
+    if trade is not None and trade.is_open:
+        parts.append(bias_lines(sig, tech, tag="<b>LIVE CALL</b>", trade=trade))
+        parts.append(levels_block(entry=trade.entry, sl=trade.effective_sl, tp1=trade.tp1, tp2=trade.tp2, sizing=sizing,
+                                  now=tech.price, r_now=trade.r_at(tech.price), ref=trade.entry))
+        parts.append(management_line(trade))
+    elif trade is not None:
+        parts.append(bias_lines(sig, tech, tag="setup", trade=trade))
+        parts.append(levels_block(zone_lo=trade.zone_lo, zone_hi=trade.zone_hi, sl=trade.sl, tp1=trade.tp1, tp2=trade.tp2, sizing=sizing))
+        parts.append(wait_line(trade, trade.chase, in_zone=(trade.setup_mode == "in-zone" or trade.touched)))
     elif sig.direction != "flat" and sig.stop is not None and sig.zone_lo is not None:
-        side = "BUY" if sig.direction == "long" else "SELL"
-        lines.append(f"🎯 {side} zone <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b> · {plan_line(sig)}")
-        lines.append(entry_hint(sig))
+        parts.append(bias_lines(sig, tech))
+        parts.append(levels_block(zone_lo=sig.zone_lo, zone_hi=sig.zone_hi, sl=sig.stop, tp1=sig.target1, tp2=sig.target2, sizing=sizing))
+        parts.append(wait_line(sig, sig.chase_limit, in_zone=(sig.entry_mode == "in-zone")))
     else:
-        lines.append("No call — bias not strong enough. Waiting.")
-    pa = price_action_line(tech)
-    if pa:
-        lines.append(pa)
-    lines.append(f"🧭 Support <b>{_num(sig.nearest_support)}</b> · Resistance <b>{_num(sig.nearest_resistance)}</b>")
+        parts.append(bias_lines(sig, tech))
+        parts.append(f"No trade — bias too weak for a call. Waiting.\nLevels: R <b>{_num(sig.nearest_resistance)}</b> · S <b>{_num(sig.nearest_support)}</b>")
+    tail = []
     if news is not None and news.drivers:
         top = news.drivers[0]
-        lines.append(f"📰 {_impact_icon(top)} {escape(top.title)} <i>({escape(top.source)}, {_age(top)})</i>")
+        tail.append(f"📰 {escape(top.title)} <i>({escape(top.source)}, {_age(top)})</i>")
     nxt = next((e for e in (events or []) if e.impact == "High" and e.minutes_away > -15), None)
     if nxt is not None:
-        lines.append(f"⏱ {escape(nxt.title)} {_countdown(nxt.minutes_away)}")
+        tail.append(f"⏱ {escape(nxt.title)} {_countdown(nxt.minutes_away)}")
     sl = session_line(sig.session)
     if sl and not (sig.session or {}).get("allow_entries", True):
-        lines.append(sl)
+        tail.append(sl)
+    if tail:
+        parts.append("\n".join(tail))
     if briefing:
-        lines.append(f"\n🧠 <b>AI BRIEFING</b>\n{escape(briefing)}")
-    return "\n".join(lines)
+        parts.append(f"🧠 <b>AI BRIEFING</b>\n{escape(briefing)}")
+    return "\n\n".join(parts)
 
 
 def format_full_report(tech: TechSnapshot, news: NewsScore, sig: Signal, briefing: str | None,
                        source: str, as_of: datetime, max_headlines: int = 5, hours: int = 36,
                        events: list | None = None, trade=None, sizing: Sizing | None = None) -> str:
     """/analyze – the complete picture, still tight: decision, call, briefing, structure and levels, news, calendar."""
-    sections = [f"{price_header(tech)}\n\n{format_signal(sig)}"]
-    if trade is not None:
-        sections.append(format_trade_signal(trade, tech.price, sizing))
-    nxt = next((e for e in (events or []) if e.impact == "High" and e.minutes_away > -15), None)
-    if nxt is not None:
-        sections.append(format_next_event(nxt))
+    sections = [format_pulse(tech, sig, trade, sizing, events, as_of, title="XAU/USD ANALYSIS")]
     if briefing:
         sections.append(f"🧠 <b>AI BRIEFING</b>\n{escape(briefing)}")
     pa_text = format_price_action(tech)
@@ -697,14 +757,14 @@ def format_full_report(tech: TechSnapshot, news: NewsScore, sig: Signal, briefin
 # ---------------------------------------------------------------------------
 def format_alert_bias_change(prev_bias: str | None, sig: Signal, tech: TechSnapshot) -> str:
     was = escape(prev_bias.replace("_", " ").title()) if prev_bias else "n/a"
-    lines = [f"🔔 <b>BIAS CHANGED</b> — {was} → {sig.emoji} <b>{escape(sig.label)}</b> {sig.confidence}% · XAU/USD {tech.price:,.1f}"]
+    parts = [f"🔔 <b>BIAS CHANGED</b> · {was} → {escape(sig.label.upper().replace(' / WAIT', ''))} {sig.emoji} {sig.confidence}%\n"
+             f"Price <b>{tech.price:,.1f}</b> ({_chg(tech.change_24h_pct)})"]
     if sig.direction != "flat" and sig.stop is not None and sig.zone_lo is not None:
-        side = "BUY" if sig.direction == "long" else "SELL"
-        lines.append(f"🎯 {side} zone <b>{_num(sig.zone_lo)} – {_num(sig.zone_hi)}</b> · {plan_line(sig)}")
-        lines.append(entry_hint(sig))
+        parts.append(levels_block(zone_lo=sig.zone_lo, zone_hi=sig.zone_hi, sl=sig.stop, tp1=sig.target1, tp2=sig.target2))
+        parts.append(wait_line(sig, sig.chase_limit, in_zone=(sig.entry_mode == "in-zone")))
     else:
-        lines.append("No trade plan yet — the bias is not strong enough for a call.")
-    return "\n".join(lines)
+        parts.append("No trade plan yet — the bias is not strong enough for a call.")
+    return "\n\n".join(parts)
 
 
 def format_alert_news(articles: list[Article]) -> str:

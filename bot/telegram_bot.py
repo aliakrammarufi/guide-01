@@ -357,7 +357,11 @@ class SentinelBot:
     async def cmd_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
         rep = await self.cache.get(with_briefing=False)
-        await self._send(update.effective_chat.id, fmt.format_signal_message(rep.tech, rep.signal, rep.data.source, rep.data.last_bar_time))
+        chat_id = update.effective_chat.id
+        trade = self.cache.tracker.live()
+        sizing = self._sizing(chat_id, trade.entry, trade.sl) if trade is not None else None
+        await self._send(chat_id, fmt.format_signal_message(rep.tech, rep.signal, rep.data.source, rep.data.last_bar_time,
+                                                            trade=trade, sizing=sizing, events=rep.events))
 
     async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
