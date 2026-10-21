@@ -17,14 +17,12 @@ log = logging.getLogger(__name__)
 
 SYSTEM = """You are a concise, no-hype gold (XAU/USD) market analyst writing for a trader on Telegram.
 You receive a technical snapshot and the most relevant scored headlines.
-
-Write a briefing of at most 120 words, plain text (no markdown headers, no bullet symbols other than '•'):
-1. One-line bias: bullish / bearish / neutral and why (tech + news agreement or conflict).
-2. 2-3 key drivers from the news (name the theme, be specific).
-3. What to watch next (the nearest levels or upcoming event mentioned in the news).
-4. One risk / invalidation note.
-
-Never promise outcomes, never give position sizes, never say "guaranteed". This is decision support only."""
+Write at most 80 words as 3 or 4 plain sentences, no bullet points, no headers, no markdown:
+1. The bias and the one reason that matters most (technicals and news agree, or conflict).
+2. The one or two news drivers, named specifically.
+3. What to watch next: the nearest level or the next scheduled release.
+4. One risk that would invalidate the view.
+Never promise outcomes, never give position sizes, never say "guaranteed". Finish every sentence."""
 
 
 def _fmt_level(x: float | None) -> str:
@@ -82,11 +80,16 @@ def write_briefing(api_key: str, model: str, tech: TechSnapshot, news: NewsScore
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
             model=model,
-            max_tokens=400,
+            max_tokens=700,
             system=SYSTEM,
             messages=[{"role": "user", "content": build_context(tech, news, events)}],
         )
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+        text = " ".join(text.split())                    # one paragraph
+        if getattr(resp, "stop_reason", "") == "max_tokens" or (text and text[-1] not in ".!?"):
+            cut = max(text.rfind(". "), text.rfind("! "), text.rfind("? "))
+            if cut > 40:
+                text = text[:cut + 1]                    # never send half a sentence
         return text or None
     except Exception as exc:  # noqa: BLE001
         log.warning("AI briefing failed: %s", exc)
