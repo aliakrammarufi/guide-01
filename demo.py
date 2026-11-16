@@ -39,7 +39,7 @@ class DemoPipeline(Pipeline):
         from signals.tracker import SignalTracker
         SignalTracker(store).seed_demo()
 
-    def scan_news(self) -> list[Article]:
+    def scan_news(self, feeds: list[str] | None = None, min_gap_sec: float = 0.0) -> list[Article]:
         now = datetime.now(timezone.utc)
         arts: list[Article] = []
         for title, source, age_h in SAMPLE_HEADLINES:
@@ -58,6 +58,8 @@ class DemoPipeline(Pipeline):
             for a in arts:
                 a.high_impact = is_high_impact(a, self.settings.high_impact_terms)
             self.store.upsert_articles(arts)
+        self.last_scan_at = self.last_full_scan_at = now
+        self.last_scan_new = len(arts)
         return arts
 
     def run(self, with_briefing: bool = True, refresh_news: bool = True, bars_max_age_sec: float = 0.0):

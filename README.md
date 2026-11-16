@@ -234,6 +234,7 @@ lists you can edit, and `NEWS_FEEDS` in `.env` overrides the whole list.
 | Setting | Default | What it controls |
 |---|---|---|
 | `NEWS_SCAN_INTERVAL_MIN` | 3 | how often all feeds are re-scanned and alerts checked |
+| `NEWS_LIVE_INTERVAL_SEC` | 60 | how often the direct publisher / Fed feeds (not the Google News searches) are polled; new headlines go to `/api/news`, the `news` event on `/api/stream` and, when high-impact, straight to Telegram. Minimum 20, `0` = off |
 | `ANALYSIS_INTERVAL_MIN` | 15 | how often the full report (chart, AI briefing) is produced and sent |
 | `QUOTE_PROVIDER` / `QUOTE_INTERVAL_SEC` | goldapi / 1 | live price tick on the terminal: gold-api.com every second (free, no key); falls back to the data provider |
 | `FEED_WORKERS` / `FEED_TIMEOUT_SEC` | 16 / 8 | concurrency and per-feed timeout |
@@ -241,6 +242,8 @@ lists you can edit, and `NEWS_FEEDS` in `.env` overrides the whole list.
 Scanning every 3 minutes with 46 feeds is fine for Google News and the publishers
 above. Going below ~2 minutes gains little (feeds themselves update every few minutes)
 and risks being rate-limited.
+The direct publisher and Fed feeds are the exception: most of them answer conditional
+requests ("304 Not Modified"), so `NEWS_LIVE_INTERVAL_SEC` polls just those every minute.
 
 ---
 
@@ -256,6 +259,7 @@ market/  data.py       yfinance / Twelve Data providers
          indicators.py EMA, RSI, MACD, ATR, Bollinger, swing levels, pivots
          analysis.py   technical score and reasons
 news/    fetch.py      RSS fetching, relevance filter, de-duplication
+         live.py       fast scan cycle for the direct feeds, event hub for the stream
          sentiment.py  keyword rules, Claude classifier, aggregation
          store.py      SQLite: articles, subscribers, state
 signals/ engine.py     combined bias, confidence, reference levels
@@ -265,6 +269,7 @@ bot/     telegram_bot.py, formatting.py, chart.py
 market/  quote.py      fast live quotes + ticker-tape instruments (cached)
 web/     server.py (FastAPI) + static/index.html (terminal UI)
          API: GET /api/report · GET /api/quote · GET /api/tape · POST /api/refresh · GET /api/health
+              GET /api/news (stored headlines, newest first) · GET /api/stream (SSE: ticks + `news` / `signal` events)
 tests/                 offline unit tests (synthetic data)
 ```
 

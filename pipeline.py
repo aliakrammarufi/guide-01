@@ -6,6 +6,8 @@ layer runs it in a worker thread.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -50,6 +52,13 @@ class Pipeline:
         self.calendar = CalendarService(settings.calendar_url, settings.calendar_currencies)
         self._classifier: ClaudeClassifier | None = None
         self._rescored = False
+        # News scans: one at a time (see scan_news); listeners are told about every batch of NEW articles.
+        self._scan_lock = threading.Lock()
+        self.last_scan_at: datetime | None = None          # end of the last scan of any kind
+        self.last_full_scan_at: datetime | None = None     # end of the last scan of every configured feed
+        self.last_scan_took: float | None = None           # seconds
+        self.last_scan_new: int = 0                        # new articles stored by the last scan
+        self.news_listeners: list = []                     # fn(list[Article]) – called from the scanning thread
         if settings.ai_enabled:
             try:
                 self._classifier = ClaudeClassifier(settings.anthropic_api_key, settings.classifier_model)
@@ -58,10 +67,41 @@ class Pipeline:
                 log.warning("Could not initialise Claude classifier: %s", exc)
 
     # ---- news --------------------------------------------------------------
-    def scan_news(self) -> list[Article]:
-        """Fetch feeds, store new articles, score them. Returns the NEW articles."""
+    def scan_news(self, feeds: list[str] | None = None, min_gap_sec: float = 0.0) -> list[Article]:
+        """Fetch feeds, store new articles, score them. Returns the NEW articles.
+
+        ``feeds`` limits the scan to some of the feeds (the fast cycle polls only the direct publisher
+        feeds, see news/live.py); None scans every configured feed. Only one scan runs at a time: a call
+        that arrives while another thread is scanning returns [] at once instead of queueing behind it.
+        A full scan asked for less than ``min_gap_sec`` after the last full scan finished is skipped too.
+        """
+        if not self._scan_lock.acquire(blocking=False):
+            return []
+        try:
+            full = not feeds                      # None (or nothing to narrow to) = every configured feed
+            if full and min_gap_sec > 0 and self.last_full_scan_at is not None \
+                    and (datetime.now(timezone.utc) - self.last_full_scan_at).total_seconds() < min_gap_sec:
+                return []
+            started = time.monotonic()
+            new = self._scan(feeds or self.settings.feeds)
+            self.last_scan_at = datetime.now(timezone.utc)
+            if full:
+                self.last_full_scan_at = self.last_scan_at
+            self.last_scan_took = round(time.monotonic() - started, 2)
+            self.last_scan_new = len(new)
+        finally:
+            self._scan_lock.release()
+        if new:
+            for fn in list(self.news_listeners):
+                try:
+                    fn(new)
+                except Exception:  # noqa: BLE001
+                    log.exception("news listener failed")
+        return new
+
+    def _scan(self, feeds: list[str]) -> list[Article]:
         fetched = fetch_all(
-            self.settings.feeds,
+            feeds,
             max_age_hours=self.settings.news_lookback_hours * 2,
             workers=self.settings.feed_workers,
             timeout=self.settings.feed_timeout_sec,

@@ -6,6 +6,11 @@ Commands: /start /help /price /signal /analyze /news /levels /subscribe
 Jobs:     scheduled full report (every ANALYSIS_INTERVAL_MIN)
           monitor (every NEWS_SCAN_INTERVAL_MIN): news scan, high-impact
           news alerts, big-move alerts, bias-change alerts
+          High-impact news alerts also go out right after any scan stores one
+          (pipeline news listener), not only with the next monitor run.
+
+Updates are handled concurrently; commands answer from the cached report and
+the article store and leave slow work (feed scans, refreshes) to the background.
 """
 from __future__ import annotations
 
@@ -19,7 +24,7 @@ from html import escape
 
 from telegram import BotCommand, ForceReply, Update
 from telegram.constants import ChatAction, ParseMode
-from telegram.error import Forbidden, TelegramError
+from telegram.error import Forbidden, RetryAfter, TelegramError
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot import formatting as fmt
@@ -33,6 +38,9 @@ from state import ReportCache
 log = logging.getLogger(__name__)
 
 TG_LIMIT = 4000  # keep under Telegram's 4096-char message limit
+CONCURRENT_UPDATES = 16   # commands handled side by side: one slow command no longer holds up every other chat
+SEND_CONCURRENCY = 20     # chats served at the same time by a broadcast (Telegram allows about 30 messages/s)
+READY_REPORT_SEC = 600    # a report younger than this is answered from memory (it is refreshed every minute)
 
 
 class SentinelBot:
@@ -40,9 +48,16 @@ class SentinelBot:
         self.settings = settings
         self.store = store
         self.cache = cache
-        self.app: Application = ApplicationBuilder().token(settings.telegram_token).build()
+        self.app: Application = ApplicationBuilder().token(settings.telegram_token).concurrent_updates(CONCURRENT_UPDATES).build()
+        # Handlers run concurrently, all on the event loop: state they share is keyed by chat (this set, the
+        # "risk:<chat>" rows) and only touched between awaits, so it needs no lock of its own.
         self._awaiting_risk: set[tuple[int, int]] = set()     # (chat id, user id) waiting to answer /risk
         self._flush_lock = asyncio.Lock()
+        self._news_alert_lock = asyncio.Lock()                # one breaking-news announcement at a time
+        self._chart_lock = asyncio.Lock()                     # matplotlib's pyplot is not thread-safe: one render at a time
+        self._send_sem = asyncio.Semaphore(SEND_CONCURRENCY)
+        self._bg: set[asyncio.Task] = set()                   # fire-and-forget tasks (kept so they are not garbage collected)
+        self._bg_refresh: asyncio.Task | None = None
         self._register()
 
     # ------------------------------------------------------------------ setup
@@ -183,32 +198,101 @@ class SentinelBot:
                 else:
                     raise
 
-    async def _send_chart(self, chat_id: int, report) -> None:
+    async def _render(self, report) -> bytes | None:
+        """The chart as PNG bytes; None when charts are off or the render failed."""
         if not self.settings.send_charts:
+            return None
+        try:
+            async with self._chart_lock:
+                return await asyncio.to_thread(render_chart, report.data.hourly, report.tech, report.signal)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Chart failed: %s", exc)
+            return None
+
+    async def _send_chart(self, chat_id: int, report, png: bytes | None = None) -> None:
+        if png is None:
+            png = await self._render(report)
+        if png is None:
             return
         try:
-            png = await asyncio.to_thread(render_chart, report.data.hourly, report.tech, report.signal)
             await self.app.bot.send_photo(chat_id, png, caption=f"XAU/USD H1 · {report.signal.label}")
         except Exception as exc:  # noqa: BLE001
             log.warning("Chart failed: %s", exc)
 
     async def _broadcast(self, chat_ids: list[int], text: str, report=None, with_chart: bool = False) -> None:
-        for chat_id in chat_ids:
-            try:
-                if with_chart and report is not None:
-                    await self._send_chart(chat_id, report)
-                await self._send(chat_id, text)
-            except Forbidden:
-                log.info("Chat %s blocked the bot – unsubscribing", chat_id)
-                self.store.unsubscribe(chat_id)
-            except TelegramError as exc:
-                log.warning("Send to %s failed: %s", chat_id, exc)
+        await self._broadcast_each([(chat_id, [text]) for chat_id in chat_ids], report=report, with_chart=with_chart)
+
+    async def _broadcast_each(self, per_chat: list[tuple[int, list[str]]], report=None, with_chart: bool = False) -> None:
+        """Send every chat its own messages. The chats are served side by side (SEND_CONCURRENCY at a time)
+        instead of one after another; within one chat the order is kept: chart first, then the texts."""
+        if not per_chat:
+            return
+        png = await self._render(report) if (with_chart and report is not None) else None    # one render for everybody
+
+        async def one(chat_id: int, texts: list[str]) -> None:
+            async with self._send_sem:
+                if png is not None:
+                    await self._send_chart(chat_id, report, png)
+                for text in texts:
+                    try:
+                        try:
+                            await self._send(chat_id, text)
+                        except RetryAfter as exc:              # flood limit: wait as told, then one more try
+                            await asyncio.sleep(self._retry_wait(exc))
+                            await self._send(chat_id, text)
+                    except Forbidden:
+                        log.info("Chat %s blocked the bot – unsubscribing", chat_id)
+                        self.store.unsubscribe(chat_id)
+                        return
+                    except TelegramError as exc:
+                        log.warning("Send to %s failed: %s", chat_id, exc)
+
+        results = await asyncio.gather(*(one(chat_id, texts) for chat_id, texts in per_chat), return_exceptions=True)
+        for (chat_id, _), res in zip(per_chat, results):
+            if isinstance(res, Exception):
+                log.warning("Send to %s failed: %r", chat_id, res)
+
+    @staticmethod
+    def _retry_wait(exc: RetryAfter) -> float:
+        wait = exc.retry_after                 # seconds today, a timedelta in newer python-telegram-bot versions
+        sec = wait.total_seconds() if hasattr(wait, "total_seconds") else float(wait or 1)
+        return min(30.0, max(0.0, sec)) + 0.5
+
+    def _spawn(self, coro) -> asyncio.Task:
+        """Run ``coro`` in the background; a failure is logged, never raised into a command."""
+        task = asyncio.ensure_future(coro)
+        self._bg.add(task)
+        task.add_done_callback(self._bg_done)
+        return task
+
+    def _bg_done(self, task: asyncio.Task) -> None:
+        self._bg.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            log.warning("Background task failed: %r", task.exception())
 
     async def _typing(self, update: Update) -> None:
+        """Show "typing…" without waiting for Telegram to confirm it: the work starts one round trip sooner."""
+        self._spawn(self._typing_now(update))
+
+    async def _typing_now(self, update: Update) -> None:
         try:
             await update.effective_chat.send_action(ChatAction.TYPING)
         except TelegramError:
             pass
+
+    async def _fresh_report(self, max_age_sec: float = 120.0, get_max_age: int | None = None):
+        """The report for a command that only reads it. A report younger than READY_REPORT_SEC is returned at
+        once (signals/live.minute_refresh keeps it current to the minute); when it is older than
+        ``max_age_sec`` a fast refresh starts behind the reply. Only without a usable report does the command
+        wait for the pipeline, as before (``get_max_age`` is the age cache.get accepts; None = its default)."""
+        rep = self.cache.report
+        if rep is not None:
+            age = (datetime.now(timezone.utc) - rep.generated_at).total_seconds()
+            if age <= READY_REPORT_SEC:
+                if age > max_age_sec and (self._bg_refresh is None or self._bg_refresh.done()):
+                    self._bg_refresh = self._spawn(self.cache.refresh(with_briefing=False, refresh_news=False, fast=True))
+                return rep
+        return await self.cache.get(max_age_sec=get_max_age, with_briefing=False)
 
     # --------------------------------------------------------------- sizing
     def _risk_settings(self, chat_id: int) -> tuple[float | None, float | None]:
@@ -351,19 +435,22 @@ class SentinelBot:
 
     async def cmd_price(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
-        rep = await self.cache.get(max_age_sec=120, with_briefing=False)
+        rep = await self._fresh_report(120, get_max_age=120)
         await self._send(update.effective_chat.id, fmt.format_price(rep.tech, rep.data.source, rep.data.last_bar_time))
 
     async def cmd_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
-        rep = await self.cache.get(with_briefing=False)
+        rep = await self._fresh_report()
         await self._send(update.effective_chat.id, fmt.format_signal_message(rep.tech, rep.signal, rep.data.source, rep.data.last_bar_time))
 
     async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         await self._typing(update)
-        await self._send(chat_id, "⏳ <i>Running the full analysis…</i>")
-        rep = await self.cache.get(with_briefing=True)
+        notice = asyncio.ensure_future(self._send(chat_id, "⏳ <i>Running the full analysis…</i>"))   # sent while the analysis runs
+        try:
+            rep = await self.cache.get(with_briefing=True)
+        finally:
+            await asyncio.gather(notice, return_exceptions=True)     # keep the order: notice, then chart and report
         await self._send_chart(chat_id, rep)
         await self._send(chat_id, self._full_report(rep, chat_id))
 
@@ -378,7 +465,7 @@ class SentinelBot:
 
     async def cmd_signals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
-        rep = await self.cache.get(with_briefing=False)
+        rep = await self._fresh_report()
         tr = self.cache.tracker
         chat_id = update.effective_chat.id
         marks = self.store.marks(chat_id)
@@ -464,10 +551,11 @@ class SentinelBot:
         if not events:
             return
         subs = self.store.subscribers()          # signal calls go to every subscriber, alerts on or off
-        for e in events:
-            for chat_id in subs:
-                sz = self._sizing(chat_id, e.signal.entry, e.signal.sl)
-                await self._broadcast([chat_id], fmt.format_signal_event(e, sz))
+        # Every chat gets its own texts (lot size differs); the chats are served concurrently, the events in order.
+        await self._broadcast_each([
+            (chat_id, [fmt.format_signal_event(e, self._sizing(chat_id, e.signal.entry, e.signal.sl)) for e in events])
+            for chat_id in subs
+        ])
 
     async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
@@ -477,13 +565,18 @@ class SentinelBot:
     async def cmd_news(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
         chat_id = update.effective_chat.id
-        await asyncio.to_thread(self.cache.pipeline.scan_news)
-        news = await asyncio.to_thread(self.cache.pipeline.news_score)
+        pipe = self.cache.pipeline
+        # Answer from the store at once. The scans run on their own (news/live.py and the monitor job); when
+        # the last full one is overdue, start one behind the reply instead of making the user wait for it.
+        last = getattr(pipe, "last_full_scan_at", None)
+        if last is None or (datetime.now(timezone.utc) - last).total_seconds() > self.settings.news_scan_interval_min * 60:
+            self._spawn(asyncio.to_thread(pipe.scan_news))
+        news = await asyncio.to_thread(pipe.news_score)
         await self._send(chat_id, fmt.format_news(news, max_items=12, hours=self.settings.news_lookback_hours))
 
     async def cmd_levels(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
-        rep = await self.cache.get(with_briefing=False)
+        rep = await self._fresh_report()
         await self._send(update.effective_chat.id, fmt.format_levels(rep.tech))
 
     async def cmd_subscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -568,8 +661,7 @@ class SentinelBot:
         await self._flush_signal_events()
         if not subs:
             return
-        for chat_id in subs:
-            await self._broadcast([chat_id], self._full_report(rep, chat_id), report=rep, with_chart=True)
+        await self._broadcast_each([(chat_id, [self._full_report(rep, chat_id)]) for chat_id in subs], report=rep, with_chart=True)
         log.info("Report sent to %d subscriber(s): %s %d%% · %s", len(subs), rep.signal.bias, rep.signal.confidence,
                  f"{self.cache.tracker.live().side} {self.cache.tracker.live().status}" if self.cache.tracker.live() else "no call")
 
@@ -580,13 +672,7 @@ class SentinelBot:
             await asyncio.to_thread(self.cache.pipeline.scan_news)
         except Exception as exc:  # noqa: BLE001
             log.warning("News scan failed: %s", exc)
-        fresh = self.store.unalerted_high_impact(hours=6)
-        if not self.store.get_state("first_scan_done"):
-            # Don't replay hours of old headlines as "breaking" on first start-up
-            self.store.set_state("first_scan_done", True)
-        elif alert_subs and fresh:
-            await self._broadcast(alert_subs, fmt.format_alert_news(fresh))
-        self.store.mark_alerted([a.id for a in fresh])
+        await self._alert_fresh_news()
 
         # 2) heads-up before high-impact scheduled releases (CPI, FOMC, NFP…)
         if alert_subs:
@@ -625,6 +711,19 @@ class SentinelBot:
                 await self._broadcast(alert_subs, fmt.format_alert_price(rep.tech, move, "hour"))
                 self.store.set_state("last_move_alert_at", datetime.now(timezone.utc).isoformat())
 
+    async def _alert_fresh_news(self) -> None:
+        """Announce the high-impact headlines that have not been announced yet. Called by the monitor job and,
+        seconds after a scan stored one, by the pipeline's news listener (see run_forever)."""
+        async with self._news_alert_lock:
+            alert_subs = self.store.subscribers(alerts_only=True)
+            fresh = self.store.unalerted_high_impact(hours=6)
+            if not self.store.get_state("first_scan_done"):
+                # Don't replay hours of old headlines as "breaking" on first start-up
+                self.store.set_state("first_scan_done", True)
+            elif alert_subs and fresh:
+                await self._broadcast(alert_subs, fmt.format_alert_news(fresh))
+            self.store.mark_alerted([a.id for a in fresh])
+
     async def _check_bias_change(self, rep) -> None:
         prev = self.store.get_state("last_signal")
         if bias_changed(prev, rep.signal):
@@ -646,6 +745,12 @@ class SentinelBot:
                 loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._flush_signal_events()))
 
             self.cache.tracker.listeners.append(_on_signal_event)
+
+            def _on_news(new):                  # called from the scanning thread, right after the articles are stored
+                if any(a.high_impact for a in new):
+                    loop.call_soon_threadsafe(lambda: self._spawn(self._alert_fresh_news()))
+
+            self.cache.pipeline.news_listeners.append(_on_news)
             # Allowed chats are the intended recipients: subscribe them on every start, so a
             # redeploy (which resets the free-tier database) never silently drops the reports.
             for cid in self.settings.allowed_chat_ids:
@@ -661,5 +766,7 @@ class SentinelBot:
             except asyncio.CancelledError:
                 pass
             finally:
+                if _on_news in self.cache.pipeline.news_listeners:
+                    self.cache.pipeline.news_listeners.remove(_on_news)
                 await self.app.updater.stop()
                 await self.app.stop()

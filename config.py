@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -171,6 +172,10 @@ class Settings:
     max_headlines_in_report: int = field(default_factory=lambda: _env_int("MAX_HEADLINES", 8))
     feed_workers: int = field(default_factory=lambda: _env_int("FEED_WORKERS", 16))
     feed_timeout_sec: float = field(default_factory=lambda: _env_float("FEED_TIMEOUT_SEC", 8.0))
+    # Fast cycle: the direct publisher / Fed feeds are polled this often (seconds, at least 20) so a headline
+    # reaches the terminal and Telegram within about a minute. Google News stays on NEWS_SCAN_INTERVAL_MIN.
+    # 0 switches the fast cycle off.
+    news_live_interval_sec: int = field(default_factory=lambda: _env_int("NEWS_LIVE_INTERVAL_SEC", 60))
 
     # --- Economic calendar --------------------------------------------------
     calendar_url: str = field(default_factory=lambda: _env("CALENDAR_URL", DEFAULT_CALENDAR_URL))
@@ -250,6 +255,13 @@ class Settings:
     @property
     def ai_enabled(self) -> bool:
         return bool(self.anthropic_api_key)
+
+    @property
+    def direct_feeds(self) -> list[str]:
+        """The configured feeds that are not Google News searches: publisher and Fed feeds. Most of them
+        answer conditional requests (304), so they can be polled every minute; Google News rate-limits
+        bursts (see the back-off in news/fetch.py) and stays on the slower full scan."""
+        return [u for u in self.feeds if (urlsplit(u).hostname or "").lower() != "news.google.com"]
 
     def validate(self) -> list[str]:
         """Return a list of human-readable configuration problems."""

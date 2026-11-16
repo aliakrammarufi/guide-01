@@ -3,6 +3,8 @@ Web dashboard API (FastAPI).
 
 GET  /               the dashboard page
 GET  /api/report     latest analysis as JSON (candles, indicators, signal, news)
+GET  /api/news       the stored headlines, newest first (read straight from the store, no analysis run)
+GET  /api/stream     server-sent events: price ticks (unnamed) plus named "news" and "signal" events
 POST /api/refresh    force a new analysis run
 GET  /api/health     liveness
 """
@@ -21,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from market import indicators as ind
+from news.live import EventHub, article_brief, live_interval, news_watch, sse_event
 from news.store import article_to_dict
 from pipeline import Report
 from state import ReportCache
@@ -169,11 +172,42 @@ def signals_json(tracker, session=None) -> dict:
     }
 
 
-def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
+def news_json(pipeline, limit: int = 40, hours: float | None = None) -> dict:
+    """The stored headlines, newest first, with the current news score. Reads the store only."""
+    st = pipeline.settings
+    limit = max(1, min(200, int(limit)))
+    lookback = float(st.news_lookback_hours) if hours is None or hours != hours else max(0.25, min(float(hours), 14 * 24.0))
+    # Every headline must be traceable to its publisher: no link or no source → not shown.
+    arts = [a for a in pipeline.store.recent_articles(lookback, limit=limit * 2 + 50)
+            if a.source.strip() and a.link.strip().lower().startswith(("http://", "https://"))]
+    arts.sort(key=lambda a: a.published_at, reverse=True)
+    arts = arts[:limit]
+    score = pipeline.news_score()
+    last = getattr(pipeline, "last_scan_at", None)
+    return {
+        "articles": [article_to_dict(a) | {"age_hours": _r(a.age_hours, 1), "direction": a.direction} for a in arts],
+        "score": score.score,
+        "label": score.label,
+        "n_articles": score.n_articles,
+        "n_bullish": score.n_bullish,
+        "n_bearish": score.n_bearish,
+        "n_neutral": score.n_neutral,
+        "themes": [{"theme": th, "value": _r(v, 2)} for th, v in score.top_themes],
+        "last_scan_at": last.isoformat() if last else None,
+        "last_scan_new": getattr(pipeline, "last_scan_new", 0),
+        "scan_interval_sec": int(live_interval(st) or st.news_scan_interval_min * 60),
+        "sources": len({a.source for a in arts}),
+    }
+
+
+def create_app(cache: ReportCache, demo: bool = False, engine=None, hub: EventHub | None = None) -> FastAPI:
     from market.quote import QuoteService
 
     app = FastAPI(title="XAU Sentinel", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+    if hub is None:
+        hub = EventHub()
+    app.state.hub = hub                      # "news" and "signal" events for /api/stream
     basis: dict = {"key": None, "value": 1.0}
 
     def prev_close_for(spot: float) -> float | None:
@@ -234,28 +268,81 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
         if owns_engine:
             await engine.stop()
 
+    # ---- live events: new headlines and signal events → the hub → /api/stream -------
+    live: dict = {"loop": None, "task": None}
+
+    def _on_news(new) -> None:               # called from the scanning thread
+        loop = live["loop"]
+        if loop is not None:
+            hub.publish_threadsafe(loop, "news", {"articles": [article_brief(a) for a in new[:20]], "count": len(new),
+                                                  "at": datetime.now(timezone.utc).isoformat()})
+
+    def _on_signal(ev) -> None:              # called from the tick / pipeline threads
+        loop = live["loop"]
+        if loop is not None:
+            hub.publish_threadsafe(loop, "signal", ev.to_dict())
+
+    @app.on_event("startup")
+    async def _start_live_events():
+        if demo:
+            return
+        live["loop"] = asyncio.get_running_loop()
+        if _on_news not in cache.pipeline.news_listeners:        # a restarted app must not announce twice
+            cache.pipeline.news_listeners.append(_on_news)
+        if _on_signal not in cache.tracker.listeners:
+            cache.tracker.listeners.append(_on_signal)
+        if owns_engine and live["task"] is None and live_interval(cache.pipeline.settings):
+            live["task"] = asyncio.create_task(news_watch(cache, hub), name="news-watch")   # main.py starts it otherwise
+
+    @app.on_event("shutdown")
+    async def _stop_live_events():
+        if demo:
+            return
+        if _on_news in cache.pipeline.news_listeners:
+            cache.pipeline.news_listeners.remove(_on_news)
+        if _on_signal in cache.tracker.listeners:
+            cache.tracker.listeners.remove(_on_signal)
+        task, live["task"], live["loop"] = live["task"], None, None
+        if task is not None:
+            task.cancel()
+
     @app.get("/api/stream")
     async def stream(request: Request):
-        """Server-sent events: one message per tick, instantly."""
+        """Server-sent events: one unnamed message per tick, instantly, plus the named events
+        ``news`` (new headlines) and ``signal`` (trade-call events) within about two seconds."""
         if demo:
             raise HTTPException(404, "no live stream in demo mode")
         q = engine.subscribe()
 
         async def gen():
+            hq = hub.subscribe()
             try:
                 t = engine.latest()
                 yield f"data: {json.dumps(tick_json(t))}\n\n" if t else ": connected\n\n"
+                last_out = time.monotonic()
                 while True:
                     if await request.is_disconnected():
                         break
+                    while True:                                   # named events queued since the last look
+                        try:
+                            kind, payload = hq.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        yield sse_event(kind, payload)
+                        last_out = time.monotonic()
                     try:
-                        t = await asyncio.wait_for(q.get(), timeout=10)
+                        # Short wait: with the market closed no tick wakes this loop, and an event must not sit for long.
+                        t = await asyncio.wait_for(q.get(), timeout=2)
                     except asyncio.TimeoutError:
-                        yield ": ping\n\n"
+                        if time.monotonic() - last_out >= 10:
+                            yield ": ping\n\n"
+                            last_out = time.monotonic()
                         continue
                     yield f"data: {json.dumps(tick_json(t))}\n\n"
+                    last_out = time.monotonic()
             finally:
                 engine.unsubscribe(q)
+                hub.unsubscribe(hq)
 
         return StreamingResponse(gen(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
@@ -293,6 +380,13 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
         deep_v = await asyncio.to_thread(cache.pipeline.store.get_state, "backtest_deep_variants")
         return JSONResponse(bt | {"variants": variants, "deep": deep, "deep_variants": deep_v}, headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/news")
+    async def news(limit: int = 40, hours: float | None = None):
+        """The stored headlines, newest first – as fresh as the last feed scan, not the last report."""
+        data = await asyncio.to_thread(news_json, cache.pipeline, limit, hours)
+        return JSONResponse(data | {"demo": demo, "now": datetime.now(timezone.utc).isoformat()},
+                            headers={"Cache-Control": "no-store"})
+
     @app.get("/api/tape")
     async def tape():
         t = await asyncio.to_thread(quotes.get_tape)
@@ -310,6 +404,8 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
     @app.get("/api/health")
     async def health():
         rep = cache.report
+        pipe = cache.pipeline
+        last_scan = getattr(pipe, "last_scan_at", None)
         return {
             "ok": True,
             "demo": demo,
@@ -319,6 +415,9 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None) -> FastAPI:
             "error": cache.last_error,
             "backup": cache.backup.status() if getattr(cache, "backup", None) else {"enabled": False},
             "live_bars": __import__("market.bars", fromlist=["LIVE"]).LIVE.status() if __import__("market.bars", fromlist=["LIVE"]).LIVE else None,
+            "news": {"last_scan_at": last_scan.isoformat() if last_scan else None,
+                     "last_scan_new": getattr(pipe, "last_scan_new", 0),
+                     "live_interval_sec": 0 if demo else int(live_interval(getattr(pipe, "settings", None)))},
             "now": datetime.now(timezone.utc).isoformat(),
         }
 

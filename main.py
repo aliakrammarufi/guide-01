@@ -88,6 +88,11 @@ async def main_async(args: argparse.Namespace) -> int:
         tasks.append(asyncio.create_task(bar_builder_feed(engine, live_bars.LIVE), name="bar-builder"))
         tasks.append(asyncio.create_task(bar_close_watch(cache), name="bar-close"))
         tasks.append(asyncio.create_task(minute_refresh(cache), name="minute-refresh"))
+        # Headlines within about a minute: the direct publisher feeds on a fast cycle, with or without Telegram
+        # (the web app and the bot hear about new articles through pipeline.news_listeners).
+        from news.live import news_watch
+
+        tasks.append(asyncio.create_task(news_watch(cache), name="news-watch"))
 
     async def guarded(coro, name: str):
         """A crash in one component (e.g. an invalid Telegram token) must not take the others down."""
