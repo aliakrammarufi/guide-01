@@ -112,6 +112,7 @@ async def main_async(args: argparse.Namespace) -> int:
             from bot.telegram_bot import SentinelBot
 
             bot = SentinelBot(settings, store, cache)
+            cache.bot = bot              # /api/health reports whether the bot is polling
             tasks.append(asyncio.create_task(guarded(bot.run_forever(), "Telegram"), name="telegram"))
 
     stop = asyncio.Event()          # set on SIGTERM / SIGINT → orderly shutdown (final backup, stop polling)

@@ -24,7 +24,7 @@ from html import escape
 
 from telegram import BotCommand, ForceReply, Update
 from telegram.constants import ChatAction, ParseMode
-from telegram.error import Forbidden, RetryAfter, TelegramError
+from telegram.error import Forbidden, InvalidToken, RetryAfter, TelegramError
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot import formatting as fmt
@@ -40,6 +40,8 @@ log = logging.getLogger(__name__)
 TG_LIMIT = 4000  # keep under Telegram's 4096-char message limit
 CONCURRENT_UPDATES = 16   # commands handled side by side: one slow command no longer holds up every other chat
 SEND_CONCURRENCY = 20     # chats served at the same time by a broadcast (Telegram allows about 30 messages/s)
+START_RETRY_MIN_SEC = 5   # a failed start (Telegram unreachable at boot) is retried after 5 s, 10 s, … up to
+START_RETRY_MAX_SEC = 300 # … 5 minutes between tries
 READY_REPORT_SEC = 600    # a report younger than this is answered from memory (it is refreshed every minute)
 
 
@@ -58,6 +60,10 @@ class SentinelBot:
         self._send_sem = asyncio.Semaphore(SEND_CONCURRENCY)
         self._bg: set[asyncio.Task] = set()                   # fire-and-forget tasks (kept so they are not garbage collected)
         self._bg_refresh: asyncio.Task | None = None
+        self.state = "starting"                               # starting / running / retrying / stopped (see status())
+        self.state_since = datetime.now(timezone.utc)
+        self.starts_failed = 0
+        self.last_start_error: str | None = None
         self._register()
 
     # ------------------------------------------------------------------ setup
@@ -736,37 +742,83 @@ class SentinelBot:
     # --------------------------------------------------------------- running
     async def run_forever(self) -> None:
         """Start polling and keep running until cancelled (lets us share the
-        event loop with the web dashboard)."""
+        event loop with the web dashboard).
+
+        A start that fails (Telegram unreachable for a moment while the container boots) is tried again
+        with a growing pause instead of leaving the bot off until the next deploy. An invalid token is
+        not retried: that needs a new configuration, not patience."""
+        delay = START_RETRY_MIN_SEC
+        while True:
+            self._set_status("starting")
+            try:
+                await self._run_once()
+                self._set_status("stopped")
+                return
+            except asyncio.CancelledError:
+                self._set_status("stopped")
+                raise
+            except InvalidToken as exc:
+                self._set_status("stopped", exc)
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self.starts_failed += 1
+                self._set_status("retrying", exc)
+                log.error("Telegram start failed (attempt %d): %s – next try in %.0f s", self.starts_failed,
+                          self.last_start_error, delay, exc_info=self.starts_failed == 1)   # full trace once
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                self._set_status("stopped")
+                raise
+            delay = min(START_RETRY_MAX_SEC, delay * 2)
+
+    def _set_status(self, state: str, exc: BaseException | None = None) -> None:
+        self.state = state
+        self.state_since = datetime.now(timezone.utc)
+        if exc is not None:
+            self.last_start_error = f"{type(exc).__name__}: {exc}".rstrip(": ")[:300]
+
+    def status(self) -> dict:
+        """For /api/health: is the bot polling, and if not, why."""
+        return {"state": self.state, "since": self.state_since.isoformat(), "starts_failed": self.starts_failed,
+                "last_error": self.last_start_error}
+
+    async def _run_once(self) -> None:
+        loop = asyncio.get_running_loop()
+
+        def _on_signal_event(_ev):          # called from the tick/pipeline threads: hop onto the bot loop
+            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._flush_signal_events()))
+
+        def _on_news(new):                  # called from the scanning thread, right after the articles are stored
+            if any(a.high_impact for a in new):
+                loop.call_soon_threadsafe(lambda: self._spawn(self._alert_fresh_news()))
+
         async with self.app:
             await self._post_init(self.app)
-            loop = asyncio.get_running_loop()
-
-            def _on_signal_event(_ev):          # called from the tick/pipeline threads: hop onto the bot loop
-                loop.call_soon_threadsafe(lambda: asyncio.ensure_future(self._flush_signal_events()))
-
-            self.cache.tracker.listeners.append(_on_signal_event)
-
-            def _on_news(new):                  # called from the scanning thread, right after the articles are stored
-                if any(a.high_impact for a in new):
-                    loop.call_soon_threadsafe(lambda: self._spawn(self._alert_fresh_news()))
-
-            self.cache.pipeline.news_listeners.append(_on_news)
             # Allowed chats are the intended recipients: subscribe them on every start, so a
             # redeploy (which resets the free-tier database) never silently drops the reports.
             for cid in self.settings.allowed_chat_ids:
                 if cid not in self.store.subscribers():
                     self.store.subscribe(cid)
                     log.info("Auto-subscribed allowed chat %s", cid)
-            await self.app.start()
-            await self.app.updater.start_polling(drop_pending_updates=True)
-            log.info("Polling Telegram…")
+            self.cache.tracker.listeners.append(_on_signal_event)
+            self.cache.pipeline.news_listeners.append(_on_news)
             try:
+                await self.app.start()
+                await self.app.updater.start_polling(drop_pending_updates=True)
+                log.info("Polling Telegram…")
+                self._set_status("running")
+                self.last_start_error = None
                 while True:
                     await asyncio.sleep(3600)
             except asyncio.CancelledError:
                 pass
-            finally:
+            finally:                        # also after a failed start, so a retry never registers them twice
+                if _on_signal_event in self.cache.tracker.listeners:
+                    self.cache.tracker.listeners.remove(_on_signal_event)
                 if _on_news in self.cache.pipeline.news_listeners:
                     self.cache.pipeline.news_listeners.remove(_on_news)
-                await self.app.updater.stop()
-                await self.app.stop()
+                if self.app.updater.running:
+                    await self.app.updater.stop()
+                if self.app.running:
+                    await self.app.stop()

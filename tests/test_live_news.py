@@ -264,6 +264,9 @@ def test_api_news_and_health_report_the_last_scan(web, monkeypatch):
     assert d["last_scan_new"] == 1 and datetime.fromisoformat(d["last_scan_at"]) == web.pipe.last_scan_at
     h = web.client.get("/api/health").json()
     assert h["ok"] is True and h["news"] == {"last_scan_at": web.pipe.last_scan_at.isoformat(), "last_scan_new": 1, "live_interval_sec": 60}
+    assert h["telegram"] == {"state": "off"}                                        # no bot attached to this cache
+    web.cache.bot = SimpleNamespace(status=lambda: {"state": "retrying", "starts_failed": 2})
+    assert web.client.get("/api/health").json()["telegram"] == {"state": "retrying", "starts_failed": 2}
 
 
 def test_new_articles_and_signal_events_are_published_to_the_hub(web, monkeypatch):

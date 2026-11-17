@@ -33,6 +33,7 @@ class ReportCache:
         self._history: list[dict] = []   # recent signals (for the dashboard sparkline)
         self.last_error: str | None = None
         self.backup = None               # StateBackup when REDIS_URL is set (see backup.py)
+        self.bot = None                  # SentinelBot when Telegram is on (see /api/health)
 
     @property
     def report(self) -> Report | None:
