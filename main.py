@@ -94,6 +94,18 @@ async def main_async(args: argparse.Namespace) -> int:
 
         tasks.append(asyncio.create_task(news_watch(cache), name="news-watch"))
 
+    async def loop_watch(step: float = 0.5, warn_sec: float = 1.0):
+        """Say so in the log when the event loop stood still: that is what delays every Telegram reply."""
+        lp = asyncio.get_running_loop()
+        while True:
+            t0 = lp.time()
+            await asyncio.sleep(step)
+            lag = lp.time() - t0 - step
+            if lag > warn_sec:
+                log.warning("Event loop was blocked for %.1f s", lag)
+
+    tasks.append(asyncio.create_task(loop_watch(), name="loop-watch"))
+
     async def guarded(coro, name: str):
         """A crash in one component (e.g. an invalid Telegram token) must not take the others down."""
         try:

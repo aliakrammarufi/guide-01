@@ -18,13 +18,14 @@ import asyncio
 import html
 import re
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from html import escape
 
 from telegram import BotCommand, ForceReply, Update
 from telegram.constants import ChatAction, ParseMode
-from telegram.error import Forbidden, InvalidToken, RetryAfter, TelegramError
+from telegram.error import BadRequest, Forbidden, InvalidToken, NetworkError, RetryAfter, TelegramError
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot import formatting as fmt
@@ -42,6 +43,8 @@ CONCURRENT_UPDATES = 16   # commands handled side by side: one slow command no l
 SEND_CONCURRENCY = 20     # chats served at the same time by a broadcast (Telegram allows about 30 messages/s)
 START_RETRY_MIN_SEC = 5   # a failed start (Telegram unreachable at boot) is retried after 5 s, 10 s, … up to
 START_RETRY_MAX_SEC = 300 # … 5 minutes between tries
+SEND_RETRY_PAUSE_SEC = 1.0  # a send that timed out / lost its connection is tried once more after this pause
+SLOW_COMMAND_SEC = 3.0    # a command that took longer than this to answer is logged as a warning
 READY_REPORT_SEC = 600    # a report younger than this is answered from memory (it is refreshed every minute)
 
 
@@ -50,7 +53,11 @@ class SentinelBot:
         self.settings = settings
         self.store = store
         self.cache = cache
-        self.app: Application = ApplicationBuilder().token(settings.telegram_token).concurrent_updates(CONCURRENT_UPDATES).build()
+        # The library's default of 5 s per request is too tight for this small instance: a short stall turned
+        # into "Timed out" and a lost chart or alert. A healthy request is not slowed by a longer limit.
+        self.app: Application = (ApplicationBuilder().token(settings.telegram_token).concurrent_updates(CONCURRENT_UPDATES)
+                                 .connect_timeout(10).read_timeout(20).write_timeout(20).pool_timeout(10)
+                                 .media_write_timeout(60).build())
         # Handlers run concurrently, all on the event loop: state they share is keyed by chat (this set, the
         # "risk:<chat>" rows) and only touched between awaits, so it needs no lock of its own.
         self._awaiting_risk: set[tuple[int, int]] = set()     # (chat id, user id) waiting to answer /risk
@@ -143,10 +150,15 @@ class SentinelBot:
                     parse_mode=ParseMode.HTML,
                 )
                 return
+            started = time.monotonic()
+            msg = update.effective_message
+            name = (msg.text or "").split()[0][:24] if (msg is not None and msg.text and msg.text.startswith("/")) else func.__name__
             try:
                 await func(update, context)
+                took = time.monotonic() - started
+                log.log(logging.WARNING if took > SLOW_COMMAND_SEC else logging.INFO, "%s answered in %.2f s", name, took)
             except Exception as exc:  # noqa: BLE001
-                log.exception("Command failed")
+                log.exception("Command failed: %s after %.2f s", name, time.monotonic() - started)
                 await context.bot.send_message(chat.id, f"⚠️ Something went wrong: <code>{escape(str(exc)[:300])}</code>", parse_mode=ParseMode.HTML)
         return wrapper
 
@@ -180,6 +192,19 @@ class SentinelBot:
                 units.append(("\n".join(buf), "\n"))
         return units
 
+    async def _tg(self, call):
+        """Run one Telegram request; when it times out or the connection drops, try it once more.
+        A missed call or alert costs more than the rare duplicate (Telegram may have got the first try).
+        A request Telegram rejects (BadRequest, Forbidden, RetryAfter) is not repeated here."""
+        try:
+            return await call()
+        except BadRequest:
+            raise
+        except NetworkError as exc:
+            log.warning("Telegram request failed (%s) – trying once more", exc)
+            await asyncio.sleep(SEND_RETRY_PAUSE_SEC)
+            return await call()
+
     async def _send(self, chat_id: int, text: str, **kwargs) -> None:
         """Send HTML text; long messages are split only at paragraph / line boundaries so
         every chunk keeps its tags balanced (Telegram rejects a chunk cut inside a tag)."""
@@ -196,11 +221,12 @@ class SentinelBot:
             chunks.append(current)
         for chunk in chunks:
             try:
-                await self.app.bot.send_message(chat_id, chunk[:4096], parse_mode=ParseMode.HTML, disable_web_page_preview=True, **kwargs)
+                await self._tg(lambda: self.app.bot.send_message(chat_id, chunk[:4096], parse_mode=ParseMode.HTML, disable_web_page_preview=True, **kwargs))
             except TelegramError as exc:
                 if "parse entities" in str(exc).lower():
                     log.warning("HTML rejected, sending plain text: %s", exc)
-                    await self.app.bot.send_message(chat_id, html.unescape(re.sub(r"<[^>]+>", "", chunk))[:4096], disable_web_page_preview=True, **kwargs)
+                    plain = html.unescape(re.sub(r"<[^>]+>", "", chunk))[:4096]
+                    await self._tg(lambda: self.app.bot.send_message(chat_id, plain, disable_web_page_preview=True, **kwargs))
                 else:
                     raise
 
@@ -215,15 +241,20 @@ class SentinelBot:
             log.warning("Chart failed: %s", exc)
             return None
 
-    async def _send_chart(self, chat_id: int, report, png: bytes | None = None) -> None:
+    async def _send_chart(self, chat_id: int, report, png: bytes | str | None = None) -> str | None:
+        """Send the chart. ``png`` is the image, or the file id of a chart Telegram already has (nothing is
+        uploaded then). Returns that file id for the next chat, None when the chart could not be sent."""
         if png is None:
             png = await self._render(report)
         if png is None:
-            return
+            return None
         try:
-            await self.app.bot.send_photo(chat_id, png, caption=f"XAU/USD H1 · {report.signal.label}")
+            msg = await self._tg(lambda: self.app.bot.send_photo(chat_id, png, caption=f"XAU/USD H1 · {report.signal.label}"))
+            photos = getattr(msg, "photo", None)
+            return photos[-1].file_id if photos else None
         except Exception as exc:  # noqa: BLE001
-            log.warning("Chart failed: %s", exc)
+            log.warning("Chart to %s failed: %s", chat_id, exc)
+            return None
 
     async def _broadcast(self, chat_ids: list[int], text: str, report=None, with_chart: bool = False) -> None:
         await self._broadcast_each([(chat_id, [text]) for chat_id in chat_ids], report=report, with_chart=with_chart)
@@ -234,11 +265,22 @@ class SentinelBot:
         if not per_chat:
             return
         png = await self._render(report) if (with_chart and report is not None) else None    # one render for everybody
+        uploaded: list[str] = []            # the chart's file id once Telegram has it: the other chats reuse it
+        upload_lock = asyncio.Lock()
+
+        async def chart(chat_id: int) -> None:
+            async with upload_lock:         # one upload, not one per chat; a failed one is tried by the next chat
+                if not uploaded:
+                    file_id = await self._send_chart(chat_id, report, png)
+                    if file_id:
+                        uploaded.append(file_id)
+                    return
+            await self._send_chart(chat_id, report, uploaded[0])
 
         async def one(chat_id: int, texts: list[str]) -> None:
             async with self._send_sem:
                 if png is not None:
-                    await self._send_chart(chat_id, report, png)
+                    await chart(chat_id)
                 for text in texts:
                     try:
                         try:
