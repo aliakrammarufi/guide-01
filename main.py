@@ -93,6 +93,12 @@ async def main_async(args: argparse.Namespace) -> int:
         from news.live import news_watch
 
         tasks.append(asyncio.create_task(news_watch(cache), name="news-watch"))
+        if settings.finlight_api_key:                  # headlines pushed the moment the provider has them
+            from news.push import FinlightStream
+
+            cache.push = FinlightStream(cache.pipeline, settings.finlight_api_key, settings.finlight_query,
+                                        settings.finlight_sources, settings.finlight_daily_cap)
+            tasks.append(asyncio.create_task(cache.push.run(), name="news-push"))
 
     async def loop_watch(step: float = 0.5, warn_sec: float = 1.0):
         """Say so in the log when the event loop stood still: that is what delays every Telegram reply."""

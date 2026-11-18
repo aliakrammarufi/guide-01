@@ -176,6 +176,12 @@ class Settings:
     # reaches the terminal and Telegram within about a minute. Google News stays on NEWS_SCAN_INTERVAL_MIN.
     # 0 switches the fast cycle off.
     news_live_interval_sec: int = field(default_factory=lambda: _env_int("NEWS_LIVE_INTERVAL_SEC", 60))
+    # Pushed news (finlight raw stream, news/push.py): on when FINLIGHT_API_KEY is set. Every delivered headline
+    # counts against the plan, so the query is narrow and FINLIGHT_DAILY_CAP closes the stream for the day.
+    finlight_api_key: str = field(default_factory=lambda: _env("FINLIGHT_API_KEY"))
+    finlight_query: str = field(default_factory=lambda: _env("FINLIGHT_QUERY"))
+    finlight_sources: list[str] = field(default_factory=lambda: _env_list("FINLIGHT_SOURCES"))
+    finlight_daily_cap: int = field(default_factory=lambda: _env_int("FINLIGHT_DAILY_CAP", 160))
 
     # --- Economic calendar --------------------------------------------------
     calendar_url: str = field(default_factory=lambda: _env("CALENDAR_URL", DEFAULT_CALENDAR_URL))

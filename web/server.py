@@ -419,6 +419,7 @@ def create_app(cache: ReportCache, demo: bool = False, engine=None, hub: EventHu
                      "last_scan_new": getattr(pipe, "last_scan_new", 0),
                      "live_interval_sec": 0 if demo else int(live_interval(getattr(pipe, "settings", None)))},
             "telegram": cache.bot.status() if getattr(cache, "bot", None) else {"state": "off"},
+            "push": cache.push.status() if getattr(cache, "push", None) else {"state": "off"},
             "now": datetime.now(timezone.utc).isoformat(),
         }
 

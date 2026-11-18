@@ -59,6 +59,11 @@ class Pipeline:
         self.last_scan_took: float | None = None           # seconds
         self.last_scan_new: int = 0                        # new articles stored by the last scan
         self.news_listeners: list = []                     # fn(list[Article]) – called from the scanning thread
+        # Pushed news (news/push.py): headlines the stream stored before any feed scan saw them, and by how
+        # many seconds the stream was ahead once a scan did (the measurement behind "is the stream worth it").
+        self._ingest_lock = threading.Lock()
+        self._pushed_at: dict[str, float] = {}             # article id → time.monotonic() of the pushed arrival
+        self.push_leads: list[float] = []                  # seconds; newest last, at most 500
         if settings.ai_enabled:
             try:
                 self._classifier = ClaudeClassifier(settings.anthropic_api_key, settings.classifier_model)
@@ -106,6 +111,13 @@ class Pipeline:
             workers=self.settings.feed_workers,
             timeout=self.settings.feed_timeout_sec,
         )
+        if self._pushed_at:                                # a feed now carries a headline the stream delivered earlier
+            now_m = time.monotonic()
+            for a in fetched:
+                t0 = self._pushed_at.pop(a.id, None)
+                if t0 is not None:
+                    self.push_leads.append(round(now_m - t0, 1))
+            del self.push_leads[:-500]
         new = [a for a in fetched if not self.store.has_article(a.id)]
         if new:
             self._score(new)
@@ -129,6 +141,30 @@ class Pipeline:
                 self.store.update_scores(done)
                 log.info("AI re-read %d recent headlines that were scored by keywords", len(done))
         self.store.prune(days=14)
+        return new
+
+    def ingest_pushed(self, articles: list[Article]) -> list[Article]:
+        """Store headlines that were pushed to us (not fetched by a scan): the same steps as a scan – skip
+        the known ones, score, flag high impact, store, tell the listeners. Returns the NEW articles."""
+        with self._ingest_lock:
+            new = [a for a in articles if not self.store.has_article(a.id)]
+            if new:
+                self._score(new)
+                for a in new:
+                    a.high_impact = is_high_impact(a, self.settings.high_impact_terms)
+                self.store.upsert_articles(new)
+                now_m = time.monotonic()
+                for a in new:
+                    self._pushed_at[a.id] = now_m
+                if len(self._pushed_at) > 2000:            # headlines no feed ever carried: forget the oldest
+                    for k in list(self._pushed_at)[:1000]:
+                        self._pushed_at.pop(k, None)
+        if new:
+            for fn in list(self.news_listeners):
+                try:
+                    fn(new)
+                except Exception:  # noqa: BLE001
+                    log.exception("news listener failed")
         return new
 
     def _score(self, articles: list[Article]) -> None:
