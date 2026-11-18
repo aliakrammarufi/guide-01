@@ -42,6 +42,7 @@ def test_unusable_or_irrelevant_payloads_are_dropped_and_a_future_timestamp_is_c
     assert push.to_article(payload("Football club signs a new striker"), now) is None           # nothing to do with gold
     assert push.to_article(payload("Gold rises", link="javascript:alert(1)"), now) is None
     assert push.to_article(payload("", link="https://x.test/a"), now) is None
+    assert push.to_article(payload("Junior miner intersects 163 metres of gold", source="www.globenewswire.com"), now) is None
     ahead = push.to_article(payload("Gold rises on dollar weakness", publishDate=(now + timedelta(hours=3)).isoformat()), now)
     assert ahead.published_at == now
     assert push.to_article(payload("Gold rises on dollar weakness", publishDate="not a date"), now).published_at == now
@@ -121,6 +122,7 @@ def test_the_stream_subscribes_and_stores_what_it_is_sent(tmp_path):
     assert h["x-api-key"] == "sk_test" and h["x-takeover"] == "true"
     sub = server.subscriptions[0]
     assert sub["query"] == "title:gold" and sub["sources"] == ["www.reuters.com"] and sub["language"] == "en" and sub["clientNonce"]
+    assert "www.globenewswire.com" in sub["excludeSources"]                    # press-release wires are not subscribed to
     st = stream.status()
     assert (st["received"], st["relevant"], st["stored_first"], st["feeds_had_it"], st["today"]) == (3, 2, 1, 1, 3)
     assert st["lag_sec_median"] is not None and 20 <= st["lag_sec_median"] <= 45 and st["state"] == "off"

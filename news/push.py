@@ -40,8 +40,13 @@ RECONNECT_MAX_SEC = 60.0
 PREEMPTED_WAIT_SEC = 600.0           # another client took the stream over (e.g. the new instance during a deploy)
 LIMIT_WAIT_SEC = 900.0               # the server said "limit": do not hammer it
 # Headline terms only: every delivered article counts against the plan, so no broad full-text search here.
+# "dollar" is not in it: on its first day it mostly matched "Dollar General" and "multibillion-dollar deal".
 DEFAULT_QUERY = ("title:gold OR title:bullion OR title:XAU OR title:Fed OR title:FOMC OR title:Powell OR title:inflation "
-                 "OR title:CPI OR title:payrolls OR title:Treasury OR title:dollar OR title:tariff OR title:ceasefire")
+                 "OR title:CPI OR title:payrolls OR title:Treasury OR title:yields OR title:tariff OR title:ceasefire")
+# Press-release wires: junior miners' drilling results and award announcements carry "gold" in the title, cost a
+# delivery each and move nothing.
+DEFAULT_EXCLUDE_SOURCES = ["www.globenewswire.com", "www.prnewswire.com", "www.accessnewswire.com", "www.businesswire.com",
+                           "www.newsfilecorp.com"]
 
 
 def _parse_time(value) -> datetime | None:
@@ -66,6 +71,8 @@ def to_article(data: dict, now: datetime | None = None) -> Article | None:
     link = str(data.get("link") or "")[:500]
     if not title or not link.startswith("http"):
         return None
+    if _source_name(str(data.get("source") or "")) in {_source_name(x) for x in DEFAULT_EXCLUDE_SOURCES}:
+        return None                           # press-release wire (also excluded in the subscription)
     summary = clean_text(data.get("summary"), 400)
     if not is_relevant(f"{title} {summary}"):
         return None
@@ -78,11 +85,12 @@ def to_article(data: dict, now: datetime | None = None) -> Article | None:
 
 class FinlightStream:
     def __init__(self, pipeline, api_key: str, query: str = "", sources: list[str] | None = None, daily_cap: int = 160,
-                 url: str = WSS_URL):
+                 url: str = WSS_URL, exclude_sources: list[str] | None = None):
         self.pipeline = pipeline
         self.api_key = api_key
         self.query = query.strip() or DEFAULT_QUERY
         self.sources = [s for s in (sources or []) if s]
+        self.exclude_sources = list(DEFAULT_EXCLUDE_SOURCES) if exclude_sources is None else [s for s in exclude_sources if s]
         self.daily_cap = max(0, int(daily_cap))
         self.url = url
         self.state = "starting"               # starting / connected / waiting / capped / off
@@ -134,8 +142,8 @@ class FinlightStream:
         """Connect, listen, reconnect – until cancelled."""
         import websockets
 
-        log.info("Pushed news: finlight raw stream, query %r, sources %s, at most %d headlines a day",
-                 self.query, self.sources or "default", self.daily_cap)
+        log.info("Pushed news: finlight raw stream, query %r, sources %s, excluded %s, at most %d headlines a day",
+                 self.query, self.sources or "default", self.exclude_sources or "none", self.daily_cap)
         delay = RECONNECT_MIN_SEC
         while True:
             wait = delay
@@ -173,7 +181,7 @@ class FinlightStream:
 
     async def _session(self, ws) -> float | None:
         """One connection. Returns how long to wait before the next one (None = the usual back-off)."""
-        sub = {"query": self.query, "sources": self.sources or None, "excludeSources": None, "language": "en",
+        sub = {"query": self.query, "sources": self.sources or None, "excludeSources": self.exclude_sources or None, "language": "en",
                "includeUpdates": False, "clientNonce": str(uuid.uuid4())}
         await ws.send(json.dumps(sub))
         self._last_pong = time.monotonic()

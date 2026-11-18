@@ -102,7 +102,8 @@ async def main_async(args: argparse.Namespace) -> int:
             from news.push import FinlightStream
 
             cache.push = FinlightStream(cache.pipeline, settings.finlight_api_key, settings.finlight_query,
-                                        settings.finlight_sources, settings.finlight_daily_cap)
+                                        settings.finlight_sources, settings.finlight_daily_cap,
+                                        exclude_sources=settings.finlight_exclude_sources or None)
             tasks.append(asyncio.create_task(cache.push.run(), name="news-push"))
 
     async def loop_watch(step: float = 0.5, warn_sec: float = 1.0):

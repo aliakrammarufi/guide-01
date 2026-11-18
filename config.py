@@ -182,6 +182,7 @@ class Settings:
     finlight_query: str = field(default_factory=lambda: _env("FINLIGHT_QUERY"))
     finlight_sources: list[str] = field(default_factory=lambda: _env_list("FINLIGHT_SOURCES"))
     finlight_daily_cap: int = field(default_factory=lambda: _env_int("FINLIGHT_DAILY_CAP", 160))
+    finlight_exclude_sources: list[str] = field(default_factory=lambda: _env_list("FINLIGHT_EXCLUDE_SOURCES"))   # empty = built-in list
 
     # --- Economic calendar --------------------------------------------------
     calendar_url: str = field(default_factory=lambda: _env("CALENDAR_URL", DEFAULT_CALENDAR_URL))
