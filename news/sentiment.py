@@ -306,10 +306,37 @@ def _term_re(terms: list[str]) -> re.Pattern:
 def is_high_impact(article: Article, terms: list[str]) -> bool:
     """High-impact = the headline itself is about a gold driver AND it carries a market-moving term
     (or the classifier scored it strongly). Whole words only ('warns' is not 'war', 'toward' is not 'war');
-    the summary alone never qualifies a story."""
+    the summary alone never qualifies a story.
+
+    When the AI reader scored the headline, its verdict outranks the keyword: "tariff" in a retailer's earnings
+    story or "war" in a feature article was scored 0 ("no direct gold link") and still went out as a
+    high-impact alert. A keyword match now also needs a real score from the reader (|impact| >= 1, confidence
+    >= 0.5). Headlines scored by the keyword scorer (no AI key) keep the plain keyword rule."""
     if not _CORE_RE.search(article.title or ""):
         return False
+    strong = article.impact is not None and abs(article.impact) >= 1.5 and (article.confidence or 0) >= 0.6
     text = f"{article.title} {article.summary[:160]}"
     if terms and _term_re(terms).search(text):
+        if article.scored_by == "claude":
+            return strong or (article.impact is not None and abs(article.impact) >= 1.0 and (article.confidence or 0) >= 0.5)
         return True
-    return article.impact is not None and abs(article.impact) >= 1.5 and (article.confidence or 0) >= 0.6
+    return strong
+
+
+_SAME_STORY_STOP = frozenset("a an the of to in on at for and or as by with from is are was be it its this that says say said "
+                             "after over amid into up down new us u s".split())
+
+
+def _story_words(title: str) -> set[str]:
+    words = re.findall(r"[a-z0-9]+", (title or "").lower().replace("’", "'").replace("'s", ""))
+    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words if w not in _SAME_STORY_STOP}
+
+
+def same_story(a: str, b: str) -> bool:
+    """Two headlines about the same story (several outlets on one wire report). Deliberately strict – at least
+    four shared words and three quarters of the shorter headline – so a new development is never taken for a repeat."""
+    wa, wb = _story_words(a), _story_words(b)
+    if not wa or not wb:
+        return False
+    shared = len(wa & wb)
+    return shared >= 4 and shared / min(len(wa), len(wb)) >= 0.75

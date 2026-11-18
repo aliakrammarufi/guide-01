@@ -96,3 +96,36 @@ def test_parse_feed_rss():
 def test_extract_json_array_tolerates_fences():
     assert _extract_json_array('```json\n[{"id": "a", "impact": 1}]\n```')[0]["id"] == "a"
     assert _extract_json_array('Here you go: [{"id": "b"}] thanks')[0]["id"] == "b"
+
+
+def _scored(title, impact, confidence, scored_by="claude"):
+    from datetime import datetime, timezone
+    from news.store import Article
+    return Article(id="x", title=title, link="https://x.test", source="s", summary="", published_at=datetime.now(timezone.utc),
+                   impact=impact, confidence=confidence, scored_by=scored_by)
+
+
+def test_a_keyword_alone_is_not_high_impact_when_the_ai_reader_saw_no_gold_link():
+    terms = ["tariff", "war", "rate hike", "ceasefire"]
+    # scored 0 by the reader: a retailer's earnings and a feature article
+    assert not is_high_impact(_scored("Target's turnaround gains traction, but tariff refunds mute the beat", 0.0, 0.7), terms)
+    assert not is_high_impact(_scored("Inside the old gas pipeline where Ukraine fights an underground war", 0.0, 0.8), terms)
+    assert not is_high_impact(_scored("Analysts ask whether a frozen war can last", 1.0, 0.3), terms)       # a guess, not a reading
+    # a real reading from the reader, with the keyword
+    assert is_high_impact(_scored("Fed's Waller says Fed should consider a half-point rate hike", -1.0, 0.6), terms)
+    # strong score without any keyword still qualifies
+    assert is_high_impact(_scored("US dollar at 19-month high", -2.0, 0.7), terms)
+    # without the AI reader the keyword rule is unchanged
+    assert is_high_impact(_scored("Tariff shock hits markets", 0.4, 0.5, scored_by="lexicon"), terms)
+
+
+def test_repeats_of_one_story_are_recognised_but_a_new_development_is_not():
+    from news.sentiment import same_story
+    a = "Fed’s Waller Says Fed Should Consider Half-Point Rate Hike"
+    assert same_story(a, "Waller Thinks Fed Should Consider Half-Point Rate Hike")
+    assert same_story("Israeli tanks roll into central Gaza in first ground operation since ceasefire began",
+                      "Israeli tanks roll into central Gaza in first known ground operation since ceasefire began")
+    assert not same_story(a, "Fed hikes rates by 50 basis points")            # the decision itself is news
+    assert not same_story(a, "Fed holds rates steady, signals cuts")
+    assert not same_story(a, "Gold plunges to 14-month low as Fed rate hike bets intensify")
+    assert not same_story("", a)

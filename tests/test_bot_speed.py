@@ -225,3 +225,19 @@ def test_fresh_high_impact_news_is_announced_once(tmp_path):
         assert len(sent) == 1
 
     asyncio.run(run())
+
+
+def test_one_alert_per_story_even_when_several_outlets_carry_it(tmp_path):
+    bot, store, sent = make_bot(tmp_path)
+    store.subscribe(1)
+    store.set_state("first_scan_done", True)
+    first = high_impact("Fed’s Waller Says Fed Should Consider Half-Point Rate Hike", minutes_ago=20)
+    store.upsert_articles([first])
+    asyncio.run(bot._alert_fresh_news())
+    assert len(sent) == 1 and "Waller" in sent[0][1]
+    # two more outlets with the same story, and one new development
+    store.upsert_articles([high_impact("Waller Thinks Fed Should Consider Half-Point Rate Hike", minutes_ago=5),
+                           high_impact("Gold plunges to 14-month low as Fed rate hike bets intensify", minutes_ago=3)])
+    asyncio.run(bot._alert_fresh_news())
+    assert len(sent) == 2 and "Gold plunges" in sent[1][1] and "Waller Thinks" not in sent[1][1]
+    assert store.unalerted_high_impact() == []                                   # the repeat is not kept for later either

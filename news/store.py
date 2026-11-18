@@ -214,6 +214,16 @@ class Store:
             ).fetchall()
             return [self._row_to_article(r) for r in rows]
 
+    def alerted_high_impact(self, hours: float = 3) -> list[Article]:
+        """High-impact headlines already announced, newest first (by the time we stored them)."""
+        with self._lock:
+            since = _iso(datetime.now(timezone.utc) - timedelta(hours=hours))
+            rows = self._conn.execute(
+                "SELECT * FROM articles WHERE high_impact=1 AND alerted=1 AND fetched_at >= ? ORDER BY fetched_at DESC LIMIT 60",
+                (since,),
+            ).fetchall()
+            return [self._row_to_article(r) for r in rows]
+
     def prune(self, days: int = 14) -> int:
         cutoff = _iso(datetime.now(timezone.utc) - timedelta(days=days))
         with self._lock, self._conn:

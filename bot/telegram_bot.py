@@ -32,6 +32,7 @@ from bot import formatting as fmt
 from bot.chart import render_chart
 from config import Settings
 from news.store import Store
+from news.sentiment import same_story
 from signals.engine import bias_changed
 from signals.sizing import size_for
 from state import ReportCache
@@ -45,6 +46,7 @@ START_RETRY_MIN_SEC = 5   # a failed start (Telegram unreachable at boot) is ret
 START_RETRY_MAX_SEC = 300 # … 5 minutes between tries
 SEND_RETRY_PAUSE_SEC = 1.0  # a send that timed out / lost its connection is tried once more after this pause
 BROADCAST_RETRY_SEC = (10.0, 30.0, 60.0, 120.0)   # further tries for a report / alert while Telegram is unreachable
+SAME_STORY_HOURS = 3.0    # a high-impact headline repeating a story announced this recently is not announced again
 SLOW_COMMAND_SEC = 3.0    # a command that took longer than this to answer is logged as a warning
 READY_REPORT_SEC = 600    # a report younger than this is answered from memory (it is refreshed every minute)
 
@@ -790,7 +792,17 @@ class SentinelBot:
                 # Don't replay hours of old headlines as "breaking" on first start-up
                 self.store.set_state("first_scan_done", True)
             elif alert_subs and fresh:
-                await self._broadcast(alert_subs, fmt.format_alert_news(fresh))
+                # One alert per story: several outlets carry the same wire report within minutes.
+                said = [a.title for a in self.store.alerted_high_impact(hours=SAME_STORY_HOURS)]
+                tell = []
+                for a in sorted(fresh, key=lambda x: x.published_at):
+                    if any(same_story(a.title, t) for t in said):
+                        log.info("News alert skipped (same story already announced): %s", a.title[:90])
+                        continue
+                    tell.append(a)
+                    said.append(a.title)
+                if tell:
+                    await self._broadcast(alert_subs, fmt.format_alert_news(sorted(tell, key=lambda x: x.published_at, reverse=True)))
             self.store.mark_alerted([a.id for a in fresh])
 
     async def _check_bias_change(self, rep) -> None:
