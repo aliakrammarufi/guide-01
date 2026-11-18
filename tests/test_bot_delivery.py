@@ -120,3 +120,32 @@ def test_every_command_logs_how_long_the_answer_took(tmp_path, monkeypatch, capl
         asyncio.run(bot._guard(cmd)(update, SimpleNamespace(bot=fake)))
     assert fake.messages == [(7, "pong")]
     assert any(r.getMessage().startswith("/price answered in ") for r in caplog.records)
+
+
+def test_a_broadcast_survives_a_short_telegram_outage(tmp_path, monkeypatch):
+    monkeypatch.setattr(tb, "BROADCAST_RETRY_SEC", (0.01, 0.01, 0.01, 0.01))
+    fake = FakeBot(fail=5, exc=TimedOut())             # the quick retry and two more rounds fail, the fourth round gets through
+    bot = make_bot(tmp_path, monkeypatch, fake)
+    asyncio.run(bot._broadcast([7], "TP1 hit"))
+    assert fake.messages == [(7, "TP1 hit")]
+
+
+def test_a_broadcast_gives_up_after_the_last_try_and_does_not_repeat_a_rejected_message(tmp_path, monkeypatch, caplog):
+    monkeypatch.setattr(tb, "BROADCAST_RETRY_SEC", (0.01, 0.01))
+    fake = FakeBot(fail=10**6, exc=TimedOut())
+    bot = make_bot(tmp_path, monkeypatch, fake)
+    with caplog.at_level(logging.ERROR, logger="bot.telegram_bot"):
+        asyncio.run(bot._broadcast([7], "report"))
+    assert fake.messages == [] and fake.calls == 6     # three rounds, each with its quick retry
+    assert any("failed for good" in r.getMessage() for r in caplog.records)
+
+    fake = FakeBot(fail=10**6, exc=BadRequest("message is too long"))
+    bot = make_bot(tmp_path, monkeypatch, fake)
+    asyncio.run(bot._broadcast([7], "report"))
+    assert fake.calls == 1
+
+
+def test_calls_carry_a_size_guide_by_confidence():
+    from bot import formatting as fmt
+    assert "half" in fmt.size_guide(52) and "52%" in fmt.size_guide(52)
+    assert "normal risk" in fmt.size_guide(68) and "half" not in fmt.size_guide(68)

@@ -679,7 +679,22 @@ def format_signal_event(e, sizing: Sizing | None = None) -> str:
         "stale": "⌛ <b>SETUP EXPIRED</b> — no confirmation in time, no trade",
     }.get(e.kind, e.kind)
     body = format_trade_signal(s, e.price if s.is_live else None, sizing)
+    if e.kind in ("setup", "triggered"):
+        body += "\n\n" + size_guide(s.confidence)
     return f"{head}\n\n{body}\n\n{DISCLAIMER}"
+
+
+STRONG_CONFIDENCE = 65      # three-year replay (599 calls): 65%+ made +0.15R a call, 45–64% about +0.05R
+
+
+def size_guide(confidence: int) -> str:
+    """One line on how much to risk on this call. The rules are the same for every call; the replay only shows
+    that the strongest group paid about three times as much per call, so the weaker ones deserve less risk."""
+    if confidence >= STRONG_CONFIDENCE:
+        return (f"📏 <b>Size guide:</b> confidence {confidence}% is in the stronger group ({STRONG_CONFIDENCE}%+) of the "
+                f"three-year test — your normal risk.")
+    return (f"📏 <b>Size guide:</b> confidence {confidence}% is below {STRONG_CONFIDENCE}% — consider <b>half</b> your normal risk. "
+            f"In the three-year test these calls earned about a third as much per trade as the {STRONG_CONFIDENCE}%+ ones.")
 
 
 # ---------------------------------------------------------------------------

@@ -1392,6 +1392,27 @@
     try { const q = await (await fetch('/api/quote', { cache: 'no-store' })).json(); if (last) applyQuote(q); if (q && q.interval_ms) next = Math.max(700, q.interval_ms + 200); } catch (e) { console.error('quote update failed', e); }
     setTimeout(pollQuote, next);
   }
+  function showPushedNews(articles) {
+    const list = $('news');
+    if (!list || firstNews) return;
+    let toasts = 0;
+    articles.slice().reverse().forEach((a) => {
+      if (!a || !a.id || !a.title || seenNews.has(a.id)) return;
+      seenNews.add(a.id);
+      const imp = a.impact ?? 0;
+      if (Math.abs(imp) < 0.35 && !a.high_impact) return;      // this list is for headlines that move gold, not every story
+      const dir = Math.abs(imp) < 0.35 ? 'neu' : imp > 0 ? 'bull' : 'bear';
+      const mins = Math.max(0, Math.round((Date.now() - Date.parse(a.published_at)) / 60000));
+      const age = !isFinite(mins) ? 'just now' : mins < 60 ? mins + ' min ago' : Math.round(mins / 60) + ' h ago';
+      const li = document.createElement('li');
+      li.className = 'fresh';
+      li.innerHTML = `<span class="ico ${dir}">${dir === 'bull' ? '▲' : dir === 'bear' ? '▼' : '•'}</span><div><a class="t" href="${esc(a.link || '#')}" target="_blank" rel="noopener">${esc(a.title)}</a><div class="m"><span class="new">NEW</span>${favicon(a.link)}<span>${esc(a.source || '')}</span><span>${age}</span><span class="imp">impact ${signed(imp.toFixed(1))}</span>${a.reason && a.scored_by === 'claude' ? `<span class="why">${esc(a.reason)}</span>` : ''}</div></div>`;
+      const empty = list.querySelector('li.empty'); if (empty) empty.remove();
+      list.insertBefore(li, list.firstChild);
+      if ((a.high_impact || Math.abs(imp) >= 1) && toasts++ < 2) toast('Gold-moving headline', a.title, dir === 'bull' ? 'bull' : dir === 'bear' ? 'bear' : '');
+    });
+    while (list.children.length > 20) list.removeChild(list.lastChild);
+  }
   // Live tick stream (server-sent events): every tick is pushed the moment the feed prints it.
   // Falls back to polling if the browser or the server cannot stream.
   let streamOk = false;
@@ -1401,6 +1422,9 @@
       let es;
       try { es = new EventSource('/api/stream'); } catch (_) { pollQuote(); return; }
       es.onmessage = (e) => { try { const q = JSON.parse(e.data); streamOk = true; if (last) applyQuote(q); } catch (_) {} };
+      // Headlines are pushed the moment the server stores them (feed scan or live stream): show them at once
+      // instead of at the next one-minute reload.
+      es.addEventListener('news', (e) => { try { showPushedNews(JSON.parse(e.data).articles || []); } catch (_) {} });
       es.onerror = () => { streamOk = false; es.close(); setTimeout(connect, 2500); };
     };
     connect();

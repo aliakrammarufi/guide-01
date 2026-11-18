@@ -44,6 +44,7 @@ SEND_CONCURRENCY = 20     # chats served at the same time by a broadcast (Telegr
 START_RETRY_MIN_SEC = 5   # a failed start (Telegram unreachable at boot) is retried after 5 s, 10 s, … up to
 START_RETRY_MAX_SEC = 300 # … 5 minutes between tries
 SEND_RETRY_PAUSE_SEC = 1.0  # a send that timed out / lost its connection is tried once more after this pause
+BROADCAST_RETRY_SEC = (10.0, 30.0, 60.0, 120.0)   # further tries for a report / alert while Telegram is unreachable
 SLOW_COMMAND_SEC = 3.0    # a command that took longer than this to answer is logged as a warning
 READY_REPORT_SEC = 600    # a report younger than this is answered from memory (it is refreshed every minute)
 
@@ -282,18 +283,32 @@ class SentinelBot:
                 if png is not None:
                     await chart(chat_id)
                 for text in texts:
-                    try:
+                    # A report or alert must survive a short Telegram outage (502s for a few minutes were seen):
+                    # after the quick retry inside _send, try again after 10 s, 30 s, 60 s and 120 s.
+                    for pause in (0.0, *BROADCAST_RETRY_SEC):
+                        if pause:
+                            await asyncio.sleep(pause)
                         try:
-                            await self._send(chat_id, text)
-                        except RetryAfter as exc:              # flood limit: wait as told, then one more try
-                            await asyncio.sleep(self._retry_wait(exc))
-                            await self._send(chat_id, text)
-                    except Forbidden:
-                        log.info("Chat %s blocked the bot – unsubscribing", chat_id)
-                        self.store.unsubscribe(chat_id)
-                        return
-                    except TelegramError as exc:
-                        log.warning("Send to %s failed: %s", chat_id, exc)
+                            try:
+                                await self._send(chat_id, text)
+                            except RetryAfter as exc:          # flood limit: wait as told, then one more try
+                                await asyncio.sleep(self._retry_wait(exc))
+                                await self._send(chat_id, text)
+                            break
+                        except Forbidden:
+                            log.info("Chat %s blocked the bot – unsubscribing", chat_id)
+                            self.store.unsubscribe(chat_id)
+                            return
+                        except BadRequest as exc:              # Telegram rejects the message itself: repeating cannot help
+                            log.warning("Send to %s failed: %s", chat_id, exc)
+                            break
+                        except NetworkError as exc:
+                            log.warning("Send to %s failed: %s – will try again", chat_id, exc)
+                        except TelegramError as exc:
+                            log.warning("Send to %s failed: %s", chat_id, exc)
+                            break
+                    else:
+                        log.error("Send to %s failed for good after %d tries – message lost", chat_id, len(BROADCAST_RETRY_SEC) + 1)
 
         results = await asyncio.gather(*(one(chat_id, texts) for chat_id, texts in per_chat), return_exceptions=True)
         for (chat_id, _), res in zip(per_chat, results):
