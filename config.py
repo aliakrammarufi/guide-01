@@ -186,6 +186,8 @@ class Settings:
     # --- Economic calendar --------------------------------------------------
     calendar_url: str = field(default_factory=lambda: _env("CALENDAR_URL", DEFAULT_CALENDAR_URL))
     calendar_currencies: list[str] = field(default_factory=lambda: _env_list("CALENDAR_CURRENCIES", ["USD"]))
+    # Read the actual number of a scheduled release against its forecast as it prints (news/releases.py).
+    release_watch: bool = field(default_factory=lambda: _env_bool("RELEASE_WATCH", True))
     # minutes before a high-impact release to send the heads-up alert
     event_warn_min: int = field(default_factory=lambda: _env_int("EVENT_WARN_MIN", 30))
 

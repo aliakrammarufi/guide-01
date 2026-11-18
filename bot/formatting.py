@@ -491,6 +491,18 @@ def format_alert_event(e) -> str:
             f"consider tightening risk or waiting for the print.{extra}")
 
 
+def format_alert_release(r: dict) -> str:
+    """A scheduled release that just printed: the number against the forecast and gold's usual first reaction."""
+    icon = {"bullish": "🟢", "bearish": "🔴"}.get(r.get("gold"), "⚪")
+    verdict = {"bullish": "usually <b>bullish for gold</b>", "bearish": "usually <b>bearish for gold</b>"}.get(r.get("gold"), "<b>neutral for gold</b>")
+    prev = f" · previous {escape(str(r.get('previous')))}" if r.get("previous") else ""
+    return (f"📊 <b>{escape(str(r.get('title', '')))}</b> — just released\n"
+            f"Actual <b>{escape(str(r.get('actual')))}</b> vs forecast <b>{escape(str(r.get('forecast')))}</b>{prev}\n"
+            f"{icon} {escape(str(r.get('surprise', '')).capitalize())} → {verdict}\n"
+            f"<i>{escape(str(r.get('why', '')).capitalize())}. First reaction only: the move can reverse and spreads are wide "
+            f"for the first minutes.</i>")
+
+
 # ---------------------------------------------------------------------------
 # trade signals
 # ---------------------------------------------------------------------------

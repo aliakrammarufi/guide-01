@@ -93,6 +93,11 @@ async def main_async(args: argparse.Namespace) -> int:
         from news.live import news_watch
 
         tasks.append(asyncio.create_task(news_watch(cache), name="news-watch"))
+        if settings.calendar_url and settings.release_watch:   # the actual number of a scheduled release, as it prints
+            from news.releases import ReleaseWatcher
+
+            cache.releases = ReleaseWatcher(cache.pipeline)
+            tasks.append(asyncio.create_task(cache.releases.run(), name="release-watch"))
         if settings.finlight_api_key:                  # headlines pushed the moment the provider has them
             from news.push import FinlightStream
 

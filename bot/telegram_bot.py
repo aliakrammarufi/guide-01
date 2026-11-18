@@ -759,6 +759,12 @@ class SentinelBot:
                 await self._broadcast(alert_subs, fmt.format_alert_price(rep.tech, move, "hour"))
                 self.store.set_state("last_move_alert_at", datetime.now(timezone.utc).isoformat())
 
+    def _on_release(self, result: dict) -> None:
+        """A scheduled release printed (news/releases.py, called on the event loop): tell the alert subscribers."""
+        subs = self.store.subscribers(alerts_only=True)
+        if subs:
+            self._spawn(self._broadcast(subs, fmt.format_alert_release(result)))
+
     async def _alert_fresh_news(self) -> None:
         """Announce the high-impact headlines that have not been announced yet. Called by the monitor job and,
         seconds after a scan stored one, by the pipeline's news listener (see run_forever)."""
@@ -845,6 +851,9 @@ class SentinelBot:
                     log.info("Auto-subscribed allowed chat %s", cid)
             self.cache.tracker.listeners.append(_on_signal_event)
             self.cache.pipeline.news_listeners.append(_on_news)
+            releases = getattr(self.cache, "releases", None)
+            if releases is not None:
+                releases.listeners.append(self._on_release)
             try:
                 await self.app.start()
                 await self.app.updater.start_polling(drop_pending_updates=True)
@@ -860,6 +869,8 @@ class SentinelBot:
                     self.cache.tracker.listeners.remove(_on_signal_event)
                 if _on_news in self.cache.pipeline.news_listeners:
                     self.cache.pipeline.news_listeners.remove(_on_news)
+                if releases is not None and self._on_release in releases.listeners:
+                    releases.listeners.remove(self._on_release)
                 if self.app.updater.running:
                     await self.app.updater.stop()
                 if self.app.running:

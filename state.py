@@ -35,6 +35,7 @@ class ReportCache:
         self.backup = None               # StateBackup when REDIS_URL is set (see backup.py)
         self.bot = None                  # SentinelBot when Telegram is on (see /api/health)
         self.push = None                 # FinlightStream when FINLIGHT_API_KEY is set (see news/push.py)
+        self.releases = None             # ReleaseWatcher (see news/releases.py)
 
     @property
     def report(self) -> Report | None:
