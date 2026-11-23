@@ -89,3 +89,30 @@ def test_without_a_reports_chat_everything_goes_to_the_subscribers_as_before(tmp
     assert bot.reports_chat is None and bot._main_subs() == [MAIN]
     asyncio.run(bot._flush_signal_events())
     assert sent == [(MAIN, "<tp2>")]
+
+
+def _report_job(tmp_path, monkeypatch, **over):
+    bot, store, sent = make_bot(tmp_path)
+    for k, v in over.items():
+        setattr(bot.settings, k, v)
+    store.subscribe(REPORTS)
+    rep = SimpleNamespace(signal=SimpleNamespace(bias="NEUTRAL", confidence=0, to_dict=lambda: {}), tech=None)
+
+    async def refresh(**kw):
+        return rep
+
+    async def nothing(*a, **k):
+        return None
+
+    bot.cache.refresh = refresh
+    bot.cache.tracker.live = lambda: None
+    bot._check_bias_change = nothing
+    bot._render = nothing
+    bot._full_report = lambda r, chat_id=None: "FULL REPORT"
+    asyncio.run(bot.job_report(None))
+    return sent
+
+
+def test_the_scheduled_report_stays_out_of_the_results_board_unless_asked(tmp_path, monkeypatch):
+    assert _report_job(tmp_path, monkeypatch) == [(MAIN, "FULL REPORT")]
+    assert _report_job(tmp_path / "b", monkeypatch, reports_chat_full_report=True) == [(REPORTS, "FULL REPORT")]

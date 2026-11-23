@@ -134,6 +134,10 @@ class Settings:
     # closed call and the weekly scorecard. With it set, those leave the main chats, which keep the setups, live
     # calls and alerts. The chat may use the commands like an allowed chat.
     reports_chat_id: int = field(default_factory=lambda: _env_int("TELEGRAM_REPORTS_CHAT_ID", 0))
+    # The reports chat is a results board by default: target hits, closed calls (win / loss) and the weekly
+    # scorecard. true also moves the scheduled full report there (it shows the current bias and entry plan, so
+    # readers take it for a signal); false leaves that report with the main chats as before.
+    reports_chat_full_report: bool = field(default_factory=lambda: _env_bool("TELEGRAM_REPORTS_FULL_REPORT", False))
 
     # --- Market data --------------------------------------------------------
     # "yfinance" (free, no key) or "twelvedata" (free key, true XAU/USD spot)

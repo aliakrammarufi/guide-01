@@ -725,8 +725,10 @@ class SentinelBot:
 
     # ------------------------------------------------------------------ jobs
     async def job_report(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        # With a reports chat the scheduled report goes there and nowhere else; without one, to every subscriber.
-        subs = [self.reports_chat] if self.reports_chat else self.store.subscribers()
+        # The scheduled report goes to the main chats. Only when the reports chat is asked to carry it
+        # (TELEGRAM_REPORTS_FULL_REPORT) does it go there instead: by default that chat is a results board.
+        to_reports = bool(self.reports_chat and getattr(self.settings, "reports_chat_full_report", False))
+        subs = [self.reports_chat] if to_reports else self._main_subs()
         try:
             rep = await self.cache.refresh(with_briefing=bool(subs))
         except Exception:  # noqa: BLE001
@@ -736,7 +738,7 @@ class SentinelBot:
         if not subs:
             return
         await self._broadcast_each([(chat_id, [self._full_report(rep, chat_id)]) for chat_id in subs], report=rep, with_chart=True)
-        log.info("Report sent to %s: %s %d%% · %s", "the reports chat" if self.reports_chat else f"{len(subs)} subscriber(s)",
+        log.info("Report sent to %s: %s %d%% · %s", "the reports chat" if to_reports else f"{len(subs)} subscriber(s)",
                  rep.signal.bias, rep.signal.confidence,
                  f"{self.cache.tracker.live().side} {self.cache.tracker.live().status}" if self.cache.tracker.live() else "no call")
 
