@@ -491,12 +491,15 @@ def format_alert_event(e) -> str:
             f"consider tightening risk or waiting for the print.{extra}")
 
 
-RESULT_KINDS = ("tp2", "stopped", "flipped", "expired")      # the events that close a live call
+RESULT_KINDS = ("tp1", "tp2", "stopped", "flipped", "expired")      # a target reached, or the call closed
 
 
 def format_trade_result(e, stats: dict | None = None) -> str:
     """One closed call for the reports chat: win or loss, how much, and the running record."""
     s = e.signal
+    if e.kind == "tp1":                        # first target reached: the call is still running to TP2
+        return (f"🎯 <b>TARGET 1 HIT</b> — {s.side} call #{s.id}\n"
+                f"Entry {s.entry:,.1f} → TP1 {s.tp1:,.1f} · half booked, the rest runs to TP2 {s.tp2:,.1f}")
     r = s.result_r
     if r is None:
         icon, word = "⚪", "CLOSED"

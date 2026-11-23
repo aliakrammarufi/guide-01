@@ -46,6 +46,8 @@ def test_a_closed_call_is_written_up_for_the_reports_chat():
     assert "WIN" in text and "+0.65R" in text and "SELL call #7" in text and "3,867.7" in text and "take profit 2 hit" in text
     assert "19 wins / 7 losses of 26" in text and "+8.91R" in text
     assert "LOSS" in fmt.format_trade_result(SimpleNamespace(kind="stopped", signal=trade(-1.01, "stopped"), price=3902.5))
+    tp1 = fmt.format_trade_result(SimpleNamespace(kind="tp1", signal=trade(None, "tp1"), price=3858.3))
+    assert "TARGET 1 HIT" in tp1 and "3,858.3" in tp1 and "TP2 3,832.0" in tp1
 
 
 def test_calls_stay_in_the_main_chat_and_results_also_go_to_the_reports_chat(tmp_path, monkeypatch):
