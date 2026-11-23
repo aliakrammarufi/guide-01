@@ -130,6 +130,11 @@ class Settings:
         default_factory=lambda: [int(x) for x in _env_list("TELEGRAM_ALLOWED_CHAT_IDS")]
     )
 
+    # Optional second chat (a group) for what is read at leisure: the scheduled full report, the result of every
+    # closed call and the weekly scorecard. With it set, those leave the main chats, which keep the setups, live
+    # calls and alerts. The chat may use the commands like an allowed chat.
+    reports_chat_id: int = field(default_factory=lambda: _env_int("TELEGRAM_REPORTS_CHAT_ID", 0))
+
     # --- Market data --------------------------------------------------------
     # "yfinance" (free, no key) or "twelvedata" (free key, true XAU/USD spot)
     data_provider: str = field(default_factory=lambda: _env("DATA_PROVIDER", "yfinance"))

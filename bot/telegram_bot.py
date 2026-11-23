@@ -70,6 +70,7 @@ class SentinelBot:
         self._send_sem = asyncio.Semaphore(SEND_CONCURRENCY)
         self._bg: set[asyncio.Task] = set()                   # fire-and-forget tasks (kept so they are not garbage collected)
         self._bg_refresh: asyncio.Task | None = None
+        self.reports_chat: int | None = int(settings.reports_chat_id) if getattr(settings, "reports_chat_id", 0) else None
         self.state = "starting"                               # starting / running / retrying / stopped (see status())
         self.state_since = datetime.now(timezone.utc)
         self.starts_failed = 0
@@ -144,7 +145,7 @@ class SentinelBot:
             chat = update.effective_chat
             if chat is None:
                 return
-            if self.settings.allowed_chat_ids and chat.id not in self.settings.allowed_chat_ids:
+            if self.settings.allowed_chat_ids and chat.id not in self.settings.allowed_chat_ids and chat.id != self.reports_chat:
                 where = "This group's" if chat.type in ("group", "supergroup") else "Your"
                 await context.bot.send_message(
                     chat.id,
@@ -232,6 +233,10 @@ class SentinelBot:
                     await self._tg(lambda: self.app.bot.send_message(chat_id, plain, disable_web_page_preview=True, **kwargs))
                 else:
                     raise
+
+    def _main_subs(self, alerts_only: bool = False) -> list[int]:
+        """The chats that get calls and alerts: every subscriber except the reports chat (it has its own diet)."""
+        return [c for c in self.store.subscribers(alerts_only=alerts_only) if c != self.reports_chat]
 
     async def _render(self, report) -> bytes | None:
         """The chart as PNG bytes; None when charts are off or the render failed."""
@@ -601,7 +606,7 @@ class SentinelBot:
         await self._send(chat_id, await asyncio.to_thread(self._scorecard_text, chat_id))
 
     async def job_scorecard(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        for chat_id in self.store.subscribers():
+        for chat_id in ([self.reports_chat] if self.reports_chat else self.store.subscribers()):
             try:
                 await self._send(chat_id, await asyncio.to_thread(self._scorecard_text, chat_id))
             except Exception as exc:  # noqa: BLE001
@@ -615,12 +620,15 @@ class SentinelBot:
         events = self.cache.tracker.drain_events()
         if not events:
             return
-        subs = self.store.subscribers()          # signal calls go to every subscriber, alerts on or off
+        subs = self._main_subs()                 # signal calls go to every subscriber, alerts on or off
         # Every chat gets its own texts (lot size differs); the chats are served concurrently, the events in order.
-        await self._broadcast_each([
-            (chat_id, [fmt.format_signal_event(e, self._sizing(chat_id, e.signal.entry, e.signal.sl)) for e in events])
-            for chat_id in subs
-        ])
+        per_chat = [(chat_id, [fmt.format_signal_event(e, self._sizing(chat_id, e.signal.entry, e.signal.sl)) for e in events])
+                    for chat_id in subs]
+        closed = [e for e in events if e.kind in fmt.RESULT_KINDS]
+        if self.reports_chat and closed:         # the reports chat keeps the record: one line per closed call
+            stats = self.cache.tracker.stats()
+            per_chat.append((self.reports_chat, [fmt.format_trade_result(e, stats) for e in closed]))
+        await self._broadcast_each(per_chat)
 
     async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
@@ -717,7 +725,8 @@ class SentinelBot:
 
     # ------------------------------------------------------------------ jobs
     async def job_report(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        subs = self.store.subscribers()
+        # With a reports chat the scheduled report goes there and nowhere else; without one, to every subscriber.
+        subs = [self.reports_chat] if self.reports_chat else self.store.subscribers()
         try:
             rep = await self.cache.refresh(with_briefing=bool(subs))
         except Exception:  # noqa: BLE001
@@ -727,11 +736,12 @@ class SentinelBot:
         if not subs:
             return
         await self._broadcast_each([(chat_id, [self._full_report(rep, chat_id)]) for chat_id in subs], report=rep, with_chart=True)
-        log.info("Report sent to %d subscriber(s): %s %d%% · %s", len(subs), rep.signal.bias, rep.signal.confidence,
+        log.info("Report sent to %s: %s %d%% · %s", "the reports chat" if self.reports_chat else f"{len(subs)} subscriber(s)",
+                 rep.signal.bias, rep.signal.confidence,
                  f"{self.cache.tracker.live().side} {self.cache.tracker.live().status}" if self.cache.tracker.live() else "no call")
 
     async def job_monitor(self, context: ContextTypes.DEFAULT_TYPE) -> None:
-        alert_subs = self.store.subscribers(alerts_only=True)
+        alert_subs = self._main_subs(alerts_only=True)
         # 1) news scan (also runs when nobody is subscribed, to keep the DB warm)
         try:
             await asyncio.to_thread(self.cache.pipeline.scan_news)
@@ -778,7 +788,7 @@ class SentinelBot:
 
     def _on_release(self, result: dict) -> None:
         """A scheduled release printed (news/releases.py, called on the event loop): tell the alert subscribers."""
-        subs = self.store.subscribers(alerts_only=True)
+        subs = self._main_subs(alerts_only=True)
         if subs:
             self._spawn(self._broadcast(subs, fmt.format_alert_release(result)))
 
@@ -786,7 +796,7 @@ class SentinelBot:
         """Announce the high-impact headlines that have not been announced yet. Called by the monitor job and,
         seconds after a scan stored one, by the pipeline's news listener (see run_forever)."""
         async with self._news_alert_lock:
-            alert_subs = self.store.subscribers(alerts_only=True)
+            alert_subs = self._main_subs(alerts_only=True)
             fresh = self.store.unalerted_high_impact(hours=6)
             if not self.store.get_state("first_scan_done"):
                 # Don't replay hours of old headlines as "breaking" on first start-up
@@ -809,7 +819,7 @@ class SentinelBot:
         prev = self.store.get_state("last_signal")
         if bias_changed(prev, rep.signal):
             if prev is not None:  # don't alert on the very first run
-                alert_subs = self.store.subscribers(alerts_only=True)
+                alert_subs = self._main_subs(alerts_only=True)
                 if alert_subs:
                     await self._broadcast(alert_subs, fmt.format_alert_bias_change(prev.get("bias"), rep.signal, rep.tech))
             self.store.set_state("last_signal", rep.signal.to_dict())

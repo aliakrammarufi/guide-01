@@ -491,6 +491,31 @@ def format_alert_event(e) -> str:
             f"consider tightening risk or waiting for the print.{extra}")
 
 
+RESULT_KINDS = ("tp2", "stopped", "flipped", "expired")      # the events that close a live call
+
+
+def format_trade_result(e, stats: dict | None = None) -> str:
+    """One closed call for the reports chat: win or loss, how much, and the running record."""
+    s = e.signal
+    r = s.result_r
+    if r is None:
+        icon, word = "⚪", "CLOSED"
+    elif r > 0.05:
+        icon, word = "✅", "WIN"
+    elif r < -0.05:
+        icon, word = "❌", "LOSS"
+    else:
+        icon, word = "➖", "BREAK-EVEN"
+    how = {"tp2": "take profit 2 hit", "stopped": "stopped out", "flipped": "closed, bias flipped", "expired": "closed at max hold"}.get(e.kind, e.kind)
+    res = f" <b>{r:+.2f}R</b>" if r is not None else ""
+    exit_px = s.exit_price if s.exit_price is not None else e.price
+    lines = [f"{icon} <b>{word}</b>{res} — {s.side} call #{s.id}",
+             f"Entry {s.entry:,.1f} → exit {exit_px:,.1f} · {how}"]
+    if stats and stats.get("count"):
+        lines.append(f"Record: {stats['wins']} wins / {stats['losses']} losses of {stats['count']} closed calls · total {stats['total_r']:+.2f}R")
+    return "\n".join(lines)
+
+
 def format_alert_release(r: dict) -> str:
     """A scheduled release that just printed: the number against the forecast and gold's usual first reaction."""
     icon = {"bullish": "🟢", "bearish": "🔴"}.get(r.get("gold"), "⚪")
