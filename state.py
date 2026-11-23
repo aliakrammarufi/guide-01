@@ -24,7 +24,8 @@ class ReportCache:
                                      breakeven_after_tp1=st.signal_breakeven_after_tp1,
                                      pending_max_hours=st.signal_pending_max_hours, require_trigger=st.signal_require_trigger,
                                      spread_usd=st.spread_usd, slippage_usd=st.slippage_usd,
-                                     trigger_kinds=st.trigger_kinds or None)
+                                     trigger_kinds=st.trigger_kinds or None,
+                                     daily_trend=getattr(st, "signal_daily_trend", "") or "")
         from bot import formatting as _fmt
 
         _fmt.BREAKEVEN_AFTER_TP1 = bool(st.signal_breakeven_after_tp1)     # the call wording follows the management rule

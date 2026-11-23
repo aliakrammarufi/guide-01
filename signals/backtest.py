@@ -65,6 +65,7 @@ class ReplayParams:
     trigger_kinds: tuple = ()             # () = every confirmation type
     zone_refine: bool = True              # fib / order-block zone refinement
     blocked_sessions: tuple = ()          # sessions with no new entries
+    daily_trend: str = ""                 # "" | "not_against" | "with": daily-trend gate for new setups (see SignalTracker)
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
     method: int = 5                       # replay/accounting/engine version: a change invalidates stored results
@@ -73,6 +74,8 @@ class ReplayParams:
         d = {k: getattr(self, k) for k in self.__dataclass_fields__ if k != "yield_sleep"}
         d["trigger_kinds"] = list(d["trigger_kinds"])
         d["blocked_sessions"] = list(d["blocked_sessions"])
+        if not d["daily_trend"]:
+            del d["daily_trend"]                # off = the rules as stored before this option existed (keeps old results valid)
         return d
 
 
@@ -139,7 +142,8 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
     store = Store(":memory:")
     tracker = SignalTracker(store, min_conf=p.min_conf, max_hours=p.max_hours, breakeven_after_tp1=p.breakeven_after_tp1,
                             pending_max_hours=p.pending_max_hours, require_trigger=p.require_trigger,
-                            spread_usd=p.spread_usd, slippage_usd=p.slippage_usd, trigger_kinds=tuple(p.trigger_kinds) or None)
+                            spread_usd=p.spread_usd, slippage_usd=p.slippage_usd, trigger_kinds=tuple(p.trigger_kinds) or None,
+                            daily_trend=p.daily_trend)
     tracker.quiet = True
     news = NewsScore(score=0, n_articles=0, n_bullish=0, n_bearish=0, n_neutral=0, top_themes=[], drivers=[])
     step = timedelta(minutes=15)
@@ -368,7 +372,7 @@ def params_from_settings(settings) -> ReplayParams:
         session_filter=settings.session_filter, asia_entries=settings.asia_entries,
         spread_usd=settings.spread_usd, slippage_usd=settings.slippage_usd, macro=settings.macro_context,
         trigger_kinds=tuple(settings.trigger_kinds), zone_refine=settings.zone_refine,
-        blocked_sessions=tuple(settings.blocked_sessions),
+        blocked_sessions=tuple(settings.blocked_sessions), daily_trend=getattr(settings, "signal_daily_trend", "") or "",
     )
 
 
@@ -399,6 +403,13 @@ VARIANTS: list[tuple[str, dict]] = [
     ("no break-even + no overlap entries", {"breakeven_after_tp1": False, "blocked_sessions": ("London/NY overlap",)}),
     ("more calls: minimum confidence 35%", {"min_conf": 35}),
     ("fewer calls: minimum confidence 55%", {"min_conf": 55}),
+    # Nov 2026: the question was "more winning calls". Higher bars and a daily-trend gate, replayed for real
+    # (filtering the finished trade list is misleading: skipping a call changes which call comes next).
+    ("no calls against the daily trend", {"daily_trend": "not_against"}),
+    ("only with the full daily trend", {"daily_trend": "with"}),
+    ("fewer calls: minimum confidence 65%", {"min_conf": 65}),
+    ("fewer calls: minimum confidence 70%", {"min_conf": 70}),
+    ("no calls against the daily trend + minimum confidence 55%", {"daily_trend": "not_against", "min_conf": 55}),
 ]
 VARIANTS_KEY = "backtest_variants"
 
@@ -500,6 +511,12 @@ def _fresh(stored: dict | None, base: ReplayParams, max_age_days: float, params_
     return age < timedelta(days=max_age_days) and stored.get(params_key) == base.to_dict()
 
 
+def _missing_variants(stored: dict | None, base: ReplayParams) -> list[str]:
+    """Names of the VARIANTS that the stored sweep does not hold yet."""
+    have = {r.get("name") for r in ((stored or {}).get("variants") or [])}
+    return [name for name, _o, _p in applicable_variants(base) if name not in have]
+
+
 DEEP_KEY = "backtest_deep"
 DEEP_VARIANTS_KEY = "backtest_deep_variants"
 
@@ -548,6 +565,8 @@ async def run_on_start(cache, delay_sec: int = 150) -> None:
     deep_sweep_due = settings.deep_check and settings.deep_sweep and \
         not _fresh(store.get_state(DEEP_VARIANTS_KEY), base, settings.backtest_max_age_days, "base_params")
     sweep_due = settings.backtest_sweep and not _fresh(store.get_state(VARIANTS_KEY), base, settings.backtest_max_age_days, "base_params")
+    if settings.deep_check and settings.deep_sweep and not deep_sweep_due and _missing_variants(store.get_state(DEEP_VARIANTS_KEY), base):
+        deep_sweep_due = True                 # new alternatives were added since the stored sweep: replay just those
     if main_fresh and not deep_due and not sweep_due and not deep_sweep_due:
         log.info("Self-check: stored replays are recent – skipping")
         return

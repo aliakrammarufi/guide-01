@@ -172,9 +172,12 @@ class SignalEvent:
 class SignalTracker:
     def __init__(self, store: Store, min_conf: int = 45, max_hours: float = 48.0, breakeven_after_tp1: bool = True,
                  pending_max_hours: float = 12.0, require_trigger: bool = True, spread_usd: float = 0.0, slippage_usd: float = 0.0,
-                 trigger_kinds: tuple[str, ...] | list[str] | None = None):
+                 trigger_kinds: tuple[str, ...] | list[str] | None = None, daily_trend: str = ""):
         self.store = store
         self.min_conf = min_conf
+        # Daily-trend gate for NEW setups: "" = off, "not_against" = no call against a full daily trend
+        # (price and D-EMA50 both on the wrong side), "with" = only with a full daily trend.
+        self.daily_trend = daily_trend if daily_trend in ("not_against", "with") else ""
         self.trigger_kinds = tuple(trigger_kinds) if trigger_kinds else None   # None = every confirmation type
         self.spread_usd = spread_usd          # round-trip spread charged to every closed trade ($/oz)
         self.slippage_usd = slippage_usd      # extra cost when a stop fills ($/oz)
@@ -338,6 +341,8 @@ class SignalTracker:
             return events
         if session is not None and not session.allow_entries:
             return events
+        if not self._daily_trend_ok(direction, tech):
+            return events
         plan = self._plan_from_signal(eng)
         if plan is None:
             return events
@@ -356,6 +361,19 @@ class SignalTracker:
         else:
             events.extend(self._try_trigger(sig, tech, m15, now))
         return events
+
+    def _daily_trend_ok(self, direction: str, tech) -> bool:
+        """The daily-trend gate (see ``daily_trend``). Without daily averages the gate lets the call through."""
+        if not self.daily_trend:
+            return True
+        price, e50, e200 = getattr(tech, "price", None), getattr(tech, "daily_ema50", None), getattr(tech, "daily_ema200", None)
+        if price is None or e50 is None or e200 is None or e50 != e50 or e200 != e200:      # missing / NaN
+            return True
+        daily = (1 if price > e50 else -1) + (1 if e50 > e200 else -1)                     # -2 … +2, as in the analysis
+        want = 1 if direction == "long" else -1
+        if self.daily_trend == "with":
+            return daily == 2 * want
+        return daily != -2 * want
 
     def _try_trigger(self, sig: TradeSignal, tech, m15, now: datetime) -> list[SignalEvent]:
         res = trig.evaluate(sig.side, sig.zone_lo, sig.zone_hi, tech.atr, m15, now, kinds=self.trigger_kinds)

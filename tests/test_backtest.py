@@ -114,3 +114,52 @@ def test_applicable_variants_skip_the_current_rules_and_duplicates():
     assert len(names2) < len(VARIANTS)
     b = _brief({"count": 3, "total_r": 1.0}, {"2025": {"count": 3, "win_rate": 66.7, "total_r": 1.0, "avg_r": 0.33}})
     assert b["by_year"] == {"2025": {"count": 3, "win_rate": 66.7, "total_r": 1.0}} and b["count"] == 3
+
+
+def test_the_daily_trend_gate_blocks_only_what_it_says():
+    from types import SimpleNamespace
+    from news.store import Store
+    from signals.tracker import SignalTracker
+
+    up = SimpleNamespace(price=4100.0, daily_ema50=4000.0, daily_ema200=3900.0)       # full daily uptrend
+    down = SimpleNamespace(price=3800.0, daily_ema50=3900.0, daily_ema200=4000.0)     # full daily downtrend
+    mixed = SimpleNamespace(price=3950.0, daily_ema50=4000.0, daily_ema200=3900.0)    # pullback inside an uptrend
+    nodata = SimpleNamespace(price=4000.0, daily_ema50=float("nan"), daily_ema200=3900.0)
+
+    off = SignalTracker(Store(":memory:"))
+    assert all(off._daily_trend_ok(d, t) for d in ("long", "short") for t in (up, down, mixed))
+
+    na = SignalTracker(Store(":memory:"), daily_trend="not_against")
+    assert na._daily_trend_ok("long", up) and not na._daily_trend_ok("short", up)
+    assert na._daily_trend_ok("short", down) and not na._daily_trend_ok("long", down)
+    assert na._daily_trend_ok("long", mixed) and na._daily_trend_ok("short", mixed)   # a mixed picture blocks nothing
+    assert na._daily_trend_ok("short", nodata)                                        # no daily averages: let it through
+
+    w = SignalTracker(Store(":memory:"), daily_trend="with")
+    assert w._daily_trend_ok("long", up) and not w._daily_trend_ok("short", up)
+    assert not w._daily_trend_ok("long", mixed) and not w._daily_trend_ok("short", mixed)
+    assert SignalTracker(Store(":memory:"), daily_trend="nonsense").daily_trend == ""
+
+
+def test_the_new_option_leaves_stored_results_valid_and_new_variants_are_found_missing():
+    from signals.backtest import ReplayParams, _missing_variants, applicable_variants
+
+    base = ReplayParams(breakeven_after_tp1=False)
+    assert "daily_trend" not in base.to_dict()                     # off = exactly the parameters stored before the option
+    assert ReplayParams(daily_trend="with").to_dict()["daily_trend"] == "with"
+    names = [n for n, _o, _p in applicable_variants(base)]
+    for n in ("no calls against the daily trend", "only with the full daily trend", "fewer calls: minimum confidence 65%",
+              "fewer calls: minimum confidence 70%"):
+        assert n in names
+    old_sweep = {"variants": [{"name": n} for n in names if "daily trend" not in n and "65%" not in n and "70%" not in n]}
+    assert set(_missing_variants(old_sweep, base)) == {n for n in names if "daily trend" in n or "65%" in n or "70%" in n}
+    assert _missing_variants({"variants": [{"name": n} for n in names]}, base) == []
+
+
+def test_replay_with_the_daily_trend_gate_takes_no_call_against_the_trend():
+    h1, d1, m15 = synth()
+    tail = m15[m15.index >= m15.index[-1] - pd.Timedelta(days=9)]
+    base = replay(h1, d1, tail, ReplayParams(min_conf=45))
+    gated = replay(h1, d1, tail, ReplayParams(min_conf=45, daily_trend="with"))
+    assert gated["summary"]["setups"] <= base["summary"]["setups"]
+    assert gated["params"]["daily_trend"] == "with" and "daily_trend" not in base["params"]

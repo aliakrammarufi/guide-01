@@ -219,6 +219,9 @@ class Settings:
     asia_entries: bool = field(default_factory=lambda: _env_bool("ASIA_ENTRIES", True))
     # Sessions in which no new call is opened (names: Asia, London, London/NY overlap, New York)
     blocked_sessions: list[str] = field(default_factory=lambda: _env_list("BLOCKED_SESSIONS", []))
+    # Daily-trend gate for new setups: "" (off), "not_against" or "with" (see signals/tracker.py). Off until the
+    # three-year replay shows it beats the current rules.
+    signal_daily_trend: str = field(default_factory=lambda: _env("SIGNAL_DAILY_TREND"))
     news_blackout_before_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_BEFORE_MIN", 30))
     news_blackout_after_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_AFTER_MIN", 15))
     # Trading costs charged to every result (replay and live stats): round-trip spread and the slippage
