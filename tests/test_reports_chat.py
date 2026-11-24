@@ -144,3 +144,64 @@ def test_no_introduction_without_a_reports_chat_and_an_empty_history_says_so(tmp
     bot.cache.tracker.history = lambda limit=20: []
     asyncio.run(bot._reports_intro())
     assert sent == [] and "No closed call yet" in bot._recent_results_text()
+
+
+def test_a_result_says_what_it_is_in_money_and_how_long_the_call_was_open(monkeypatch):
+    from datetime import timedelta
+    monkeypatch.setattr(fmt, "EXAMPLE_ACCOUNT", 10000.0)
+    monkeypatch.setattr(fmt, "EXAMPLE_RISK_PCT", 1.0)
+    s = trade(0.65)
+    s.triggered_at = datetime(2026, 11, 16, 5, 0, tzinfo=timezone.utc)
+    s.opened_at = s.triggered_at - timedelta(hours=3)                     # the setup was published earlier: not counted
+    s.closed_at = s.triggered_at + timedelta(hours=4, minutes=20)
+    text = fmt.format_trade_result(SimpleNamespace(kind="tp2", signal=s, price=3831.6))
+    assert "≈ <b>+$65</b> on an example $10,000 account risking 1% per call" in text and "open for 4 h 20 min" in text
+    s2 = trade(-1.01, "stopped")
+    s2.opened_at, s2.triggered_at = datetime(2026, 11, 16, 5, 0, tzinfo=timezone.utc), None
+    s2.closed_at = s2.opened_at + timedelta(minutes=35)
+    loss = fmt.format_trade_result(SimpleNamespace(kind="stopped", signal=s2, price=3902.5))
+    assert "−$101" in loss and "open for 35 min" in loss
+    monkeypatch.setattr(fmt, "EXAMPLE_ACCOUNT", 0.0)                       # switched off: no money line
+    assert "$" not in fmt.format_trade_result(SimpleNamespace(kind="tp2", signal=s, price=3831.6))
+    assert fmt._held(SimpleNamespace(triggered_at=None, opened_at=None, closed_at=None)) == ""
+    long = SimpleNamespace(triggered_at=s.triggered_at, opened_at=None, closed_at=s.triggered_at + timedelta(hours=53))
+    assert fmt._held(long) == "2 d 5 h"
+
+
+def test_the_day_summary_lists_the_calls_that_closed_that_day(tmp_path, monkeypatch):
+    from datetime import timedelta
+    monkeypatch.setattr(fmt, "EXAMPLE_ACCOUNT", 10000.0)
+    monkeypatch.setattr(fmt, "EXAMPLE_RISK_PCT", 1.0)
+    bot, store, sent = make_bot(tmp_path)
+    day = datetime(2026, 11, 24, 21, 5, tzinfo=timezone.utc)
+
+    def sig(i, r, status, closed):
+        s = trade(r, status)
+        s.id, s.traded, s.is_open = i, True, False
+        s.opened_at = s.triggered_at = closed - timedelta(hours=2)
+        s.closed_at = closed
+        return s
+
+    rows = [sig(30, 0.65, "tp2", day.replace(hour=9)), sig(31, -1.01, "stopped", day.replace(hour=15)),
+            sig(29, 0.80, "tp2", day - timedelta(days=1)),                      # yesterday's: not in today's summary
+            SimpleNamespace(id=32, traded=True, is_open=True, result_r=None, closed_at=None)]   # still open
+    store.signals_since = lambda since: rows
+    text = bot._day_summary_text(day)
+    assert "DAY SUMMARY — Tue 24 Nov" in text and "2 calls closed: <b>1 win</b>, <b>1 loss</b>" in text
+    assert "day total <b>-0.36R</b>" in text and "≈ −$36" in text
+    assert "#30" in text and "#31" in text and "#29" not in text and "#32" not in text
+    assert "Past results do not predict future results" in text
+    store.signals_since = lambda since: []
+    assert "No call closed today." in bot._day_summary_text(day)
+    asyncio.run(bot.job_day_summary(None))
+    assert sent and sent[-1][0] == REPORTS and "DAY SUMMARY" in sent[-1][1]
+
+
+def test_the_weekly_scorecard_runs_on_monday_and_the_day_summary_on_weekdays(tmp_path):
+    bot, _store, _sent = make_bot(tmp_path)
+    jobs = {j.name: j for j in bot.app.job_queue.jobs()}
+    # APScheduler's own names: the library maps its 0 = Sunday … 6 = Saturday onto these
+    assert str(jobs["scorecard"].job.trigger.fields[4]) == "mon"
+    assert str(jobs["day-summary"].job.trigger.fields[4]) == "mon,tue,wed,thu,fri"
+    bot2, _s, _t = make_bot(tmp_path / "none", reports=0)
+    assert "day-summary" not in {j.name for j in bot2.app.job_queue.jobs()}

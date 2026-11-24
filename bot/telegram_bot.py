@@ -101,6 +101,7 @@ class SentinelBot:
             "skipped": self.cmd_skipped,
             "scorecard": self.cmd_scorecard,
             "results": self.cmd_results,
+            "today": self.cmd_today,
             "status": self.cmd_status,
         }
         for name, func in handlers.items():
@@ -113,9 +114,19 @@ class SentinelBot:
         grace = {"misfire_grace_time": 120}   # a run that starts late (busy startup) still runs instead of being skipped
         jq.run_repeating(self.job_report, interval=timedelta(minutes=self.settings.analysis_interval_min), first=timedelta(seconds=20), name="report", job_kwargs=grace)
         jq.run_repeating(self.job_monitor, interval=timedelta(minutes=self.settings.news_scan_interval_min), first=timedelta(seconds=90), name="monitor", job_kwargs=grace)
-        # weekly scorecard: Monday 06:30 UTC (before London), to every subscriber
+        # weekly scorecard: Monday 06:30 UTC (before London). The library counts 0 = Sunday … 6 = Saturday
+        # (since v20): days=(0,) sent it on Sunday morning, a day early and before the market opens.
         from datetime import time as _time
-        jq.run_daily(self.job_scorecard, time=_time(6, 30, tzinfo=timezone.utc), days=(0,), name="scorecard", job_kwargs=grace)
+        jq.run_daily(self.job_scorecard, time=_time(6, 30, tzinfo=timezone.utc), days=(1,), name="scorecard", job_kwargs=grace)
+        fmt.EXAMPLE_ACCOUNT = float(getattr(self.settings, "results_example_account", 10000.0) or 0.0)
+        fmt.EXAMPLE_RISK_PCT = float(getattr(self.settings, "results_example_risk_pct", 1.0) or 0.0)
+        if self.reports_chat:                   # end-of-day summary for the results board, Monday–Friday
+            try:
+                hh, mm = (int(x) for x in str(getattr(self.settings, "results_day_summary_utc", "21:05")).split(":")[:2])
+            except ValueError:
+                hh, mm = 21, 5
+            jq.run_daily(self.job_day_summary, time=_time(hh % 24, mm % 60, tzinfo=timezone.utc), days=(1, 2, 3, 4, 5),
+                         name="day-summary", job_kwargs=grace)
 
     async def _post_init(self, app: Application) -> None:
         await app.bot.set_my_commands(
@@ -621,6 +632,28 @@ class SentinelBot:
 
     async def cmd_results(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._send(update.effective_chat.id, await asyncio.to_thread(self._recent_results_text))
+
+    def _day_summary_text(self, day: datetime | None = None) -> str:
+        """The calls that closed on ``day`` (UTC, default today), for the results board."""
+        day = (day or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+        rows = self.store.signals_since(start - timedelta(days=5))        # a call can stay open for two days
+        closed = [s for s in rows if s.traded and not s.is_open and s.result_r is not None
+                  and s.closed_at is not None and start <= s.closed_at < end]
+        closed.sort(key=lambda s: s.closed_at)
+        return fmt.format_day_summary(start, closed, self.cache.tracker.stats())
+
+    async def job_day_summary(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self.reports_chat:
+            return
+        try:
+            await self._send(self.reports_chat, await asyncio.to_thread(self._day_summary_text))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("day summary failed: %s", exc)
+
+    async def cmd_today(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._send(update.effective_chat.id, await asyncio.to_thread(self._day_summary_text))
 
     async def _reports_intro(self) -> None:
         """Once per reports chat: say what the board is for and show the last closed calls, so the group

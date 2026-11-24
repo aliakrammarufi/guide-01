@@ -494,8 +494,40 @@ def format_alert_event(e) -> str:
 RESULT_KINDS = ("tp1", "tp2", "stopped", "flipped", "expired")      # a target reached, or the call closed
 
 
+EXAMPLE_ACCOUNT = 10_000.0     # the example account the results board quotes money for (set from the settings)
+EXAMPLE_RISK_PCT = 1.0         # … risking this share of it on every call
+
+
+def example_money(r: float | None) -> str:
+    """What ``r`` (in R) is in money on the example account, e.g. '+$65'. Empty when there is nothing to show."""
+    if r is None or EXAMPLE_ACCOUNT <= 0 or EXAMPLE_RISK_PCT <= 0:
+        return ""
+    usd = r * EXAMPLE_ACCOUNT * EXAMPLE_RISK_PCT / 100.0
+    return f"{'+' if usd >= 0 else '−'}${abs(usd):,.0f}"
+
+
+def example_note() -> str:
+    return f"example ${EXAMPLE_ACCOUNT:,.0f} account risking {EXAMPLE_RISK_PCT:g}% per call"
+
+
+def _held(sig) -> str:
+    """How long the call was open, e.g. '4 h 20 min' (from the confirmed entry when there was one)."""
+    start = getattr(sig, "triggered_at", None) or getattr(sig, "opened_at", None)
+    end = getattr(sig, "closed_at", None)
+    if start is None or end is None or end < start:
+        return ""
+    mins = int((end - start).total_seconds() // 60)
+    if mins < 60:
+        return f"{mins} min"
+    h, m = divmod(mins, 60)
+    if h < 48:
+        return f"{h} h {m:02d} min" if m else f"{h} h"
+    return f"{h // 24} d {h % 24} h"
+
+
 def format_trade_result(e, stats: dict | None = None) -> str:
-    """One closed call for the reports chat: win or loss, how much, and the running record."""
+    """One closed call for the reports chat: win or loss, how much (in R and on the example account), how long
+    it was open, and the running record."""
     s = e.signal
     if e.kind == "tp1":                        # first target reached: the call is still running to TP2
         return (f"🎯 <b>TARGET 1 HIT</b> — {s.side} call #{s.id}\n"
@@ -514,9 +546,42 @@ def format_trade_result(e, stats: dict | None = None) -> str:
     exit_px = s.exit_price if s.exit_price is not None else e.price
     lines = [f"{icon} <b>{word}</b>{res} — {s.side} call #{s.id}",
              f"Entry {s.entry:,.1f} → exit {exit_px:,.1f} · {how}"]
+    extra = []
+    money = example_money(r)
+    if money:
+        extra.append(f"≈ <b>{money}</b> on an {example_note()}")
+    held = _held(s)
+    if held:
+        extra.append(f"open for {held}")
+    if extra:
+        lines.append(" · ".join(extra))
     if stats and stats.get("count"):
         lines.append(f"Record: {stats['wins']} wins / {stats['losses']} losses of {stats['count']} closed calls · total {stats['total_r']:+.2f}R")
     return "\n".join(lines)
+
+
+def format_day_summary(day, closed: list, stats: dict | None = None) -> str:
+    """The results board's end-of-day line-up: the calls that closed on ``day`` (UTC) and the day's total."""
+    title = f"🗓 <b>DAY SUMMARY — {day.strftime('%a %d %b')}</b>"
+    if not closed:
+        body = "No call closed today."
+    else:
+        wins = sum(1 for s in closed if (s.result_r or 0) > 0.05)
+        losses = sum(1 for s in closed if (s.result_r or 0) < -0.05)
+        total = sum(s.result_r or 0.0 for s in closed)
+        rows = []
+        for s in closed:
+            mark = "✅" if (s.result_r or 0) > 0.05 else "❌" if (s.result_r or 0) < -0.05 else "➖"
+            held = _held(s)
+            rows.append(f"{mark} {s.side} #{s.id} · {s.result_r:+.2f}R" + (f" · {held}" if held else ""))
+        money = example_money(total)
+        body = (f"{len(closed)} call{'s' if len(closed) != 1 else ''} closed: <b>{wins} win{'s' if wins != 1 else ''}</b>, "
+                f"<b>{losses} loss{'es' if losses != 1 else ''}</b> · day total <b>{total:+.2f}R</b>"
+                + (f" (≈ {money} on an {example_note()})" if money else "") + "\n" + "\n".join(rows))
+    tail = ""
+    if stats and stats.get("count"):
+        tail = f"\nRecord so far: {stats['wins']} wins / {stats['losses']} losses of {stats['count']} closed calls · total {stats['total_r']:+.2f}R"
+    return f"{title}\n{body}{tail}\n<i>Money amounts are an illustration, not anyone's account. Past results do not predict future results.</i>"
 
 
 def format_alert_release(r: dict) -> str:

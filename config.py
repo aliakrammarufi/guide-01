@@ -138,6 +138,11 @@ class Settings:
     # scorecard. true also moves the scheduled full report there (it shows the current bias and entry plan, so
     # readers take it for a signal); false leaves that report with the main chats as before.
     reports_chat_full_report: bool = field(default_factory=lambda: _env_bool("TELEGRAM_REPORTS_FULL_REPORT", False))
+    # The results board quotes money for an example account (0 switches the money line off).
+    results_example_account: float = field(default_factory=lambda: _env_float("RESULTS_EXAMPLE_ACCOUNT", 10000.0))
+    results_example_risk_pct: float = field(default_factory=lambda: _env_float("RESULTS_EXAMPLE_RISK_PCT", 1.0))
+    # End-of-day summary for the results board, Monday–Friday at this UTC time (after the New York close).
+    results_day_summary_utc: str = field(default_factory=lambda: _env("RESULTS_DAY_SUMMARY_UTC", "21:05"))
 
     # --- Market data --------------------------------------------------------
     # "yfinance" (free, no key) or "twelvedata" (free key, true XAU/USD spot)
