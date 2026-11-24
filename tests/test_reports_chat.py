@@ -116,3 +116,31 @@ def _report_job(tmp_path, monkeypatch, **over):
 def test_the_scheduled_report_stays_out_of_the_results_board_unless_asked(tmp_path, monkeypatch):
     assert _report_job(tmp_path, monkeypatch) == [(MAIN, "FULL REPORT")]
     assert _report_job(tmp_path / "b", monkeypatch, reports_chat_full_report=True) == [(REPORTS, "FULL REPORT")]
+
+
+def _closed(i, r, status="tp2"):
+    s = trade(r, status)
+    s.id, s.traded, s.is_open = i, True, False
+    s.closed_at = datetime(2026, 11, 20 + i % 3, 12, 0, tzinfo=timezone.utc)
+    return s
+
+
+def test_the_results_board_introduces_itself_once_with_the_last_closed_calls(tmp_path):
+    bot, store, sent = make_bot(tmp_path)
+    bot.cache.tracker.history = lambda limit=20: [_closed(9, 0.65), _closed(8, -1.01, "stopped"), _closed(7, 0.85), _closed(6, 0.72)]
+    asyncio.run(bot._reports_intro())
+    asyncio.run(bot._reports_intro())                       # a restart does not repeat it
+    assert len(sent) == 1 and sent[0][0] == REPORTS
+    text = sent[0][1]
+    assert "RESULTS BOARD" in text and "Live calls are not posted here" in text
+    assert text.count("call #") == 3 and "call #9" in text and "call #6" not in text      # the last three, newest first
+    assert "WIN" in text and "LOSS" in text and "19 wins / 7 losses of 26" in text
+    # the command shows the same list on request, in any chat
+    assert "LAST 4 CLOSED CALLS" in bot._recent_results_text()
+
+
+def test_no_introduction_without_a_reports_chat_and_an_empty_history_says_so(tmp_path):
+    bot, store, sent = make_bot(tmp_path, reports=0)
+    bot.cache.tracker.history = lambda limit=20: []
+    asyncio.run(bot._reports_intro())
+    assert sent == [] and "No closed call yet" in bot._recent_results_text()

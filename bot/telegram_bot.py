@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from html import escape
+from types import SimpleNamespace
 
 from telegram import BotCommand, ForceReply, Update
 from telegram.constants import ChatAction, ParseMode
@@ -99,6 +100,7 @@ class SentinelBot:
             "took": self.cmd_took,
             "skipped": self.cmd_skipped,
             "scorecard": self.cmd_scorecard,
+            "results": self.cmd_results,
             "status": self.cmd_status,
         }
         for name, func in handlers.items():
@@ -601,6 +603,40 @@ class SentinelBot:
         label = f"{since.strftime('%d %b')} → {datetime.now(timezone.utc).strftime('%d %b')}"
         return fmt.format_scorecard(week, allt, mine, sc, rows, label)
 
+    def _recent_results_text(self, limit: int = 5) -> str:
+        """The last closed calls, written the way the results board gets them, newest first."""
+        tr = self.cache.tracker
+        closed = [s for s in tr.history(limit=60) if s.traded and not s.is_open and s.result_r is not None][:limit]
+        if not closed:
+            return "📒 <b>RESULTS</b>\nNo closed call yet. Each one is posted here when it hits its target or its stop."
+        blocks = []
+        for sig in closed:
+            when = sig.closed_at.strftime("%a %d %b · %H:%M UTC") if sig.closed_at else ""
+            ev = SimpleNamespace(kind=sig.status, signal=sig, price=sig.exit_price)
+            blocks.append((f"<i>{when}</i>\n" if when else "") + fmt.format_trade_result(ev))
+        st = tr.stats()
+        tail = (f"<b>Record:</b> {st['wins']} wins / {st['losses']} losses of {st['count']} closed calls · total {st['total_r']:+.2f}R"
+                if st.get("count") else "")
+        return f"📒 <b>LAST {len(closed)} CLOSED CALLS</b>\n\n" + "\n\n".join(blocks) + (f"\n\n{tail}" if tail else "")
+
+    async def cmd_results(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._send(update.effective_chat.id, await asyncio.to_thread(self._recent_results_text))
+
+    async def _reports_intro(self) -> None:
+        """Once per reports chat: say what the board is for and show the last closed calls, so the group
+        does not sit empty until the next call closes."""
+        if not self.reports_chat or self.store.get_state("reports_intro_chat") == self.reports_chat:
+            return
+        text = ("📒 <b>RESULTS BOARD</b>\nThis group gets the outcome of every call: 🎯 target 1 hit, ✅ win, ❌ loss, and the "
+                "weekly scorecard on Mondays. Live calls are not posted here.\n\n"
+                "<i>These are the most recent calls that already closed:</i>\n\n"
+                + await asyncio.to_thread(self._recent_results_text, 3))
+        try:
+            await self._send(self.reports_chat, text)
+            self.store.set_state("reports_intro_chat", self.reports_chat)
+        except TelegramError as exc:
+            log.warning("Results board introduction not sent: %s", exc)
+
     async def cmd_scorecard(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         await self._send(chat_id, await asyncio.to_thread(self._scorecard_text, chat_id))
@@ -898,6 +934,7 @@ class SentinelBot:
                 await self.app.updater.start_polling(drop_pending_updates=True)
                 log.info("Polling Telegram…")
                 self._set_status("running")
+                self._spawn(self._reports_intro())
                 self.last_start_error = None
                 while True:
                     await asyncio.sleep(3600)
