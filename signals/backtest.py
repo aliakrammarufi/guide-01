@@ -66,6 +66,7 @@ class ReplayParams:
     zone_refine: bool = True              # fib / order-block zone refinement
     blocked_sessions: tuple = ()          # sessions with no new entries
     daily_trend: str = ""                 # "" | "not_against" | "with": daily-trend gate for new setups (see SignalTracker)
+    max_losses_per_day: int = 0           # 0 = off: no new setup that UTC day after this many losing calls
     analysis_every_min: int = 15          # how often the analysis re-runs (production: every few minutes)
     yield_sleep: float = 0.0              # sleep per step so a live server stays responsive
     method: int = 5                       # replay/accounting/engine version: a change invalidates stored results
@@ -76,6 +77,8 @@ class ReplayParams:
         d["blocked_sessions"] = list(d["blocked_sessions"])
         if not d["daily_trend"]:
             del d["daily_trend"]                # off = the rules as stored before this option existed (keeps old results valid)
+        if not d["max_losses_per_day"]:
+            del d["max_losses_per_day"]
         return d
 
 
@@ -143,7 +146,7 @@ def replay(h1: pd.DataFrame, d1: pd.DataFrame, m15: pd.DataFrame, params: Replay
     tracker = SignalTracker(store, min_conf=p.min_conf, max_hours=p.max_hours, breakeven_after_tp1=p.breakeven_after_tp1,
                             pending_max_hours=p.pending_max_hours, require_trigger=p.require_trigger,
                             spread_usd=p.spread_usd, slippage_usd=p.slippage_usd, trigger_kinds=tuple(p.trigger_kinds) or None,
-                            daily_trend=p.daily_trend)
+                            daily_trend=p.daily_trend, max_losses_per_day=p.max_losses_per_day)
     tracker.quiet = True
     news = NewsScore(score=0, n_articles=0, n_bullish=0, n_bearish=0, n_neutral=0, top_themes=[], drivers=[])
     step = timedelta(minutes=15)
@@ -373,6 +376,7 @@ def params_from_settings(settings) -> ReplayParams:
         spread_usd=settings.spread_usd, slippage_usd=settings.slippage_usd, macro=settings.macro_context,
         trigger_kinds=tuple(settings.trigger_kinds), zone_refine=settings.zone_refine,
         blocked_sessions=tuple(settings.blocked_sessions), daily_trend=getattr(settings, "signal_daily_trend", "") or "",
+        max_losses_per_day=int(getattr(settings, "signal_max_losses_per_day", 0) or 0),
     )
 
 
@@ -410,6 +414,8 @@ VARIANTS: list[tuple[str, dict]] = [
     ("fewer calls: minimum confidence 65%", {"min_conf": 65}),
     ("fewer calls: minimum confidence 70%", {"min_conf": 70}),
     ("no calls against the daily trend + minimum confidence 55%", {"daily_trend": "not_against", "min_conf": 55}),
+    ("daily loss limit: stop for the day after 2 losses", {"max_losses_per_day": 2}),
+    ("daily loss limit: stop for the day after 1 loss", {"max_losses_per_day": 1}),
 ]
 VARIANTS_KEY = "backtest_variants"
 

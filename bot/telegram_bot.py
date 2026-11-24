@@ -30,7 +30,7 @@ from telegram.error import BadRequest, Forbidden, InvalidToken, NetworkError, Re
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot import formatting as fmt
-from bot.chart import render_chart
+from bot.chart import render_chart, render_trade_chart
 from config import Settings
 from news.store import Store
 from news.sentiment import same_story
@@ -72,6 +72,7 @@ class SentinelBot:
         self._bg: set[asyncio.Task] = set()                   # fire-and-forget tasks (kept so they are not garbage collected)
         self._bg_refresh: asyncio.Task | None = None
         self.reports_chat: int | None = int(settings.reports_chat_id) if getattr(settings, "reports_chat_id", 0) else None
+        self.quiet_window = self._parse_quiet(getattr(settings, "quiet_hours_utc", "") or "")   # (start, end) minutes of the UTC day
         self.state = "starting"                               # starting / running / retrying / stopped (see status())
         self.state_since = datetime.now(timezone.utc)
         self.starts_failed = 0
@@ -112,7 +113,8 @@ class SentinelBot:
 
         jq = self.app.job_queue
         grace = {"misfire_grace_time": 120}   # a run that starts late (busy startup) still runs instead of being skipped
-        jq.run_repeating(self.job_report, interval=timedelta(minutes=self.settings.analysis_interval_min), first=timedelta(seconds=20), name="report", job_kwargs=grace)
+        self.report_every_min = int(getattr(self.settings, "report_interval_min", 0) or 0) or self.settings.analysis_interval_min
+        jq.run_repeating(self.job_report, interval=timedelta(minutes=self.report_every_min), first=timedelta(seconds=20), name="report", job_kwargs=grace)
         jq.run_repeating(self.job_monitor, interval=timedelta(minutes=self.settings.news_scan_interval_min), first=timedelta(seconds=90), name="monitor", job_kwargs=grace)
         # weekly scorecard: Monday 06:30 UTC (before London). The library counts 0 = Sunday … 6 = Saturday
         # (since v20): days=(0,) sent it on Sunday morning, a day early and before the market opens.
@@ -225,6 +227,8 @@ class SentinelBot:
     async def _send(self, chat_id: int, text: str, **kwargs) -> None:
         """Send HTML text; long messages are split only at paragraph / line boundaries so
         every chunk keeps its tags balanced (Telegram rejects a chunk cut inside a tag)."""
+        if self._quiet_now():
+            kwargs.setdefault("disable_notification", True)
         chunks: list[str] = []
         current = ""
         for unit, sep in self._units(text):
@@ -247,6 +251,25 @@ class SentinelBot:
                 else:
                     raise
 
+    @staticmethod
+    def _parse_quiet(text: str) -> tuple[int, int] | None:
+        """'22:30-06:00' → (1350, 360). None when empty or unreadable (quiet hours off)."""
+        m = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*", text or "")
+        if not m:
+            return None
+        h1, m1, h2, m2 = (int(x) for x in m.groups())
+        if h1 > 23 or h2 > 23 or m1 > 59 or m2 > 59 or (h1, m1) == (h2, m2):
+            return None
+        return h1 * 60 + m1, h2 * 60 + m2
+
+    def _quiet_now(self, now: datetime | None = None) -> bool:
+        """Inside the quiet hours: messages are still delivered, without sound."""
+        if self.quiet_window is None:
+            return False
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        t, (a, b) = now.hour * 60 + now.minute, self.quiet_window
+        return a <= t < b if a < b else (t >= a or t < b)
+
     def _main_subs(self, alerts_only: bool = False) -> list[int]:
         """The chats that get calls and alerts: every subscriber except the reports chat (it has its own diet)."""
         return [c for c in self.store.subscribers(alerts_only=alerts_only) if c != self.reports_chat]
@@ -262,7 +285,7 @@ class SentinelBot:
             log.warning("Chart failed: %s", exc)
             return None
 
-    async def _send_chart(self, chat_id: int, report, png: bytes | str | None = None) -> str | None:
+    async def _send_chart(self, chat_id: int, report, png: bytes | str | None = None, caption: str | None = None) -> str | None:
         """Send the chart. ``png`` is the image, or the file id of a chart Telegram already has (nothing is
         uploaded then). Returns that file id for the next chat, None when the chart could not be sent."""
         if png is None:
@@ -270,7 +293,9 @@ class SentinelBot:
         if png is None:
             return None
         try:
-            msg = await self._tg(lambda: self.app.bot.send_photo(chat_id, png, caption=f"XAU/USD H1 · {report.signal.label}"))
+            quiet = self._quiet_now()
+            cap = caption if caption is not None else f"XAU/USD H1 · {report.signal.label}"
+            msg = await self._tg(lambda: self.app.bot.send_photo(chat_id, png, caption=cap, disable_notification=quiet))
             photos = getattr(msg, "photo", None)
             return photos[-1].file_id if photos else None
         except Exception as exc:  # noqa: BLE001
@@ -507,7 +532,7 @@ class SentinelBot:
             chat_id,
             "🥇 <b>XAU SENTINEL — ONLINE</b>\n"
             "Gold (XAU/USD) analysis, news and trade setups.\n\n"
-            f"✅ Subscribed — a report every <b>{self.settings.analysis_interval_min} min</b> plus alerts: bias changes, big moves, "
+            f"✅ Subscribed — a report every <b>{self.report_every_min} min</b> plus alerts: bias changes, big moves, "
             "breaking news, pre-release warnings, and every BUY / SELL setup and live call.\n"
             f"{lock}\n\n"
             "Start with /price or /signal. Set /risk for lot sizes.\n\n" + fmt.HELP,
@@ -698,6 +723,31 @@ class SentinelBot:
             stats = self.cache.tracker.stats()
             per_chat.append((self.reports_chat, [fmt.format_trade_result(e, stats) for e in closed]))
         await self._broadcast_each(per_chat)
+        if self.reports_chat and getattr(self.settings, "results_charts", True):
+            for e in closed:
+                if e.kind != "tp1":             # the picture comes once, when the call is over
+                    await self._send_result_chart(e.signal)
+
+    async def _send_result_chart(self, sig) -> None:
+        """The closed call drawn on its candles, for the results board. Never raises: the text result already went out."""
+        try:
+            rep = self.cache.report
+            data = getattr(rep, "data", None)
+            if data is None:
+                return
+            start = sig.triggered_at or sig.opened_at
+            short = sig.closed_at is not None and start is not None and (sig.closed_at - start) <= timedelta(hours=30)
+            m15 = getattr(data, "m15", None)
+            bars = m15 if (short and m15 is not None and len(m15) > 20) else data.hourly
+            async with self._chart_lock:
+                png = await asyncio.to_thread(render_trade_chart, bars, sig)
+            if png is None and bars is not data.hourly:
+                async with self._chart_lock:
+                    png = await asyncio.to_thread(render_trade_chart, data.hourly, sig)
+            if png is not None:
+                await self._send_chart(self.reports_chat, rep, png, caption=f"{sig.side} call #{sig.id} · entry, targets, stop and exit")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Result chart for call #%s failed: %s", getattr(sig, "id", "?"), exc)
 
     async def cmd_calendar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._typing(update)
@@ -724,7 +774,7 @@ class SentinelBot:
     async def cmd_subscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
         self.store.subscribe(chat_id)
-        await self._send(chat_id, f"✅ <b>SUBSCRIBED</b>\nA report every {self.settings.analysis_interval_min} min, plus alerts. Use /alerts off to mute alerts.")
+        await self._send(chat_id, f"✅ <b>SUBSCRIBED</b>\nA report every {self.report_every_min} min, plus alerts. Use /alerts off to mute alerts.")
 
     async def cmd_unsubscribe(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
@@ -772,7 +822,7 @@ class SentinelBot:
         ai = f"on · {s.classifier_model}" if s.ai_enabled else "off · keyword scoring"
         rows = [
             ("Last analysis", last),
-            ("Report / scan", f"every {s.analysis_interval_min} / {s.news_scan_interval_min} min"),
+            ("Report / scan", f"every {self.report_every_min} / {s.news_scan_interval_min} min"),
             ("Headlines", f"{recent} in {s.news_lookback_hours}h · {len(s.feeds)} feeds"),
             ("Calendar", f"{'on' if s.calendar_url else 'off'} · warn {s.event_warn_min} min before"),
             ("Session filter", "on" if s.session_filter else "off"),

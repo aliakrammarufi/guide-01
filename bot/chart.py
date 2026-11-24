@@ -105,3 +105,76 @@ def render_chart(hourly: pd.DataFrame, tech: TechSnapshot, sig: Signal, bars: in
     fig.savefig(buf, format="png", facecolor=BG)
     plt.close(fig)
     return buf.getvalue()
+
+
+def render_trade_chart(bars: pd.DataFrame, trade, pad_bars: int = 24) -> bytes | None:
+    """A closed call on the bars it lived through: entry, stop, the two targets and the exit, with the entry and
+    exit moments marked. ``bars`` are OHLC candles with a UTC DatetimeIndex (15-minute or hourly); ``trade`` is
+    the closed TradeSignal. None when the bars do not cover the trade."""
+    start = getattr(trade, "triggered_at", None) or getattr(trade, "opened_at", None)
+    end = getattr(trade, "closed_at", None)
+    if bars is None or len(bars) < 5 or start is None or end is None:
+        return None
+    idx = bars.index
+    if getattr(idx, "tz", None) is None:
+        bars = bars.tz_localize("UTC")
+        idx = bars.index
+    step = idx[1] - idx[0]
+    df = bars[(idx >= pd.Timestamp(start) - step * pad_bars) & (idx <= pd.Timestamp(end) + step * (pad_bars // 3))]
+    if len(df) < 3 or df.index[0] > pd.Timestamp(start):
+        return None
+
+    fig, ax = plt.subplots(figsize=(11, 5.6), dpi=150)
+    fig.patch.set_facecolor(BG)
+    ax.set_facecolor(PANEL)
+    x = mdates.date2num(df.index.to_pydatetime())
+    width = (x[1] - x[0]) * 0.6 if len(x) > 1 else 0.02
+    for xi, (_, row) in zip(x, df.iterrows()):
+        color = BULL if row["close"] >= row["open"] else BEAR
+        ax.vlines(xi, row["low"], row["high"], color=color, linewidth=0.9, alpha=0.9)
+        body_low = min(row["open"], row["close"])
+        body_h = abs(row["close"] - row["open"]) or (row["high"] - row["low"]) * 0.02
+        ax.bar(xi, body_h, bottom=body_low, width=width, color=color, linewidth=0)
+
+    exit_px = trade.exit_price if trade.exit_price is not None else float(df["close"].iloc[-1])
+    levels = [v for v in (trade.entry, trade.sl, trade.tp1, trade.tp2, exit_px) if v is not None]
+    lo, hi = min(float(df["low"].min()), *levels), max(float(df["high"].max()), *levels)
+    pad = (hi - lo) * 0.08
+    lo, hi = lo - pad, hi + pad
+
+    def hline(y, color, label, style="--"):
+        if y is None:
+            return
+        ax.hlines(y, x[0], x[-1], color=color, linestyle=style, linewidth=1.0, alpha=0.85)     # stops before the label
+        ax.text(x[-1], y, f"  {label} {y:,.1f}", color=color, fontsize=8, va="center", ha="left")
+
+    hline(trade.sl, BEAR, "stop", ":")
+    hline(trade.tp1, BULL, "T1", ":")
+    hline(trade.tp2, BULL, "T2", ":")
+    hline(trade.entry, GOLD, "entry", "-")
+    xs, xe = mdates.date2num(pd.Timestamp(start).to_pydatetime()), mdates.date2num(pd.Timestamp(end).to_pydatetime())
+    ax.axvspan(xs, xe, color=GOLD, alpha=0.07, linewidth=0)            # the time the call was open
+    r = trade.result_r
+    won = r is not None and r > 0.05
+    ax.scatter([xs], [trade.entry], marker="^" if trade.side == "BUY" else "v", s=110, color=GOLD, zorder=5)
+    ax.scatter([xe], [exit_px], marker="o", s=90, color=BULL if won else BEAR, zorder=5)
+    ax.plot([xs, xe], [trade.entry, exit_px], color=BULL if won else BEAR, linewidth=1.4, alpha=0.9, zorder=4)
+
+    ax.set_xlim(x[0], x[-1] + (x[-1] - x[0]) * 0.16)
+    ax.set_ylim(lo, hi)
+    ax.grid(color=GRID, linewidth=0.6, alpha=0.6)
+    ax.tick_params(colors=INK_2, labelsize=8)
+    for spine in ax.spines.values():
+        spine.set_color(GRID)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b\n%H:%M"))
+    ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    word = "WIN" if won else ("LOSS" if (r is not None and r < -0.05) else "CLOSED")
+    res = f"  {r:+.2f}R" if r is not None else ""
+    ax.set_title(f"XAU/USD  {trade.side} call #{trade.id}  ·  {word}{res}", color=BULL if won else (BEAR if word == "LOSS" else INK),
+                 fontsize=12, loc="left", pad=12, fontweight="bold")
+    fig.text(0.99, 0.01, "XAU Sentinel · result of a closed call · times in UTC", color=INK_2, fontsize=7, ha="right", alpha=0.7)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", facecolor=BG)
+    plt.close(fig)
+    return buf.getvalue()

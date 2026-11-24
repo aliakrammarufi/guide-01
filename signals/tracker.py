@@ -172,12 +172,13 @@ class SignalEvent:
 class SignalTracker:
     def __init__(self, store: Store, min_conf: int = 45, max_hours: float = 48.0, breakeven_after_tp1: bool = True,
                  pending_max_hours: float = 12.0, require_trigger: bool = True, spread_usd: float = 0.0, slippage_usd: float = 0.0,
-                 trigger_kinds: tuple[str, ...] | list[str] | None = None, daily_trend: str = ""):
+                 trigger_kinds: tuple[str, ...] | list[str] | None = None, daily_trend: str = "", max_losses_per_day: int = 0):
         self.store = store
         self.min_conf = min_conf
         # Daily-trend gate for NEW setups: "" = off, "not_against" = no call against a full daily trend
         # (price and D-EMA50 both on the wrong side), "with" = only with a full daily trend.
         self.daily_trend = daily_trend if daily_trend in ("not_against", "with") else ""
+        self.max_losses_per_day = max(0, int(max_losses_per_day or 0))    # 0 = no daily loss limit
         self.trigger_kinds = tuple(trigger_kinds) if trigger_kinds else None   # None = every confirmation type
         self.spread_usd = spread_usd          # round-trip spread charged to every closed trade ($/oz)
         self.slippage_usd = slippage_usd      # extra cost when a stop fills ($/oz)
@@ -343,6 +344,8 @@ class SignalTracker:
             return events
         if not self._daily_trend_ok(direction, tech):
             return events
+        if self.loss_limit_reached(now):
+            return events
         plan = self._plan_from_signal(eng)
         if plan is None:
             return events
@@ -361,6 +364,17 @@ class SignalTracker:
         else:
             events.extend(self._try_trigger(sig, tech, m15, now))
         return events
+
+    def losses_today(self, now: datetime | None = None) -> int:
+        """Calls that closed at a loss on the UTC day of ``now``."""
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        rows = self.store.signals_since(day - timedelta(days=4))            # a call can stay open for two days
+        return sum(1 for s in rows if s.traded and not s.is_open and s.result_r is not None and s.result_r < -0.05
+                   and s.closed_at is not None and day <= s.closed_at <= now)
+
+    def loss_limit_reached(self, now: datetime | None = None) -> bool:
+        return bool(self.max_losses_per_day) and self.losses_today(now) >= self.max_losses_per_day
 
     def _daily_trend_ok(self, direction: str, tech) -> bool:
         """The daily-trend gate (see ``daily_trend``). Without daily averages the gate lets the call through."""

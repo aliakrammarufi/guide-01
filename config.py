@@ -143,6 +143,13 @@ class Settings:
     results_example_risk_pct: float = field(default_factory=lambda: _env_float("RESULTS_EXAMPLE_RISK_PCT", 1.0))
     # End-of-day summary for the results board, Monday–Friday at this UTC time (after the New York close).
     results_day_summary_utc: str = field(default_factory=lambda: _env("RESULTS_DAY_SUMMARY_UTC", "21:05"))
+    # A picture with every closed call on the results board (entry, stop, targets, exit on the candles).
+    results_charts: bool = field(default_factory=lambda: _env_bool("RESULTS_CHARTS", True))
+    # How often the scheduled full report is sent to Telegram (minutes). 0 = follow ANALYSIS_INTERVAL_MIN.
+    # The analysis itself keeps running every minute either way; this only spaces the messages.
+    report_interval_min: int = field(default_factory=lambda: _env_int("REPORT_INTERVAL_MIN", 0))
+    # Quiet hours, "HH:MM-HH:MM" in UTC (may wrap past midnight). Messages still arrive, without sound.
+    quiet_hours_utc: str = field(default_factory=lambda: _env("QUIET_HOURS_UTC"))
 
     # --- Market data --------------------------------------------------------
     # "yfinance" (free, no key) or "twelvedata" (free key, true XAU/USD spot)
@@ -236,6 +243,9 @@ class Settings:
     # Daily-trend gate for new setups: "" (off), "not_against" or "with" (see signals/tracker.py). Off until the
     # three-year replay shows it beats the current rules.
     signal_daily_trend: str = field(default_factory=lambda: _env("SIGNAL_DAILY_TREND"))
+    # Daily loss limit: no new setup for the rest of the UTC day once this many calls closed at a loss that day.
+    # 0 = off. Off until the three-year replay shows what it costs.
+    signal_max_losses_per_day: int = field(default_factory=lambda: _env_int("SIGNAL_MAX_LOSSES_PER_DAY", 0))
     news_blackout_before_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_BEFORE_MIN", 30))
     news_blackout_after_min: int = field(default_factory=lambda: _env_int("NEWS_BLACKOUT_AFTER_MIN", 15))
     # Trading costs charged to every result (replay and live stats): round-trip spread and the slippage
