@@ -31,6 +31,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 
 from bot import formatting as fmt
 from bot.chart import render_chart, render_trade_chart
+from bot.flip import FlipAccount
 from config import Settings
 from news.store import Store
 from news.sentiment import same_story
@@ -72,6 +73,10 @@ class SentinelBot:
         self._bg: set[asyncio.Task] = set()                   # fire-and-forget tasks (kept so they are not garbage collected)
         self._bg_refresh: asyncio.Task | None = None
         self.reports_chat: int | None = int(settings.reports_chat_id) if getattr(settings, "reports_chat_id", 0) else None
+        self.flip_chat: int | None = int(settings.flip_chat_id) if getattr(settings, "flip_chat_id", 0) else None
+        self.flip = FlipAccount(store, start=getattr(settings, "flip_start_balance", 200.0), risk_pct=getattr(settings, "flip_risk_pct", 15.0),
+                                goal=getattr(settings, "flip_goal", 20000.0), contract_oz=getattr(settings, "contract_oz", 100.0),
+                                spread_usd=getattr(settings, "spread_usd", 0.30)) if self.flip_chat else None
         self.quiet_window = self._parse_quiet(getattr(settings, "quiet_hours_utc", "") or "")   # (start, end) minutes of the UTC day
         self.state = "starting"                               # starting / running / retrying / stopped (see status())
         self.state_since = datetime.now(timezone.utc)
@@ -103,6 +108,8 @@ class SentinelBot:
             "scorecard": self.cmd_scorecard,
             "results": self.cmd_results,
             "today": self.cmd_today,
+            "flip": self.cmd_flip,
+            "flipreset": self.cmd_flipreset,
             "status": self.cmd_status,
         }
         for name, func in handlers.items():
@@ -160,7 +167,7 @@ class SentinelBot:
             chat = update.effective_chat
             if chat is None:
                 return
-            if self.settings.allowed_chat_ids and chat.id not in self.settings.allowed_chat_ids and chat.id != self.reports_chat:
+            if self.settings.allowed_chat_ids and chat.id not in self.settings.allowed_chat_ids and chat.id not in (self.reports_chat, self.flip_chat):
                 where = "This group's" if chat.type in ("group", "supergroup") else "Your"
                 await context.bot.send_message(
                     chat.id,
@@ -272,7 +279,7 @@ class SentinelBot:
 
     def _main_subs(self, alerts_only: bool = False) -> list[int]:
         """The chats that get calls and alerts: every subscriber except the reports chat (it has its own diet)."""
-        return [c for c in self.store.subscribers(alerts_only=alerts_only) if c != self.reports_chat]
+        return [c for c in self.store.subscribers(alerts_only=alerts_only) if c not in (self.reports_chat, self.flip_chat)]
 
     async def _render(self, report) -> bytes | None:
         """The chart as PNG bytes; None when charts are off or the render failed."""
@@ -680,6 +687,44 @@ class SentinelBot:
     async def cmd_today(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._send(update.effective_chat.id, await asyncio.to_thread(self._day_summary_text))
 
+    async def cmd_flip(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        if self.flip is None:
+            await self._send(chat_id, "The flip challenge is not set up (no flip chat configured).")
+            return
+        await self._send(chat_id, await asyncio.to_thread(self.flip.status_text))
+
+    async def cmd_flipreset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Start the flip account again from its starting balance. Only inside the flip chat, so nobody resets it by accident."""
+        chat_id = update.effective_chat.id
+        if self.flip is None or chat_id != self.flip_chat:
+            await self._send(chat_id, "Use /flipreset inside the flip group.")
+            return
+        if (await asyncio.to_thread(self.flip.state)).get("open"):
+            await self._send(chat_id, "A flip trade is open. Reset after it has closed.")
+            return
+        d = await asyncio.to_thread(self.flip.reset)
+        await self._send(chat_id, f"🔄 <b>FLIP ACCOUNT RESET</b>\nNew balance: ${d['balance']:,.2f}. The next confirmed call opens the first trade.")
+
+    async def _flip_intro(self) -> None:
+        """Once per flip chat: what the group is, the rules, the starting balance."""
+        if self.flip is None or self.store.get_state("flip_intro_chat") == self.flip_chat:
+            return
+        f = self.flip
+        text = ("⚡ <b>FLIP CHALLENGE</b>\n"
+                f"A ${f.start:,.0f} account that follows the bot's confirmed calls and risks about {f.risk_pct:g}% of its balance on "
+                f"each one, so the lot size grows as the balance grows. Goal: ${f.goal:,.0f}.\n\n"
+                "This group gets only the flip trades: the entry with its exact lot size, target 1, and the result with the new "
+                "balance. /flip shows the account at any time.\n\n"
+                "<i>Read this before joining in: with a small account the smallest position already risks a large share of it, "
+                "and most flip accounts are lost. Nobody can say exactly how far price will move. Use only money you can afford "
+                "to lose. The bot never places orders.</i>\n\n" + await asyncio.to_thread(f.status_text))
+        try:
+            await self._send(self.flip_chat, text)
+            self.store.set_state("flip_intro_chat", self.flip_chat)
+        except TelegramError as exc:
+            log.warning("Flip introduction not sent: %s", exc)
+
     async def _reports_intro(self) -> None:
         """Once per reports chat: say what the board is for and show the last closed calls, so the group
         does not sit empty until the next call closes."""
@@ -722,6 +767,18 @@ class SentinelBot:
         if self.reports_chat and closed:         # the reports chat keeps the record: one line per closed call
             stats = self.cache.tracker.stats()
             per_chat.append((self.reports_chat, [fmt.format_trade_result(e, stats) for e in closed]))
+        if self.flip is not None:                # the flip chat hears only its own account's trades
+            flip_texts = []
+            for e in events:
+                try:
+                    text = await asyncio.to_thread(self.flip.on_event, e)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Flip account failed on %s #%s: %s", e.kind, getattr(e.signal, "id", "?"), exc)
+                    text = None
+                if text:
+                    flip_texts.append(text)
+            if flip_texts:
+                per_chat.append((self.flip_chat, flip_texts))
         await self._broadcast_each(per_chat)
         if self.reports_chat and getattr(self.settings, "results_charts", True):
             for e in closed:
@@ -1018,6 +1075,7 @@ class SentinelBot:
                 log.info("Polling Telegram…")
                 self._set_status("running")
                 self._spawn(self._reports_intro())
+                self._spawn(self._flip_intro())
                 self.last_start_error = None
                 while True:
                     await asyncio.sleep(3600)

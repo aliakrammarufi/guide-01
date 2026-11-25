@@ -138,6 +138,12 @@ class Settings:
     # scorecard. true also moves the scheduled full report there (it shows the current bias and entry plan, so
     # readers take it for a signal); false leaves that report with the main chats as before.
     reports_chat_full_report: bool = field(default_factory=lambda: _env_bool("TELEGRAM_REPORTS_FULL_REPORT", False))
+    # Optional third chat for the flip challenge (bot/flip.py): a small account that follows the confirmed calls
+    # with a fixed share of its balance at risk, so the lot size grows with the balance. Bookkeeping only.
+    flip_chat_id: int = field(default_factory=lambda: _env_int("TELEGRAM_FLIP_CHAT_ID", 0))
+    flip_start_balance: float = field(default_factory=lambda: _env_float("FLIP_START_BALANCE", 200.0))
+    flip_risk_pct: float = field(default_factory=lambda: _env_float("FLIP_RISK_PCT", 15.0))
+    flip_goal: float = field(default_factory=lambda: _env_float("FLIP_GOAL", 20000.0))
     # The results board quotes money for an example account (0 switches the money line off).
     results_example_account: float = field(default_factory=lambda: _env_float("RESULTS_EXAMPLE_ACCOUNT", 10000.0))
     results_example_risk_pct: float = field(default_factory=lambda: _env_float("RESULTS_EXAMPLE_RISK_PCT", 1.0))
