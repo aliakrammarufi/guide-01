@@ -76,8 +76,10 @@ class FlipAccount:
                 return None
             if op is not None:                                      # a position whose call never reported its close
                 d["open"] = None                                    # (bot down at the time): dropped without a result
+            d["last_call_id"] = s.id
             sz = self.size(d["balance"], s.entry, s.sl)
             if not sz["ok"]:
+                self._save(d)
                 return self._fmt_skip(d, s, sz)
             d["open"] = {"id": s.id, "side": s.side, "entry": s.entry, "sl": s.sl, "tp1": s.tp1, "tp2": s.tp2, "lots": sz["lots"],
                          "risk_usd": sz["risk_usd"], "risk_pct": sz["risk_pct"], "half": self._half(sz["lots"]),
@@ -101,6 +103,30 @@ class FlipAccount:
             self._save(d)
             return self._fmt_close(d, op, e.kind, exit_px, pnl, before)
         return None
+
+    def join_open(self, s, price: float) -> str | None:
+        """Take a call that is already live (confirmed before the flip chat existed, or while the bot was down) at
+        the current ``price``. Only before target 1, only while price is still between the stop and target 1, and
+        only once per call. Returns the message for the flip chat, or None when there is nothing to join."""
+        d = self.state()
+        if d.get("open") is not None or d.get("last_call_id") == s.id or getattr(s, "status", "") != "active":
+            return None
+        price = float(price)
+        inside = (s.tp1 < price < s.sl) if s.side == "SELL" else (s.sl < price < s.tp1)
+        d["last_call_id"] = s.id
+        if not inside:
+            self._save(d)
+            return None
+        sz = self.size(d["balance"], price, s.sl)
+        if not sz["ok"]:
+            self._save(d)
+            return self._fmt_skip(d, s, sz)
+        d["open"] = {"id": s.id, "side": s.side, "entry": round(price, 2), "sl": s.sl, "tp1": s.tp1, "tp2": s.tp2, "lots": sz["lots"],
+                     "risk_usd": sz["risk_usd"], "risk_pct": sz["risk_pct"], "half": self._half(sz["lots"]),
+                     "opened_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "joined": True}
+        self._save(d)
+        return self._fmt_entry(d, d["open"], s).replace(
+            f"· call #{s.id}\n", f"· call #{s.id}\n<i>Joining a call that is already live (confirmed at {s.entry:,.1f}); entry at the current price.</i>\n", 1)
 
     @staticmethod
     def _half(lots: float) -> float:

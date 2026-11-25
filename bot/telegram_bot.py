@@ -706,6 +706,21 @@ class SentinelBot:
         d = await asyncio.to_thread(self.flip.reset)
         await self._send(chat_id, f"🔄 <b>FLIP ACCOUNT RESET</b>\nNew balance: ${d['balance']:,.2f}. The next confirmed call opens the first trade.")
 
+    async def _flip_join_live(self, rep) -> None:
+        """Let the flip account into a call that was already live when the flip chat came on (or the bot restarted)."""
+        if self.flip is None:
+            return
+        try:
+            live = self.cache.tracker.live()
+            price = getattr(getattr(rep, "tech", None), "price", None)
+            if live is None or price is None:
+                return
+            text = await asyncio.to_thread(self.flip.join_open, live, price)
+            if text:
+                await self._broadcast_each([(self.flip_chat, [text])])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Flip join failed: %s", exc)
+
     async def _flip_intro(self) -> None:
         """Once per flip chat: what the group is, the rules, the starting balance."""
         if self.flip is None or self.store.get_state("flip_intro_chat") == self.flip_chat:
@@ -911,6 +926,7 @@ class SentinelBot:
             return
         await self._check_bias_change(rep)
         await self._flush_signal_events()
+        await self._flip_join_live(rep)
         if not subs:
             return
         await self._broadcast_each([(chat_id, [self._full_report(rep, chat_id)]) for chat_id in subs], report=rep, with_chart=True)

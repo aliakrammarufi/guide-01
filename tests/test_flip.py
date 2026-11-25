@@ -114,3 +114,30 @@ def test_the_flip_chat_gets_only_flip_messages_and_no_calls_or_alerts(tmp_path, 
     plain = tb.SentinelBot(Settings(telegram_token="123456:TEST", anthropic_api_key="", calendar_url="", allowed_chat_ids=[MAIN]),
                            Store(tmp_path / "p.db"), SimpleNamespace(report=None, pipeline=SimpleNamespace(news_listeners=[]), tracker=tracker))
     assert plain.flip is None and plain.flip_chat is None
+
+
+def test_the_flip_account_can_join_a_call_that_is_already_live_once(tmp_path):
+    f = account(tmp_path, start=200, risk_pct=15)
+    s = call(35, entry=3551.7, sl=3592.8, tp1=3531.7, tp2=3501.1)
+    s.status = "active"
+    msg = f.join_open(s, 3557.4)
+    assert "FLIP — 🔴 SELL NOW" in msg and "Joining a call that is already live (confirmed at 3,551.7)" in msg
+    assert "Entry <b>3,557.4</b>" in msg and "Lot size <b>0.01</b>" in msg
+    op = f.state()["open"]
+    assert op["entry"] == 3557.4 and op["risk_usd"] == pytest.approx(35.70)          # $35.40 to the stop + spread
+    assert f.join_open(s, 3556.0) is None                                             # only once per call
+    s.exit_price, s.tp1_hit_at = 3501.1, datetime.now(timezone.utc)
+    close = f.on_event(ev("tp2", s))
+    assert "WIN +$56.00" in close                                                     # from the JOIN price, not the call's entry
+
+
+def test_no_late_join_after_target_1_or_outside_the_trade_and_no_retry(tmp_path):
+    f = account(tmp_path, start=200, risk_pct=15)
+    s = call(36, entry=3551.7, sl=3592.8, tp1=3531.7, tp2=3501.1)
+    s.status = "tp1"
+    assert f.join_open(s, 3540.0) is None                    # target 1 already hit: too late
+    s2 = call(37, entry=3551.7, sl=3592.8, tp1=3531.7, tp2=3501.1)
+    s2.status = "active"
+    assert f.join_open(s2, 3529.0) is None                   # price already past target 1
+    assert f.join_open(s2, 3557.0) is None                   # and it is not tried again for the same call
+    assert f.state()["open"] is None
