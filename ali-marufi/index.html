@@ -5,100 +5,86 @@
 <script>document.documentElement.className="js"</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<!-- BEFORE LAUNCH: every value in [square brackets] on this page is an unfilled fact.
-     Replace each one, in the visible text AND in the tags below, then delete the
-     "robots noindex" line so Google can index the page. -->
+<!-- BEFORE LAUNCH
+     1. Replace [website-address] everywhere in this file with the real domain.
+     2. Fill every item marked class="tbc" (shown on the page in italics with a small ring).
+     3. Delete the "robots noindex" line below so Google can index the page. -->
 <meta name="robots" content="noindex">
 
-<title>Ali Marufi — [one-line role]</title>
-<meta name="description" content="[About 150 characters, built from the one-line statement]">
+<title>Ali Marufi — Entrepreneur and Business Owner</title>
+<meta name="description" content="Ali Marufi is an entrepreneur and business owner, and the owner of Marufi Venture and Marufi Global Trade Ltd. Companies, estimated net worth and contact.">
 <link rel="canonical" href="https://[website-address]/">
 
 <meta property="og:type" content="profile">
 <meta property="og:site_name" content="Ali Marufi">
-<meta property="og:title" content="Ali Marufi — [one-line role]">
-<meta property="og:description" content="[About 150 characters, built from the one-line statement]">
+<meta property="og:title" content="Ali Marufi — Entrepreneur and Business Owner">
+<meta property="og:description" content="Ali Marufi is an entrepreneur and business owner, and the owner of Marufi Venture and Marufi Global Trade Ltd. Companies, estimated net worth and contact.">
 <meta property="og:url" content="https://[website-address]/">
 <meta property="og:image" content="https://[website-address]/images/og-image.jpg">
 <meta property="og:image:alt" content="Portrait of Ali Marufi">
 <meta property="profile:first_name" content="Ali">
 <meta property="profile:last_name" content="Marufi">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Ali Marufi — [one-line role]">
-<meta name="twitter:description" content="[About 150 characters, built from the one-line statement]">
+<meta name="twitter:title" content="Ali Marufi — Entrepreneur and Business Owner">
+<meta name="twitter:description" content="Ali Marufi is an entrepreneur and business owner, and the owner of Marufi Venture and Marufi Global Trade Ltd. Companies, estimated net worth and contact.">
 <meta name="twitter:image" content="https://[website-address]/images/og-image.jpg">
 <meta name="twitter:image:alt" content="Portrait of Ali Marufi">
-<meta name="theme-color" content="#0b0d10">
+<meta name="theme-color" content="#0f3d30">
 
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230b0d10'/%3E%3Ctext x='32' y='43' font-family='Georgia,serif' font-size='30' text-anchor='middle' fill='%23c9a24b'%3EAM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f3d30'/%3E%3Ctext x='32' y='43' font-family='Georgia,serif' font-style='italic' font-size='28' text-anchor='middle' fill='%23c9a961'%3EAM%3C/text%3E%3C/svg%3E">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 
-<!-- Structured data. Add one Organization block per business; delete unused ones. -->
+<!-- Structured data. Add "url" and "foundingDate" to each company, and "sameAs" social links,
+     "address" and "email" to the Person, once those facts are supplied. -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@graph": [
-    {
-      "@type": "WebSite",
-      "@id": "https://[website-address]/#website",
-      "url": "https://[website-address]/",
-      "name": "Ali Marufi"
-    },
+    { "@type": "WebSite", "@id": "https://[website-address]/#website", "url": "https://[website-address]/", "name": "Ali Marufi" },
     {
       "@type": "Person",
       "@id": "https://[website-address]/#ali-marufi",
       "name": "Ali Marufi",
       "givenName": "Ali",
       "familyName": "Marufi",
-      "jobTitle": "[one-line role]",
-      "description": "[one-line statement]",
+      "jobTitle": "Entrepreneur and business owner",
+      "description": "Entrepreneur and business owner. Owner of Marufi Venture and Marufi Global Trade Ltd.",
       "url": "https://[website-address]/",
       "image": "https://[website-address]/images/ali-marufi.jpg",
-      "email": "mailto:[email address]",
-      "address": {
-        "@type": "PostalAddress",
-        "addressLocality": "[city]",
-        "addressCountry": "[country]"
-      },
-      "sameAs": [
-        "[Instagram link]",
-        "[LinkedIn link]",
-        "[Telegram link]"
+      "worksFor": [
+        { "@id": "https://[website-address]/#marufi-venture" },
+        { "@id": "https://[website-address]/#marufi-global-trade" }
       ]
     },
     {
       "@type": "Organization",
-      "@id": "https://[website-address]/#project-1",
-      "name": "[Project 1 name]",
-      "description": "[Project 1: what it does]",
-      "url": "[Project 1 link]",
-      "foundingDate": "[Project 1 year]",
+      "@id": "https://[website-address]/#marufi-venture",
+      "name": "Marufi Venture",
       "founder": { "@id": "https://[website-address]/#ali-marufi" }
     },
     {
       "@type": "Organization",
-      "@id": "https://[website-address]/#project-2",
-      "name": "[Project 2 name]",
-      "description": "[Project 2: what it does]",
-      "url": "[Project 2 link]",
-      "foundingDate": "[Project 2 year]",
+      "@id": "https://[website-address]/#marufi-global-trade",
+      "name": "Marufi Global Trade Ltd.",
+      "legalName": "Marufi Global Trade Ltd.",
       "founder": { "@id": "https://[website-address]/#ali-marufi" }
     }
   ]
 }
 </script>
 </head>
-<body>
+<body class="has-curtain">
 <a class="skip" href="#main">Skip to content</a>
+<div class="curtain" aria-hidden="true"><b>AM</b></div>
 
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="index.html" aria-label="Ali Marufi, home">Ali Marufi</a>
-    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu"><span></span><span></span><span></span></button>
+    <a class="brand" href="index.html" aria-label="Ali Marufi, home">Ali <i>Marufi</i></a>
+    <button class="menu-btn" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu"><span></span><span></span></button>
     <nav aria-label="Main">
       <ul class="nav-links" id="nav-links">
         <li><a href="#top" aria-current="page">Home</a></li>
@@ -113,157 +99,132 @@
 
 <main id="main">
 
-<section class="hero" id="top">
+<section class="hero dark" id="top">
+  <div class="rosette" aria-hidden="true"><svg viewBox="-400 -400 800 800"><ellipse rx="392" ry="150" transform="rotate(0)"/><ellipse rx="392" ry="150" transform="rotate(5)"/><ellipse rx="392" ry="150" transform="rotate(10)"/><ellipse rx="392" ry="150" transform="rotate(15)"/><ellipse rx="392" ry="150" transform="rotate(20)"/><ellipse rx="392" ry="150" transform="rotate(25)"/><ellipse rx="392" ry="150" transform="rotate(30)"/><ellipse rx="392" ry="150" transform="rotate(35)"/><ellipse rx="392" ry="150" transform="rotate(40)"/><ellipse rx="392" ry="150" transform="rotate(45)"/><ellipse rx="392" ry="150" transform="rotate(50)"/><ellipse rx="392" ry="150" transform="rotate(55)"/><ellipse rx="392" ry="150" transform="rotate(60)"/><ellipse rx="392" ry="150" transform="rotate(65)"/><ellipse rx="392" ry="150" transform="rotate(70)"/><ellipse rx="392" ry="150" transform="rotate(75)"/><ellipse rx="392" ry="150" transform="rotate(80)"/><ellipse rx="392" ry="150" transform="rotate(85)"/><ellipse rx="392" ry="150" transform="rotate(90)"/><ellipse rx="392" ry="150" transform="rotate(95)"/><ellipse rx="392" ry="150" transform="rotate(100)"/><ellipse rx="392" ry="150" transform="rotate(105)"/><ellipse rx="392" ry="150" transform="rotate(110)"/><ellipse rx="392" ry="150" transform="rotate(115)"/><ellipse rx="392" ry="150" transform="rotate(120)"/><ellipse rx="392" ry="150" transform="rotate(125)"/><ellipse rx="392" ry="150" transform="rotate(130)"/><ellipse rx="392" ry="150" transform="rotate(135)"/><ellipse rx="392" ry="150" transform="rotate(140)"/><ellipse rx="392" ry="150" transform="rotate(145)"/><ellipse rx="392" ry="150" transform="rotate(150)"/><ellipse rx="392" ry="150" transform="rotate(155)"/><ellipse rx="392" ry="150" transform="rotate(160)"/><ellipse rx="392" ry="150" transform="rotate(165)"/><ellipse rx="392" ry="150" transform="rotate(170)"/><ellipse rx="392" ry="150" transform="rotate(175)"/><circle r="392"/><circle r="150"/><circle r="396"/></svg></div>
   <div class="wrap hero-grid">
     <div>
       <p class="eyebrow">Entrepreneur &middot; Business owner</p>
       <h1><span>Ali</span><span>Marufi</span></h1>
-      <p class="lede"><span class="ph">[One-line statement, e.g. "Entrepreneur and investor based in CITY. Founder of X and Y."]</span></p>
-      <p class="place"><span class="ph">[City, Country]</span></p>
+      <p class="lede">Owner of <strong>Marufi Venture</strong> and <strong>Marufi Global Trade Ltd.</strong></p>
       <div class="actions">
-        <a class="btn btn-solid" href="#projects">View projects</a>
+        <a class="btn btn-solid" href="#projects">View projects <span class="arr" aria-hidden="true">&rarr;</span></a>
         <a class="btn btn-line" href="#contact">Get in touch</a>
       </div>
     </div>
-    <!-- Replace with: <img src="images/ali-marufi.jpg" alt="Portrait of Ali Marufi" width="880" height="1100"> -->
-    <div class="photo-frame">
-      <div class="photo-ph" role="img" aria-label="Placeholder for a portrait of Ali Marufi">Photo of Ali<small>Portrait, 4:5</small></div>
+    <!-- When the photo is ready, replace the "mono" div with:
+         <img src="images/ali-marufi.jpg" alt="Portrait of Ali Marufi" width="840" height="1092"> -->
+    <div class="portrait" data-drift="-36">
+      <div class="arch"><div class="mono" role="img" aria-label="Monogram AM. Portrait to be added"><b>AM</b><small>Portrait to be added</small></div></div>
     </div>
   </div>
-  <a class="scroll-cue" href="#numbers-h" aria-label="Scroll to the numbers"><span></span></a>
+  <a class="scroll-cue" href="#numbers" aria-label="Scroll to the numbers"><span></span></a>
 </section>
 
-<hr class="rule reveal-rule">
+<div class="marquee" aria-hidden="true"><div class="marquee-track"><ul><li>Ali Marufi</li><li>Entrepreneur</li><li>Marufi Venture</li><li>Owner</li><li>Marufi Global Trade Ltd.</li><li>Owner</li><li>Ali Marufi</li><li>Entrepreneur</li><li>Marufi Venture</li><li>Owner</li><li>Marufi Global Trade Ltd.</li><li>Owner</li></ul><ul><li>Ali Marufi</li><li>Entrepreneur</li><li>Marufi Venture</li><li>Owner</li><li>Marufi Global Trade Ltd.</li><li>Owner</li><li>Ali Marufi</li><li>Entrepreneur</li><li>Marufi Venture</li><li>Owner</li><li>Marufi Global Trade Ltd.</li><li>Owner</li></ul></div></div>
 
-<section class="numbers" aria-labelledby="numbers-h">
+<section id="numbers" aria-labelledby="numbers-h">
   <div class="wrap">
-    <h2 id="numbers-h" class="eyebrow">By the numbers</h2>
-    <!-- To fill a figure: put the number in data-count and the same value as the text, e.g.
-         <span data-count="12" data-prefix="$" data-suffix=" million">$12 million</span>
-         It then counts up once when scrolled into view. -->
-    <dl class="stats" data-stagger>
-      <div class="stat stat-lead reveal">
-        <dt>Estimated net worth &middot; <span class="ph">[year]</span></dt>
-        <dd><span data-count="" data-prefix="$" data-suffix=" million"><span class="ph">[net worth]</span></span></dd>
+    <h2 id="numbers-h" class="eyebrow reveal" style="font-family:var(--sans);line-height:1.7">By the numbers</h2>
+    <div class="numbers-grid">
+      <div class="reveal">
+        <p class="worth-label">Estimated net worth</p>
+        <!-- When the figure is ready, replace the next line with (example):
+             <p class="worth-figure"><span data-count="12" data-prefix="$" data-suffix="M">$12M</span></p>
+             change the label above to "Estimated net worth · 2026", and the note below to:
+             "Ali Marufi's estimated net worth is $12 million as of 2026." -->
+        <p class="worth-figure pending">Figure to be added</p>
+        <p class="worth-note">Ali Marufi's estimated net worth, and the year it refers to, will be shown here.</p>
       </div>
-      <div class="stat reveal">
-        <dt>Projects owned</dt>
-        <dd><span data-count=""><span class="ph">[number]</span></span></dd>
-      </div>
-      <div class="stat reveal">
-        <dt>Years in business</dt>
-        <dd><span data-count=""><span class="ph">[number]</span></span></dd>
-      </div>
-      <!-- Optional fourth figure: team size, customers, countries or revenue. Delete if none applies. -->
-      <div class="stat reveal">
-        <dt><span class="ph">[fourth label, if true]</span></dt>
-        <dd><span data-count=""><span class="ph">[number]</span></span></dd>
-      </div>
-    </dl>
-    <p class="networth-line">Ali Marufi's estimated net worth is <span class="ph">[figure]</span> as of <span class="ph">[year]</span>.</p>
+      <dl class="stats" data-stagger>
+        <div class="stat reveal"><dt>Companies owned</dt><dd><span data-count="2">2</span></dd></div>
+        <div class="stat reveal"><dt>Years in business</dt><dd><span class="tbc">To be added</span></dd></div>
+        <div class="stat reveal"><dt>Based in</dt><dd><span class="tbc">To be added</span></dd></div>
+      </dl>
+    </div>
   </div>
 </section>
 
-<hr class="rule reveal-rule">
-
-<section id="projects" aria-labelledby="projects-h">
+<section id="projects" class="tint" aria-labelledby="projects-h">
   <div class="wrap">
     <div class="section-head reveal">
       <p class="eyebrow">Holdings</p>
-      <h2 id="projects-h">Projects and businesses</h2>
-      <p class="muted" style="margin-top:24px">The businesses I own and have built.</p>
+      <h2 id="projects-h">The companies <em>I own</em></h2>
     </div>
-    <!-- One <article> per business. Copy a card to add more; add class "three" to the grid for 3 or more. -->
+    <!-- One <article> per company. Copy a card to add another. -->
     <div class="holdings" data-stagger>
       <article class="holding reveal">
         <div class="holding-top">
-          <div class="logo-ph" role="img" aria-label="Placeholder for the [Project 1 name] logo">Logo</div>
-          <span class="holding-no" aria-hidden="true">01</span>
+          <!-- When the logo is ready, replace the initials with: <img src="images/logo-1.svg" alt="Marufi Venture logo"> -->
+          <div class="seal" role="img" aria-label="Marufi Venture monogram">MV</div>
+          <span class="holding-no" aria-hidden="true">No. 01</span>
         </div>
-        <h3><span class="ph">[Project 1 name]</span></h3>
-        <p><span class="ph">[Project 1: what it does, in one sentence]</span></p>
+        <span class="role-chip">Owner</span>
+        <h3>Marufi Venture</h3>
+        <p class="desc"><span class="tbc">One-sentence description to be added</span></p>
         <dl>
-          <div><dt>Role</dt><dd><span class="ph">[Owner / Founder / Partner]</span></dd></div>
-          <div><dt>Since</dt><dd><span class="ph">[year]</span></dd></div>
+          <div><dt>Role</dt><dd>Owner</dd></div>
+          <div><dt>Since</dt><dd><span class="tbc">Year</span></dd></div>
+          <div><dt>Website</dt><dd><span class="tbc">To be added</span></dd></div>
         </dl>
-        <!-- Set href to the project URL and remove data-placeholder. Delete this block if the link is "none". -->
-        <div class="holding-foot"><a class="text-link" href="#" data-placeholder title="Placeholder: project link not added yet">Visit <span class="ph">[link]</span></a></div>
       </article>
       <article class="holding reveal">
         <div class="holding-top">
-          <div class="logo-ph" role="img" aria-label="Placeholder for the [Project 2 name] logo">Logo</div>
-          <span class="holding-no" aria-hidden="true">02</span>
+          <!-- When the logo is ready, replace the initials with: <img src="images/logo-2.svg" alt="Marufi Global Trade Ltd. logo"> -->
+          <div class="seal" role="img" aria-label="Marufi Global Trade Ltd. monogram">MG</div>
+          <span class="holding-no" aria-hidden="true">No. 02</span>
         </div>
-        <h3><span class="ph">[Project 2 name]</span></h3>
-        <p><span class="ph">[Project 2: what it does, in one sentence]</span></p>
+        <span class="role-chip">Owner</span>
+        <h3>Marufi Global Trade Ltd.</h3>
+        <p class="desc"><span class="tbc">One-sentence description to be added</span></p>
         <dl>
-          <div><dt>Role</dt><dd><span class="ph">[Owner / Founder / Partner]</span></dd></div>
-          <div><dt>Since</dt><dd><span class="ph">[year]</span></dd></div>
+          <div><dt>Role</dt><dd>Owner</dd></div>
+          <div><dt>Since</dt><dd><span class="tbc">Year</span></dd></div>
+          <div><dt>Website</dt><dd><span class="tbc">To be added</span></dd></div>
         </dl>
-        <!-- Set href to the project URL and remove data-placeholder. Delete this block if the link is "none". -->
-        <div class="holding-foot"><a class="text-link" href="#" data-placeholder title="Placeholder: project link not added yet">Visit <span class="ph">[link]</span></a></div>
       </article>
     </div>
   </div>
 </section>
 
-<hr class="rule reveal-rule">
-
-<section id="about" aria-labelledby="about-h">
-  <div class="wrap brief-grid">
-    <div class="reveal">
-      <p class="eyebrow">About</p>
-      <h2 id="about-h">In brief</h2>
-    </div>
-    <div class="reveal">
-      <p class="lede"><span class="ph">[Short story, 3 or 4 sentences: where you started, what you built, what you focus on now]</span></p>
-      <a class="text-link arrow" href="about.html">Read the full story</a>
-    </div>
+<section id="about" class="dark statement" aria-labelledby="about-h">
+  <div class="wrap">
+    <h2 id="about-h" class="eyebrow reveal" style="font-family:var(--sans);line-height:1.7">About, in brief</h2>
+    <p class="big words">I am Ali Marufi, an entrepreneur and business owner. I own <em>Marufi Venture</em> and <em>Marufi Global Trade Ltd.</em></p>
+    <!-- Add the rest of the short story here (where you started, what you focus on now). -->
+    <a class="text-link reveal" href="about.html">Read the full story <span class="arr" aria-hidden="true">&rarr;</span></a>
   </div>
 </section>
 
-<hr class="rule reveal-rule">
 <section id="contact" aria-labelledby="contact-h">
   <div class="wrap contact-grid">
     <div class="reveal">
       <p class="eyebrow">Contact</p>
-      <h2 id="contact-h">Get in touch</h2>
-      <p class="muted" style="margin:24px 0 40px">Reach me directly through any of the channels below.</p>
-      <!-- Each link below is a placeholder: set href, remove data-placeholder, replace the bracketed text. -->
-      <ul class="channels" data-stagger>
-        <li class="reveal"><a href="#" data-placeholder title="Placeholder: email not added yet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="5" width="18" height="14"/><path d="M3 6l9 7 9-7"/></svg><span><span class="label">Email</span><span class="value"><span class="ph">[email address]</span></span></span></a></li>
-        <li class="reveal"><a href="#" data-placeholder title="Placeholder: Instagram link not added yet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="0.6" fill="currentColor"/></svg><span><span class="label">Instagram</span><span class="value"><span class="ph">[Instagram link]</span></span></span></a></li>
-        <li class="reveal"><a href="#" data-placeholder title="Placeholder: LinkedIn link not added yet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17"/><path d="M8 10.5V17M8 7.2v.1M12 17v-6.5M12 13.5c0-1.8 1.1-3 2.5-3s2.5 1 2.5 3V17"/></svg><span><span class="label">LinkedIn</span><span class="value"><span class="ph">[LinkedIn link]</span></span></span></a></li>
-        <li class="reveal"><a href="#" data-placeholder title="Placeholder: Telegram link not added yet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M21 4L3 11l5.5 2L10 19l3-3.5 4.5 3.5L21 4z"/><path d="M8.5 13L17 7.5"/></svg><span><span class="label">Telegram</span><span class="value"><span class="ph">[Telegram link]</span></span></span></a></li>
-      </ul>
+      <h2 id="contact-h">Get in <em>touch</em></h2>
+      <p class="soft" style="margin-top:28px;max-width:22em">Reach me directly through any of these channels.</p>
     </div>
-    <!-- Contact form: [yes / no] not decided. Delete this whole <div> if the answer is no.
-         If yes, point the form at a mail service and remove data-placeholder. -->
-    <div class="reveal">
-      <p class="eyebrow">Send a message <span class="ph">[contact form: yes / no]</span></p>
-      <form data-placeholder novalidate>
-        <div><label for="f-name">Name</label><input id="f-name" name="name" type="text" autocomplete="name" required></div>
-        <div><label for="f-email">Email</label><input id="f-email" name="email" type="email" autocomplete="email" required></div>
-        <div><label for="f-msg">Message</label><textarea id="f-msg" name="message" required></textarea></div>
-        <button class="btn btn-solid" type="submit">Send message</button>
-        <p class="form-note">Placeholder form. It is not connected to an inbox yet.</p>
-        <p class="form-note" role="status" aria-live="polite"></p>
-      </form>
-    </div>
+    <!-- For each channel: set href, remove data-pending, and replace the "tbc" span with the address or handle. -->
+    <ul class="channels" data-stagger>
+        <li class="reveal"><a href="#" data-pending title="Email: address to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 6.5l9 6.5 9-6.5"/></svg><span class="name">Email</span><span class="value"><span class="tbc">To be added</span></span><span class="go" aria-hidden="true">&rarr;</span></a></li>
+        <li class="reveal"><a href="#" data-pending title="Instagram: address to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="0.6" fill="currentColor"/></svg><span class="name">Instagram</span><span class="value"><span class="tbc">To be added</span></span><span class="go" aria-hidden="true">&rarr;</span></a></li>
+        <li class="reveal"><a href="#" data-pending title="LinkedIn: address to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 10.5V17M8 7.2v.1M12 17v-6.5M12 13.5c0-1.8 1.1-3 2.5-3s2.5 1 2.5 3V17"/></svg><span class="name">LinkedIn</span><span class="value"><span class="tbc">To be added</span></span><span class="go" aria-hidden="true">&rarr;</span></a></li>
+        <li class="reveal"><a href="#" data-pending title="Telegram: address to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M21 4L3 11l5.5 2L10 19l3-3.5 4.5 3.5L21 4z"/><path d="M8.5 13L17 7.5"/></svg><span class="name">Telegram</span><span class="value"><span class="tbc">To be added</span></span><span class="go" aria-hidden="true">&rarr;</span></a></li>
+    </ul>
   </div>
 </section>
 </main>
 
-<footer>
-  <div class="wrap foot">
-    <a class="brand" href="index.html">Ali Marufi</a>
-    <ul class="socials">
-      <li><a href="#" data-placeholder aria-label="Email (placeholder link)" title="Placeholder link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3" y="5" width="18" height="14"/><path d="M3 6l9 7 9-7"/></svg></a></li>
-      <li><a href="#" data-placeholder aria-label="Instagram (placeholder link)" title="Placeholder link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="0.6" fill="currentColor"/></svg></a></li>
-      <li><a href="#" data-placeholder aria-label="LinkedIn (placeholder link)" title="Placeholder link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17"/><path d="M8 10.5V17M8 7.2v.1M12 17v-6.5M12 13.5c0-1.8 1.1-3 2.5-3s2.5 1 2.5 3V17"/></svg></a></li>
-      <li><a href="#" data-placeholder aria-label="Telegram (placeholder link)" title="Placeholder link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M21 4L3 11l5.5 2L10 19l3-3.5 4.5 3.5L21 4z"/><path d="M8.5 13L17 7.5"/></svg></a></li>
-    </ul>
-    <small>&copy; <span data-year>2026</span> Ali Marufi. All rights reserved.</small>
+<footer class="dark">
+  <div class="wrap">
+    <p class="foot-name reveal" aria-hidden="true">Ali <i>Marufi</i></p>
+    <div class="foot">
+      <small>&copy; <span data-year>2026</span> Ali Marufi. All rights reserved.</small>
+      <ul class="socials">
+        <li><a href="#" data-pending aria-label="Email (address to be added)" title="Email: to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 6.5l9 6.5 9-6.5"/></svg></a></li>
+        <li><a href="#" data-pending aria-label="Instagram (address to be added)" title="Instagram: to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="0.6" fill="currentColor"/></svg></a></li>
+        <li><a href="#" data-pending aria-label="LinkedIn (address to be added)" title="LinkedIn: to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 10.5V17M8 7.2v.1M12 17v-6.5M12 13.5c0-1.8 1.1-3 2.5-3s2.5 1 2.5 3V17"/></svg></a></li>
+        <li><a href="#" data-pending aria-label="Telegram (address to be added)" title="Telegram: to be added"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M21 4L3 11l5.5 2L10 19l3-3.5 4.5 3.5L21 4z"/><path d="M8.5 13L17 7.5"/></svg></a></li>
+      </ul>
+    </div>
   </div>
 </footer>
 <script src="site.js" defer></script>
